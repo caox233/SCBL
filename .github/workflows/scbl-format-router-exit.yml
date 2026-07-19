@@ -25,7 +25,7 @@ jobs:
           p = Path('client/ScblPublicLauncher/Services/ProcessRouterService.cs')
           text = p.read_text(encoding='utf-8-sig')
           start = text.find('            if (intentional)')
-          marker = '            Interlocked.Increment(ref _unexpectedExitCount);'
+          marker = 'Interlocked.Increment(ref _unexpectedExitCount);'
           end = text.find(marker, start)
           if start < 0 or end < 0:
               raise SystemExit('Route Guard exit handler anchor not found')

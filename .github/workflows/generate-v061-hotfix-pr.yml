@@ -1,0 +1,65 @@
+name: Generate v0.6.1 server menu hotfix
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - '.github/triggers/v0.6.1-server-menu-fix-pr'
+      - 'scripts/apply_v061_server_menu_hotfix.py'
+
+permissions:
+  contents: write
+
+jobs:
+  generate-and-validate:
+    if: github.event.pull_request.head.repo.full_name == github.repository && github.head_ref == 'agent/fix-server-install-menu'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.head_ref }}
+          fetch-depth: 0
+
+      - name: Apply hotfix when needed
+        shell: bash
+        run: |
+          set -euo pipefail
+          version="$(tr -d '\r\n ' < VERSION)"
+          case "$version" in
+            0.6.0) python3 scripts/apply_v061_server_menu_hotfix.py ;;
+            0.6.1) echo 'v0.6.1 hotfix already generated.' ;;
+            *) echo "Unexpected source version: $version" >&2; exit 1 ;;
+          esac
+
+      - name: Validate generated source
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(tr -d '\r\n ' < VERSION)" = "0.6.1"
+          grep -Fq '<ScblVersion>0.6.1</ScblVersion>' client/SCBL.Version.props
+          grep -Fq 'SERVER_TOOL_VERSION="0.6.1"' server/install_public_server.sh
+          grep -Fq '已进入首次安装 / 重新安装流程' server/install_public_server.sh
+          grep -Fq '正在检测公网 IPv4（最多约 8 秒' server/install_public_server.sh
+          bash -n server/install_public_server.sh
+          bash -n scripts/install-server.sh
+          python3 -m py_compile server/scbl_control_plane.py server/test_control_plane.py scripts/apply_v061_server_menu_hotfix.py
+          python3 server/test_control_plane.py
+          git diff --check
+
+      - name: Commit generated source to PR branch
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add VERSION CHANGELOG.md README.md RELEASE_NOTES_v0.6.1.md \
+            client/SCBL.Version.props client/README.md client/scbl-process-router/main.go \
+            docs/index.html server/install_public_server.sh server/scbl_control_plane.py \
+            .github/workflows/release.yml
+          if git diff --cached --quiet; then
+            echo 'Generated source already committed.'
+          else
+            git commit -m 'Release SCBL v0.6.1 server installation hotfix'
+            git push origin HEAD:${{ github.head_ref }}
+          fi

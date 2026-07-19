@@ -1,6 +1,6 @@
 # SCBL Windows 客户端
 
-SCBL v0.6.0 的正式客户端由 GitHub Actions 在 Windows Server 2022 上自动编译，普通用户直接从 GitHub Releases 下载完整 ZIP。仓库不提供 Windows 在线安装脚本。
+SCBL v0.6.1 的正式客户端由 GitHub Actions 在 Windows Server 2022 上自动编译，普通用户直接从 GitHub Releases 下载完整 ZIP。仓库不提供 Windows 在线安装脚本。
 
 ## 本地一键编译
 
@@ -17,12 +17,12 @@ powershell -ExecutionPolicy Bypass -File .\create_client_full_package.ps1
 
 ```text
 client\ScblPublicLauncher\publish-single\
-client\dist\SCBL-Client-v0.6.0-win-x86.zip
+client\dist\SCBL-Client-v0.6.1-win-x86.zip
 ```
 
 ## 启动更新顺序
 
-v0.6.0 保留原更新协议和完整客户端发布方式，只调整启动顺序：
+v0.6.1 保留原更新协议和完整客户端发布方式，只调整启动顺序：
 
 1. 先通过“当前公网服务器主机 + TCP/18080”读取原 `client_update_manifest.json`；
 2. 有更新时沿用原公告、差异下载、Updater 和回滚流程；

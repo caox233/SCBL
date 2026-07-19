@@ -147,8 +147,8 @@ entry = '''## v0.6.1
 
 '''
 if "## v0.6.1" not in changelog:
-    marker = "# Changelog\n\n"
-    if marker not in changelog:
+    marker = next((candidate for candidate in ("# 更新记录\n\n", "# Changelog\n\n") if candidate in changelog), None)
+    if marker is None:
         raise SystemExit("CHANGELOG header not found")
     changelog = changelog.replace(marker, marker + entry, 1)
     write("CHANGELOG.md", changelog)

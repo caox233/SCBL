@@ -11,7 +11,7 @@
 <nav><div class="container"><a class="brand" href="#top">SCBL</a><div class="links"><a href="#start">快速开始</a><a href="#architecture">架构</a><a href="#update">更新</a><a href="#ports">端口</a><a href="#release">发布</a></div></div></nav>
 <main id="top">
   <header class="hero"><div class="container">
-    <div class="eyebrow">Self-hosted community networking · v0.6.0</div>
+    <div class="eyebrow">Self-hosted community networking · v0.6.1</div>
     <h1>SCBL</h1>
     <p class="lead">为社区联机环境提供 Windows 客户端、Linux 服务端一键部署、EasyTier 私有网络和完整客户端更新发布。每位管理员拥有完全独立的自建网络。</p>
     <div class="actions">
@@ -24,7 +24,7 @@
   <section id="start"><div class="container">
     <h2>快速开始</h2><p class="muted">Windows 用户从 Release 下载预编译完整包；开发者可在本地调用同一套构建脚本；Linux 服务端通过一条命令部署。</p>
     <div class="grid">
-      <article class="card"><h3>Windows 客户端</h3><p>前往 Release 下载 <strong>SCBL-Client-v0.6.0-win-x86.zip</strong>，解压后运行启动器。仓库不提供 Windows 在线安装脚本。</p><a href="https://github.com/caox233/SCBL/releases/latest">打开 Releases →</a></article>
+      <article class="card"><h3>Windows 客户端</h3><p>前往 Release 下载 <strong>SCBL-Client-v0.6.1-win-x86.zip</strong>，解压后运行启动器。仓库不提供 Windows 在线安装脚本。</p><a href="https://github.com/caox233/SCBL/releases/latest">打开 Releases →</a></article>
       <article class="card" id="compile"><h3>Windows 本地编译</h3><p>需要 Windows 10/11、.NET 8 SDK、Go 1.23.x、Git 和 PowerShell。</p><pre><code>git clone https://github.com/caox233/SCBL.git
 cd SCBL\client
 powershell -ExecutionPolicy Bypass -File .\build_all_windows.ps1
@@ -44,7 +44,7 @@ powershell -ExecutionPolicy Bypass -File .\create_client_full_package.ps1</code>
 
   <section id="update"><div class="container">
     <h2>先检查更新，再接入私网</h2>
-    <p class="muted">v0.6.0 不改变现有 manifest、公告、差异下载、Updater、回滚和完整包发布方式，只调整执行顺序。</p>
+    <p class="muted">v0.6.1 不改变现有 manifest、公告、差异下载、Updater、回滚和完整包发布方式，只调整执行顺序。</p>
     <div class="flow"><span>启动</span><b>→</b><span>公网主机:18080 检查</span><b>→</b><span>有更新：原流程更新并重启</span><b>→</b><span>无更新：启动 EasyTier</span></div>
     <div class="notice">公网检查失败不会阻止客户端启动。EasyTier 私网连通后，客户端会继续使用原 <code>10.66.0.1:18080</code> 地址兜底检查。TCP/11010 已由 EasyTier 占用，不能同时承载现有 HTTP 更新服务。</div>
     <h3>服务端发布完整客户端</h3>
@@ -76,6 +76,6 @@ powershell -ExecutionPolicy Bypass -File .\create_client_full_package.ps1</code>
     <div class="notice">SCBL 是非官方社区项目。正式公开前必须确认 dedicated_server、WinDivert 和客户端嵌入文件的许可证及再分发权限；不得包含游戏本体或未经授权的版权资源。</div>
   </div></section>
 </main>
-<footer><div class="container">SCBL v0.6.0 · Independent self-hosted networks · <a href="https://github.com/caox233/SCBL">GitHub</a></div></footer>
+<footer><div class="container">SCBL v0.6.1 · Independent self-hosted networks · <a href="https://github.com/caox233/SCBL">GitHub</a></div></footer>
 </body>
 </html>

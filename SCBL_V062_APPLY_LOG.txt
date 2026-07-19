@@ -1,3 +1,15 @@
 + set -euo pipefail
 + python3
-ProcessRouter exit classification anchor not found
++ git rm -r --ignore-unmatch client/hooks-source
++ git rm -f --ignore-unmatch client/ScblPublicLauncher/EmbeddedFiles/uplay_r1_loader.dll
++ gofmt -w client/scbl-process-router/main.go
++ bash -n server/install_public_server.sh
++ python3 -m py_compile server/scbl_control_plane.py server/test_control_plane.py
++ python3 server/test_control_plane.py
+control-plane authoritative snapshot tests passed
++ git diff --check
+warning: in the working copy of 'client/ScblPublicLauncher/Services/ProcessRouterService.cs', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'client/build_all_windows.ps1', LF will be replaced by CRLF the next time Git touches it
++ git config user.name 'github-actions[bot]'
++ git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
++ git add -A

@@ -1,0 +1,83 @@
+name: Finalize SCBL v0.6.2 integration
+
+on:
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: write
+
+jobs:
+  finalize:
+    if: github.head_ref == 'scbl-v0.6.2-integration'
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: scbl-v0.6.2-integration
+          fetch-depth: 0
+      - name: Finalize sources and remove temporary files
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 <<'PY'
+          from pathlib import Path
+
+          installer = Path('server/install_public_server.sh')
+          text = installer.read_text(encoding='utf-8')
+          marker = 'github_asset_headers() {'
+          while text.count(marker) > 1:
+              first = text.find(marker)
+              second = text.find(marker, first + 1)
+              text = text[:first] + text[second:]
+          installer.write_text(text, encoding='utf-8')
+
+          service = Path('client/ScblPublicLauncher/Services/ProcessRouterService.cs')
+          source = service.read_text(encoding='utf-8-sig')
+          start = source.find('            if (intentional)')
+          marker2 = '            Interlocked.Increment(ref _unexpectedExitCount);'
+          end = source.find(marker2, start)
+          if start >= 0 and end >= 0:
+              block = '''            if (intentional)
+              {
+                  _lastExitReason = "intentional";
+                  WriteGuardHealthSnapshot("stopped");
+                  return;
+              }
+
+              bool normalGameEnd;
+              lock (_sessionSync)
+              {
+                  normalGameEnd = exitCode == 0
+                      && !_allowEmptyGamePids
+                      && !_gamePids.Any(IsProcessAlive);
+              }
+              if (normalGameEnd)
+              {
+                  _lastExitReason = "game process ended normally";
+                  LogService.Info($"Process router exited normally after the launcher-owned game process ended. pid={pid}, exit={exitCode}");
+                  WriteGuardHealthSnapshot("game-ended");
+                  return;
+              }
+
+              Interlocked.Increment(ref _unexpectedExitCount);'''
+              source = source[:start] + block + source[end + len(marker2):]
+          service.write_text(source, encoding='utf-8')
+          PY
+          rm -f SCBL_V062_APPLY_LOG.txt SCBL_V062_APPLY_V2_LOG.txt SCBL_V062_APPLY_V3_LOG.txt .github/SCBL_V062_TRIGGER.md
+          test "$(grep -c '^github_asset_headers() {' server/install_public_server.sh)" -eq 1
+          test "$(grep -c '^download_5th_asset() {' server/install_public_server.sh)" -eq 1
+          test ! -e client/hooks-source
+          test ! -f client/ScblPublicLauncher/EmbeddedFiles/uplay_r1_loader.dll
+          bash -n server/install_public_server.sh
+          python3 -m py_compile server/scbl_control_plane.py server/test_control_plane.py
+          python3 server/test_control_plane.py
+          gofmt -w client/scbl-process-router/main.go
+          git diff --check
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add -A
+          if ! git diff --cached --quiet; then
+            git commit -m 'SCBL v0.6.2: finalize integration sources'
+            git push origin HEAD:scbl-v0.6.2-integration
+          fi

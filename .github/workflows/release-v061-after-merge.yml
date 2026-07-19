@@ -1,0 +1,79 @@
+name: Publish v0.6.1 after hotfix merge
+
+on:
+  pull_request:
+    branches: [main]
+    types: [closed]
+
+permissions:
+  contents: write
+  actions: write
+
+jobs:
+  publish:
+    if: github.event.pull_request.merged == true && github.event.pull_request.head.ref == 'agent/fix-server-install-menu'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+
+      - name: Verify merged source version
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(tr -d '\r\n ' < VERSION)" = "0.6.1"
+          bash -n server/install_public_server.sh
+          grep -Fq '已进入首次安装 / 重新安装流程' server/install_public_server.sh
+
+      - name: Dispatch and wait for formal Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          gh workflow run release.yml --ref main -f version=0.6.1
+          sleep 10
+          run_id="$(gh run list --workflow release.yml --event workflow_dispatch --limit 1 --json databaseId --jq '.[0].databaseId')"
+          test -n "$run_id"
+          echo "Formal Release workflow run: $run_id"
+          gh run watch "$run_id" --exit-status --interval 10
+
+      - name: Verify and record formal Release assets
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p .github/release-status
+          gh release view v0.6.1 \
+            --json tagName,name,isDraft,isPrerelease,publishedAt,url,assets \
+            > .github/release-status/v0.6.1.json
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+          p = Path('.github/release-status/v0.6.1.json')
+          d = json.loads(p.read_text())
+          required = {
+              'SCBL-Client-v0.6.1-win-x86.zip',
+              'SCBL-Client-v0.6.1-win-x86.zip.sha256',
+              'SCBL-Server-v0.6.1-linux-x86_64.tar.gz',
+              'SCBL-Server-v0.6.1-linux-x86_64.tar.gz.sha256',
+              'SCBL-Server-latest-linux-x86_64.tar.gz',
+              'install-server.sh',
+              'release-manifest.json',
+              'SHA256SUMS.txt',
+          }
+          names = {a['name'] for a in d.get('assets', [])}
+          missing = sorted(required - names)
+          if d.get('isDraft') or d.get('isPrerelease') or missing:
+              raise SystemExit(f'Invalid formal Release: missing={missing}')
+          print('Formal v0.6.1 Release assets verified')
+          PY
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add .github/release-status/v0.6.1.json
+          git commit -m 'Record SCBL v0.6.1 formal Release assets'
+          git push origin HEAD:main

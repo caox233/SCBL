@@ -51,6 +51,19 @@ if [[ $EUID -ne 0 ]]; then
   exit 1
 fi
 
+SCBL_ORIGINAL_STTY=""
+setup_terminal() {
+  [[ -t 0 ]] || return 0
+  SCBL_ORIGINAL_STTY="$(stty -g 2>/dev/null || true)"
+  stty -ixon 2>/dev/null || true
+}
+restore_terminal() {
+  [[ -t 0 && -n "${SCBL_ORIGINAL_STTY:-}" ]] || return 0
+  stty "$SCBL_ORIGINAL_STTY" 2>/dev/null || true
+}
+trap restore_terminal EXIT
+setup_terminal
+
 is_interactive() { [[ -t 0 && "${SCBL_NONINTERACTIVE:-0}" != "1" ]]; }
 
 install_management_command() {

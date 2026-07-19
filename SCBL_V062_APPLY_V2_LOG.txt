@@ -1,3 +1,0 @@
-+ set -euo pipefail
-+ python3
-OwnerResolver struct anchor not found

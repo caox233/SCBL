@@ -1,3 +1,0 @@
-+ set -euo pipefail
-+ python3
-5th defaults anchor not found

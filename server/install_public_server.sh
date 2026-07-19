@@ -1300,50 +1300,6 @@ download_5th_asset() {
     curl "${args[@]}" "$url" -o "$destination"
 }
 
-github_asset_headers() {
-    if [[ -n "${SCBL_5TH_GITHUB_TOKEN:-}" ]]; then
-        printf '%s\n' "Authorization: Bearer ${SCBL_5TH_GITHUB_TOKEN}"
-    fi
-}
-
-download_5th_asset() {
-    local asset="$1" destination="$2" auth_header="" api archive_url zip tmp found
-    mkdir -p "$(dirname "$destination")"
-    rm -f "$destination"
-    if [[ "${SCBL_5TH_SOURCE_MODE:-release}" == "branch" ]]; then
-        [[ -n "${SCBL_5TH_BRANCH:-}" ]] || { echo "5th 分支为空。" >&2; return 1; }
-        [[ -n "${SCBL_5TH_GITHUB_TOKEN:-}" ]] || {
-            echo "下载分支构建产物需要 GitHub Personal Access Token；GitHub 不接受账号密码下载 Actions Artifact。" >&2
-            return 1
-        }
-        api="https://api.github.com/repos/${SCBL_5TH_REPOSITORY}/actions/artifacts?name=scbl-dedicated-linux&per_page=100"
-        archive_url="$(curl -fsSL --connect-timeout 10 --max-time 60 --retry 3 \
-            -H "Accept: application/vnd.github+json" \
-            -H "Authorization: Bearer ${SCBL_5TH_GITHUB_TOKEN}" \
-            -H "X-GitHub-Api-Version: 2022-11-28" "$api" | \
-            python3 -c 'import json,sys; branch=sys.argv[1]; data=json.load(sys.stdin); items=[x for x in data.get("artifacts",[]) if not x.get("expired") and (x.get("workflow_run") or {}).get("head_branch")==branch]; items.sort(key=lambda x:x.get("created_at", ""), reverse=True); print(items[0]["archive_download_url"] if items else "")' "$SCBL_5TH_BRANCH")"
-        [[ -n "$archive_url" ]] || { echo "未找到分支 ${SCBL_5TH_BRANCH} 的 scbl-dedicated-linux Artifact。" >&2; return 1; }
-        zip="$(mktemp)"
-        tmp="$(mktemp -d)"
-        curl -fL --connect-timeout 10 --max-time 240 --retry 3 \
-            -H "Accept: application/vnd.github+json" \
-            -H "Authorization: Bearer ${SCBL_5TH_GITHUB_TOKEN}" \
-            -H "X-GitHub-Api-Version: 2022-11-28" "$archive_url" -o "$zip"
-        unzip -q "$zip" -d "$tmp"
-        found="$(find "$tmp" -type f -name "$asset" | head -n 1 || true)"
-        [[ -n "$found" ]] || { rm -rf "$tmp" "$zip"; echo "Artifact 中缺少 $asset。" >&2; return 1; }
-        cp -f "$found" "$destination"
-        rm -rf "$tmp" "$zip"
-        return 0
-    fi
-    local url="https://github.com/${SCBL_5TH_REPOSITORY}/releases/download/${SCBL_5TH_RELEASE_TAG}/${asset}"
-    local args=(-fL --connect-timeout 10 --max-time 240 --retry 3 --retry-all-errors)
-    if [[ -n "${SCBL_5TH_GITHUB_TOKEN:-}" ]]; then
-        args+=(-H "Authorization: Bearer ${SCBL_5TH_GITHUB_TOKEN}")
-    fi
-    curl "${args[@]}" "$url" -o "$destination"
-}
-
 fetch_scbl_dedicated_expected_sha256() {
     local checksum_tmp expected
     checksum_tmp="$SCBL_ROOT/cache/dedicated_server-linux-x86_64.sha256.check.$$"

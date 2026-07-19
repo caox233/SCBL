@@ -1,4 +1,4 @@
-# CI verification trigger after initial v0.6.0 publication.
+# Temporary PR trigger used to verify the v0.6.0 Windows build.
 name: Build Windows client
 
 on:

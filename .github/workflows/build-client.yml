@@ -116,7 +116,11 @@ jobs:
         if: steps.assemble.outcome == 'success'
         shell: pwsh
         run: |
-          $zip = Get-ChildItem .\dist\SCBL-Client-v*-win-x86.zip | Select-Object -Single
+          $zips = @(Get-ChildItem .\dist\SCBL-Client-v*-win-x86.zip)
+          if ($zips.Count -ne 1) {
+            throw "Expected exactly one client ZIP, found $($zips.Count)."
+          }
+          $zip = $zips[0]
           $hash = (Get-FileHash $zip.FullName -Algorithm SHA256).Hash.ToLowerInvariant()
           "$hash  $($zip.Name)" | Set-Content -Encoding ascii "$($zip.FullName).sha256"
           Get-ChildItem .\dist | Format-Table Name, Length

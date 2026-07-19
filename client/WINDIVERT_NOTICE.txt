@@ -1,0 +1,18 @@
+SCBL WinDivert 安全软件提示
+===========================
+
+SCBL 的严格路由、局域网广播转换和数据包重写功能使用 WinDivert 2.2.2。
+客户端包中的 WinDivert.dll 与 WinDivert64.sys 来自 WinDivert 官方发行包，构建时不会修改驱动文件。
+
+WinDivert 是具有数据包截获、修改和重新注入能力的 Windows 内核网络驱动。少数安全软件可能基于这类能力，将 WinDivert64.sys 识别为风险工具、可疑驱动或潜在不受欢迎程序。这类提示并不等同于确认存在恶意代码。
+
+请注意：
+1. 只从 https://github.com/caox233/SCBL/releases 下载正式客户端。
+2. 使用 Release 中的 SHA256SUMS.txt 或独立 .sha256 文件核对下载文件。
+3. SCBL 不会自动关闭安全软件、添加杀毒排除项或绕过安全检测。
+4. 如果安全软件阻止 WinDivert64.sys，Route Guard、广播转换或严格路由功能可能无法正常工作。
+5. 是否允许驱动运行应由用户根据自己的安全策略决定。
+
+第三方项目：WinDivert
+版本：2.2.2
+用途：SCBL Route Guard 的数据包捕获、广播转换、地址重写和重新注入。

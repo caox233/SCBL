@@ -29,23 +29,23 @@ jobs:
           case "$version" in
             0.6.0)
               python3 - <<'PY'
-              from pathlib import Path
-              p = Path('scripts/apply_v061_server_menu_hotfix.py')
-              s = p.read_text(encoding='utf-8')
-              old_marker = '    marker = "# Changelog\\n\\n"'
-              new_marker = '    marker = next((candidate for candidate in ("# 更新记录\\n\\n", "# Changelog\\n\\n") if candidate in changelog), None)'
-              old_check = '    if marker not in changelog:'
-              new_check = '    if marker is None:'
-              if old_marker in s:
-                  s = s.replace(old_marker, new_marker, 1)
-              elif new_marker not in s:
-                  raise SystemExit('generator changelog marker line not found')
-              if old_check in s:
-                  s = s.replace(old_check, new_check, 1)
-              elif new_check not in s:
-                  raise SystemExit('generator changelog check line not found')
-              p.write_text(s, encoding='utf-8', newline='\n')
-              PY
+          from pathlib import Path
+          p = Path('scripts/apply_v061_server_menu_hotfix.py')
+          s = p.read_text(encoding='utf-8')
+          old_marker = '    marker = "# Changelog\\n\\n"'
+          new_marker = '    marker = next((candidate for candidate in ("# 更新记录\\n\\n", "# Changelog\\n\\n") if candidate in changelog), None)'
+          old_check = '    if marker not in changelog:'
+          new_check = '    if marker is None:'
+          if old_marker in s:
+              s = s.replace(old_marker, new_marker, 1)
+          elif new_marker not in s:
+              raise SystemExit('generator changelog marker line not found')
+          if old_check in s:
+              s = s.replace(old_check, new_check, 1)
+          elif new_check not in s:
+              raise SystemExit('generator changelog check line not found')
+          p.write_text(s, encoding='utf-8', newline='\n')
+          PY
               python3 scripts/apply_v061_server_menu_hotfix.py
               ;;
             0.6.1) echo 'v0.6.1 hotfix already generated.' ;;

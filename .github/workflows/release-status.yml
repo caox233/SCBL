@@ -1,0 +1,58 @@
+name: Record SCBL release status
+
+on:
+  workflow_run:
+    workflows:
+      - Publish SCBL release
+    types:
+      - completed
+
+permissions:
+  actions: read
+  contents: write
+
+jobs:
+  record:
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Write release workflow result
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RUN_ID: ${{ github.event.workflow_run.id }}
+          RUN_NUMBER: ${{ github.event.workflow_run.run_number }}
+          RUN_ATTEMPT: ${{ github.event.workflow_run.run_attempt }}
+          RUN_CONCLUSION: ${{ github.event.workflow_run.conclusion }}
+          HEAD_SHA: ${{ github.event.workflow_run.head_sha }}
+          HEAD_BRANCH: ${{ github.event.workflow_run.head_branch }}
+          EVENT_NAME: ${{ github.event.workflow_run.event }}
+          HTML_URL: ${{ github.event.workflow_run.html_url }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          path='release/v0.6.0.workflow-status.json'
+          tmp="$(mktemp)"
+          jq -n \
+            --arg workflow 'Publish SCBL release' \
+            --arg runId "$RUN_ID" \
+            --arg runNumber "$RUN_NUMBER" \
+            --arg runAttempt "$RUN_ATTEMPT" \
+            --arg conclusion "$RUN_CONCLUSION" \
+            --arg headSha "$HEAD_SHA" \
+            --arg headBranch "$HEAD_BRANCH" \
+            --arg event "$EVENT_NAME" \
+            --arg htmlUrl "$HTML_URL" \
+            '{workflow:$workflow,runId:$runId,runNumber:$runNumber,runAttempt:$runAttempt,conclusion:$conclusion,headSha:$headSha,headBranch:$headBranch,event:$event,htmlUrl:$htmlUrl}' > "$tmp"
+          encoded="$(base64 -w0 < "$tmp")"
+          existing_sha="$(gh api "repos/${GITHUB_REPOSITORY}/contents/${path}?ref=main" --jq .sha 2>/dev/null || true)"
+          if [[ -n "$existing_sha" ]]; then
+            gh api --method PUT "repos/${GITHUB_REPOSITORY}/contents/${path}" \
+              -f message="Record SCBL release workflow result" \
+              -f content="$encoded" \
+              -f sha="$existing_sha" \
+              -f branch=main >/dev/null
+          else
+            gh api --method PUT "repos/${GITHUB_REPOSITORY}/contents/${path}" \
+              -f message="Record SCBL release workflow result" \
+              -f content="$encoded" \
+              -f branch=main >/dev/null
+          fi

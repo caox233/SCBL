@@ -2,16 +2,12 @@ name: Publish SCBL release
 
 on:
   push:
-    branches:
-      - main
     tags:
       - 'v*.*.*'
-    paths:
-      - 'release/v0.6.0.trigger'
   workflow_dispatch:
     inputs:
       version:
-        description: 'Release version, for example 0.6.0 (must match VERSION)'
+        description: 'Release version, for example 0.6.1 (must match VERSION)'
         required: true
         type: string
 
@@ -35,42 +31,14 @@ jobs:
           source_version="$(tr -d '\r\n ' < VERSION)"
           if [[ "${GITHUB_REF_TYPE}" == "tag" ]]; then
             requested="${GITHUB_REF_NAME#v}"
-          elif [[ "${GITHUB_EVENT_NAME}" == "workflow_dispatch" ]]; then
+          else
             requested="${{ inputs.version }}"
             requested="${requested#v}"
-          else
-            requested="$source_version"
           fi
           [[ "$requested" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || { echo "Invalid version: $requested" >&2; exit 1; }
           [[ "$requested" == "$source_version" ]] || { echo "Requested $requested != VERSION $source_version" >&2; exit 1; }
           echo "version=$requested" >> "$GITHUB_OUTPUT"
           echo "tag=v$requested" >> "$GITHUB_OUTPUT"
-
-      - name: Move release tag to the verified main commit
-        if: github.ref_type == 'branch'
-        env:
-          GH_TOKEN: ${{ github.token }}
-          RELEASE_TAG: v${{ steps.version.outputs.version }}
-        shell: bash
-        run: |
-          set -euo pipefail
-          if gh release view "$RELEASE_TAG" >/dev/null 2>&1; then
-            echo "Release $RELEASE_TAG already exists. Refusing to overwrite a published release." >&2
-            exit 1
-          fi
-
-          if gh api "repos/${GITHUB_REPOSITORY}/git/ref/tags/${RELEASE_TAG}" >/dev/null 2>&1; then
-            gh api --method PATCH \
-              "repos/${GITHUB_REPOSITORY}/git/refs/tags/${RELEASE_TAG}" \
-              -f sha="$GITHUB_SHA" \
-              -F force=true >/dev/null
-          else
-            gh api --method POST \
-              "repos/${GITHUB_REPOSITORY}/git/refs" \
-              -f ref="refs/tags/${RELEASE_TAG}" \
-              -f sha="$GITHUB_SHA" >/dev/null
-          fi
-          echo "Prepared ${RELEASE_TAG} at ${GITHUB_SHA}."
 
   client:
     needs: metadata

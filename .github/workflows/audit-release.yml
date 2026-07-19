@@ -1,0 +1,53 @@
+name: Audit SCBL v0.6.0 release
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - 'release/audit-v0.6.0.trigger'
+
+permissions:
+  contents: write
+
+jobs:
+  audit:
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Wait for release and record assets
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          tag='v0.6.0'
+          output=''
+          for attempt in $(seq 1 45); do
+            if output="$(gh release view "$tag" --repo "$GITHUB_REPOSITORY" --json tagName,name,isDraft,isPrerelease,publishedAt,url,assets 2>/dev/null)"; then
+              break
+            fi
+            echo "Release $tag not available yet (attempt $attempt/45)."
+            sleep 20
+          done
+
+          if [[ -z "$output" ]]; then
+            output="$(jq -n --arg tag "$tag" '{tagName:$tag,found:false,error:"release_not_found_after_polling"}')"
+          else
+            output="$(jq '. + {found:true}' <<<"$output")"
+          fi
+
+          path='release/v0.6.0.release-audit.json'
+          encoded="$(printf '%s\n' "$output" | base64 -w0)"
+          existing_sha="$(gh api "repos/${GITHUB_REPOSITORY}/contents/${path}?ref=main" --jq .sha 2>/dev/null || true)"
+          if [[ -n "$existing_sha" ]]; then
+            gh api --method PUT "repos/${GITHUB_REPOSITORY}/contents/${path}" \
+              -f message="Record SCBL v0.6.0 release audit" \
+              -f content="$encoded" \
+              -f sha="$existing_sha" \
+              -f branch=main >/dev/null
+          else
+            gh api --method PUT "repos/${GITHUB_REPOSITORY}/contents/${path}" \
+              -f message="Record SCBL v0.6.0 release audit" \
+              -f content="$encoded" \
+              -f branch=main >/dev/null
+          fi

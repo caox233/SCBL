@@ -130,26 +130,10 @@ write("server/scbl_control_plane.py", control)
 for rel in ("README.md", "client/README.md", "docs/index.html"):
     write(rel, read(rel).replace("0.6.0", "0.6.1"))
 
+# The current release workflow already uses RELEASE_NOTES_v<version>.md and
+# marks successful releases as latest. Only update the example version.
 workflow = read(".github/workflows/release.yml")
 workflow = workflow.replace("for example 0.6.0", "for example 0.6.1", 1)
-old_publish = '''          gh release create '${{ needs.metadata.outputs.tag }}' dist/* \\
-            --title 'SCBL v${{ needs.metadata.outputs.version }}' \\
-            --generate-notes
-'''
-new_publish = '''          notes_file="RELEASE_NOTES_v${{ needs.metadata.outputs.version }}.md"
-          if [[ -f "$notes_file" ]]; then
-            gh release create '${{ needs.metadata.outputs.tag }}' dist/* \\
-              --title 'SCBL v${{ needs.metadata.outputs.version }}' \\
-              --notes-file "$notes_file"
-          else
-            gh release create '${{ needs.metadata.outputs.tag }}' dist/* \\
-              --title 'SCBL v${{ needs.metadata.outputs.version }}' \\
-              --generate-notes
-          fi
-'''
-if old_publish not in workflow:
-    raise SystemExit("release workflow publish block not found")
-workflow = workflow.replace(old_publish, new_publish, 1)
 write(".github/workflows/release.yml", workflow)
 
 changelog = read("CHANGELOG.md")

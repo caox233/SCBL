@@ -1,1 +1,1 @@
-Temporary v0.6.2 integration trigger v5.
+Temporary v0.6.2 integration trigger v6.

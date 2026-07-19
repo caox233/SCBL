@@ -13,3 +13,11 @@ warning: in the working copy of 'client/build_all_windows.ps1', LF will be repla
 + git config user.name 'github-actions[bot]'
 + git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
 + git add -A
+warning: in the working copy of 'client/ScblPublicLauncher/Services/ProcessRouterService.cs', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'client/build_all_windows.ps1', LF will be replaced by CRLF the next time Git touches it
++ git commit -m 'SCBL v0.6.2: integrate session, routing and 5th binary fixes'
+[scbl-v0.6.2-integration 7320903] SCBL v0.6.2: integrate session, routing and 5th binary fixes
+ 2 files changed, 57 insertions(+), 1 deletion(-)
++ git push origin HEAD:scbl-v0.6.2-integration
+To https://github.com/caox233/SCBL
+   c747642..7320903  HEAD -> scbl-v0.6.2-integration

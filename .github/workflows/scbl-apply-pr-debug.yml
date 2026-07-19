@@ -1,0 +1,43 @@
+name: Diagnose SCBL v0.6.2 integration patch
+
+on:
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: write
+
+jobs:
+  diagnose:
+    if: github.head_ref == 'scbl-v0.6.2-integration'
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: scbl-v0.6.2-integration
+          fetch-depth: 0
+      - name: Run patch and persist concise log
+        shell: bash
+        run: |
+          set +e
+          git show origin/main:.github/workflows/scbl-apply-v062.yml > /tmp/apply.yml
+          python3 <<'PY'
+          from pathlib import Path
+          lines = Path('/tmp/apply.yml').read_text(encoding='utf-8').splitlines()
+          start = next(i for i, line in enumerate(lines) if line == '        run: |') + 1
+          body=[]
+          for line in lines[start:]:
+              if line and not line.startswith('          '): break
+              body.append(line[10:] if line.startswith('          ') else '')
+          Path('/tmp/apply.sh').write_text('\n'.join(body)+'\n', encoding='utf-8')
+          PY
+          bash -x /tmp/apply.sh > SCBL_V062_APPLY_LOG.txt 2>&1
+          status=$?
+          tail -n 120 SCBL_V062_APPLY_LOG.txt > SCBL_V062_APPLY_LOG.tail
+          mv SCBL_V062_APPLY_LOG.tail SCBL_V062_APPLY_LOG.txt
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add SCBL_V062_APPLY_LOG.txt
+          git commit -m 'ci: record v0.6.2 integration patch log [skip ci]' || true
+          git push origin HEAD:scbl-v0.6.2-integration || true
+          exit $status

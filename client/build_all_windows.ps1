@@ -76,6 +76,10 @@ Copy-Item -Force (Join-Path $Root "scbl-process-router\scbl-process-router.exe")
 Copy-Item -Force (Join-Path $Root "scbl-process-router\WinDivert.dll") (Join-Path $Tools "WinDivert.dll")
 Copy-Item -Force (Join-Path $Root "scbl-process-router\WinDivert64.sys") (Join-Path $Tools "WinDivert64.sys")
 
+$WinDivertNotice = Join-Path $Root "WINDIVERT_NOTICE.txt"
+if (!(Test-Path -LiteralPath $WinDivertNotice)) { throw "WinDivert notice is missing: $WinDivertNotice" }
+Copy-Item -Force $WinDivertNotice (Join-Path $Publish "WINDIVERT_NOTICE.txt")
+
 $UpdaterBuild = Join-Path $Root "SCBL.Updater\publish\SCBL.Updater.exe"
 Copy-Item -Force $UpdaterBuild (Join-Path $Publish "SCBL.Updater.exe")
 Copy-Item -Force $UpdaterBuild (Join-Path $Tools "SCBL.Updater.payload.exe")
@@ -93,6 +97,7 @@ $Required = @(
     (Join-Path $Tools "scbl-process-router.exe"),
     (Join-Path $Tools "WinDivert.dll"),
     (Join-Path $Tools "WinDivert64.sys"),
+    (Join-Path $Publish "WINDIVERT_NOTICE.txt"),
     (Join-Path $Publish "SCBL.Updater.exe"),
     (Join-Path $Tools "SCBL.Updater.payload.exe")
 )

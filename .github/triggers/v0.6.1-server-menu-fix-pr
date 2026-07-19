@@ -1,2 +1,3 @@
 Generate and validate the SCBL v0.6.1 Linux server menu responsiveness hotfix in this pull request.
 Retry after adding Chinese changelog header support.
+Retry with line-level generator patching.

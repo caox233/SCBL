@@ -1,0 +1,55 @@
+name: Diagnose SCBL v0.6.2 integration patch v2
+
+on:
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: write
+
+jobs:
+  diagnose:
+    if: github.head_ref == 'scbl-v0.6.2-integration'
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: scbl-v0.6.2-integration
+          fetch-depth: 0
+      - name: Run corrected patch and persist log
+        shell: bash
+        run: |
+          set +e
+          git show origin/main:.github/workflows/scbl-apply-v062.yml > /tmp/apply.yml
+          python3 <<'PY'
+          from pathlib import Path
+          lines=Path('/tmp/apply.yml').read_text(encoding='utf-8').splitlines()
+          start=next(i for i,l in enumerate(lines) if l=='        run: |')+1
+          body=[]
+          for l in lines[start:]:
+              if l and not l.startswith('          '): break
+              body.append(l[10:] if l.startswith('          ') else '')
+          script='\n'.join(body)+'\n'
+          old="""if 'game process ended normally' not in text:
+              if old not in text:
+                  raise SystemExit('ProcessRouter exit classification anchor not found')
+              text = text.replace(old, new, 1)"""
+          new="""if 'game process ended normally' not in text:
+              start_pos = text.find('            if (intentional)')
+              marker = '            Interlocked.Increment(ref _unexpectedExitCount);'
+              end_pos = text.find(marker, start_pos)
+              if start_pos < 0 or end_pos < 0:
+                  raise SystemExit('ProcessRouter exit classification anchor not found')
+              end_pos += len(marker)
+              text = text[:start_pos] + new + text[end_pos:]"""
+          Path('/tmp/apply-v2.sh').write_text(script.replace(old,new,1), encoding='utf-8')
+          PY
+          bash -x /tmp/apply-v2.sh > SCBL_V062_APPLY_V2_LOG.txt 2>&1
+          status=$?
+          tail -n 160 SCBL_V062_APPLY_V2_LOG.txt > /tmp/tail && mv /tmp/tail SCBL_V062_APPLY_V2_LOG.txt
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add SCBL_V062_APPLY_V2_LOG.txt
+          git commit -m 'ci: record corrected v0.6.2 patch log [skip ci]' || true
+          git push origin HEAD:scbl-v0.6.2-integration || true
+          exit $status

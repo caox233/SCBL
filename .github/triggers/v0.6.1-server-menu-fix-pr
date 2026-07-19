@@ -1,5 +1,0 @@
-Generate and validate the SCBL v0.6.1 Linux server menu responsiveness hotfix in this pull request.
-Retry after adding Chinese changelog header support.
-Retry with line-level generator patching.
-Retry after fixing embedded Python heredoc indentation.
-Run full CI against the generated v0.6.1 source.

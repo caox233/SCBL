@@ -71,11 +71,16 @@ jobs:
           Set-ExecutionPolicy -Scope Process Bypass -Force
           .\client\SCBL.Updater\build_windows.ps1
 
-      - name: Assemble and package complete client
+      - name: Assemble complete client directory
         shell: powershell
         run: |
           Set-ExecutionPolicy -Scope Process Bypass -Force
           .\client\build_all_windows.ps1
+
+      - name: Package complete client ZIP
+        shell: powershell
+        run: |
+          Set-ExecutionPolicy -Scope Process Bypass -Force
           .\client\create_client_full_package.ps1 -OutputDir "$env:GITHUB_WORKSPACE\dist"
 
       - name: Generate checksum

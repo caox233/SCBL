@@ -34,7 +34,7 @@ DEFAULT_DDNS_GO_LISTEN="127.0.0.1:9876"
 DEFAULT_DDNS_GO_INTERVAL="300"
 DEFAULT_DDNS_GO_CONFIG="/opt/ddns-go/.ddns_go_config.yaml"
 DEFAULT_DDNS_GO_VERSION="latest"
-SERVER_TOOL_VERSION="0.6.0"
+SERVER_TOOL_VERSION="0.6.1"
 
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
@@ -543,7 +543,7 @@ reuse_existing_ddns_if_requested() {
 }
 
 resolve_public_host_for_install() {
-  local manual_default="" existing=""
+  local manual_default="" existing="" detected_ipv4=""
   existing="$(detect_existing_ddns_domain 2>/dev/null || true)"
   if [[ -n "$existing" ]]; then
     if reuse_existing_ddns_if_requested "$existing"; then
@@ -551,11 +551,25 @@ resolve_public_host_for_install() {
     fi
   fi
 
-  manual_default="${SCBL_PUBLIC_HOST:-$(auto_public_ipv4 || true)}"
-  [[ -z "$manual_default" ]] && manual_default="scbl.example.com"
+  manual_default="${SCBL_PUBLIC_HOST:-}"
+  case "$manual_default" in
+    "你的公网IP或域名"|"scbl.example.com") manual_default="" ;;
+  esac
+
   echo
   echo "请输入客户端访问服务端时使用的固定公网 IP 或双栈域名。"
   echo "推荐填写同时具有 A 与 AAAA 记录的域名；DDNS-GO 可在服务部署完成后选装。"
+  if [[ -z "$manual_default" ]]; then
+    echo "正在检测公网 IPv4（最多约 8 秒，检测失败仍可手工填写）..."
+    detected_ipv4="$(auto_public_ipv4 || true)"
+    if [[ -n "$detected_ipv4" ]]; then
+      manual_default="$detected_ipv4"
+      echo "检测到公网 IPv4：$manual_default"
+    else
+      manual_default="scbl.example.com"
+      echo "未自动检测到公网 IPv4，请输入公网 IP 或域名。"
+    fi
+  fi
   prompt_value SCBL_PUBLIC_HOST "公网入口 IP 或域名" "$manual_default"
 }
 
@@ -920,10 +934,12 @@ load_env_if_exists() {
 }
 
 set_defaults() {
-  local auto_ip="${SCBL_PUBLIC_HOST:-$(auto_public_ipv4)}"
-  [[ -z "$auto_ip" ]] && auto_ip="你的公网IP或域名"
+  # Do not perform network I/O here. This function runs before the first
+  # installation message and from several management paths. Silent public-IP
+  # probes made menu option 1 appear unresponsive on slow DNS/network hosts.
+  local configured_public_host="${SCBL_PUBLIC_HOST:-}"
   SCBL_ROOT="${SCBL_ROOT:-$DEFAULT_SCBL_ROOT}"
-  SCBL_PUBLIC_HOST="${SCBL_PUBLIC_HOST:-$auto_ip}"
+  SCBL_PUBLIC_HOST="$configured_public_host"
   SCBL_PORT="${SCBL_PORT:-$DEFAULT_SCBL_PORT}"
   SCBL_UPDATE_PORT="${SCBL_UPDATE_PORT:-$DEFAULT_SCBL_UPDATE_PORT}"
   SCBL_WSS_PORT="${SCBL_WSS_PORT:-$DEFAULT_SCBL_WSS_PORT}"
@@ -2746,9 +2762,11 @@ DONEEOF
 }
 
 install_or_reinstall() {
+  echo
+  stage "已进入首次安装 / 重新安装流程"
+  echo "正在初始化安装参数，请稍候..."
   load_env_if_exists
   set_defaults
-  echo
   echo "开始安装 / 重新安装 SCBL Public Server。直接回车使用默认值。"
   prompt_value SCBL_ROOT "安装目录" "$SCBL_ROOT"
   ENV_FILE="$SCBL_ROOT/scbl.env"; BACKUP_DIR="$SCBL_ROOT/backups"

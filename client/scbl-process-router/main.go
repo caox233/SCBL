@@ -26,7 +26,7 @@ import (
 )
 
 const (
-	routerVersion         = "0.6.0"
+	routerVersion         = "0.6.1"
 	windivertLayerNetwork = 0
 	divertBufSize         = 0xFFFF
 	protoTCP              = 6

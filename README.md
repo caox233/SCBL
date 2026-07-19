@@ -60,6 +60,14 @@ docs/        GitHub Pages 完整网页说明
 
 EasyTier 使用 TCP/UDP 11010，因此现有 HTTP 更新服务不能直接复用 11010；公网更新使用 TCP/18080。
 
+## WinDivert 安全软件提示
+
+客户端的严格路由与局域网广播转换功能使用 WinDivert 2.2.2。客户端包中的 `WinDivert.dll` 和 `WinDivert64.sys` 来自 WinDivert 官方发行包，构建时不会修改驱动文件。
+
+WinDivert 是具有数据包截获、修改和重新注入能力的 Windows 内核网络驱动。少数安全软件可能基于这类能力将其识别为风险工具、可疑驱动或潜在不受欢迎程序。这类提示并不等同于确认存在恶意代码，但用户仍应只从本仓库正式 Release 下载客户端，并核对 Release 提供的 SHA256。
+
+SCBL 不会自动关闭安全软件、添加杀毒排除项或绕过安全检测。如果安全软件阻止 `WinDivert64.sys`，Route Guard、广播转换或严格路由功能可能无法正常工作。
+
 ## 发布
 
 - 提交到 `main`：校验 Shell、Python、Go 和版本一致性；

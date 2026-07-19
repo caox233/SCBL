@@ -14,10 +14,10 @@ if ([string]::IsNullOrWhiteSpace($FifthReleaseTag)) {
     $FifthReleaseTag = if ([string]::IsNullOrWhiteSpace($env:SCBL_5TH_RELEASE_TAG)) { "scbl-public-stable-latest" } else { $env:SCBL_5TH_RELEASE_TAG.Trim() }
 }
 if ([string]::IsNullOrWhiteSpace($FifthBranch)) {
-    $FifthBranch = ($env:SCBL_5TH_BRANCH ?? "").Trim()
+    $FifthBranch = if ($null -eq $env:SCBL_5TH_BRANCH) { "" } else { $env:SCBL_5TH_BRANCH.Trim() }
 }
 if ([string]::IsNullOrWhiteSpace($GitHubToken)) {
-    $GitHubToken = ($env:SCBL_GITHUB_TOKEN ?? "").Trim()
+    $GitHubToken = if ($null -eq $env:SCBL_GITHUB_TOKEN) { "" } else { $env:SCBL_GITHUB_TOKEN.Trim() }
 }
 
 function Get-GitHubHeaders {

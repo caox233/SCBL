@@ -444,13 +444,28 @@ public sealed class ProcessRouterService
             LogService.Error($"Process router exited. pid={pid}, exit={exitCode}, generation={generation}, intentional={intentional}");
 
             if (intentional)
-            {
-                _lastExitReason = "intentional";
-                WriteGuardHealthSnapshot("stopped");
-                return;
-            }
+    {
+        _lastExitReason = "intentional";
+        WriteGuardHealthSnapshot("stopped");
+        return;
+    }
 
-            Interlocked.Increment(ref _unexpectedExitCount);
+    bool normalGameEnd;
+    lock (_sessionSync)
+    {
+        normalGameEnd = exitCode == 0
+            && !_allowEmptyGamePids
+            && !_gamePids.Any(IsProcessAlive);
+    }
+    if (normalGameEnd)
+    {
+        _lastExitReason = "game process ended normally";
+        LogService.Info($"Process router exited normally after the launcher-owned game process ended. pid={pid}, exit={exitCode}");
+        WriteGuardHealthSnapshot("game-ended");
+        return;
+    }
+
+    Interlocked.Increment(ref _unexpectedExitCount);
             Interlocked.Exchange(ref _lastUnexpectedExitUnixMs, DateTimeOffset.UtcNow.ToUnixTimeMilliseconds());
             _lastExitReason = $"unexpected exit code {exitCode}";
             WriteGuardHealthSnapshot("unexpected-exit");

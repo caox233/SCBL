@@ -27,7 +27,25 @@ jobs:
           set -euo pipefail
           version="$(tr -d '\r\n ' < VERSION)"
           case "$version" in
-            0.6.0) python3 scripts/apply_v061_server_menu_hotfix.py ;;
+            0.6.0)
+              python3 - <<'PY'
+              from pathlib import Path
+              p = Path('scripts/apply_v061_server_menu_hotfix.py')
+              s = p.read_text(encoding='utf-8')
+              old = '''    marker = "# Changelog\\n\\n"
+                  if marker not in changelog:
+                      raise SystemExit("CHANGELOG header not found")
+                  changelog = changelog.replace(marker, marker + entry, 1)'''
+              new = '''    marker = next((candidate for candidate in ("# 更新记录\\n\\n", "# Changelog\\n\\n") if candidate in changelog), None)
+                  if marker is None:
+                      raise SystemExit("CHANGELOG header not found")
+                  changelog = changelog.replace(marker, marker + entry, 1)'''
+              if old not in s:
+                  raise SystemExit('generator changelog block not found')
+              p.write_text(s.replace(old, new, 1), encoding='utf-8', newline='\n')
+              PY
+              python3 scripts/apply_v061_server_menu_hotfix.py
+              ;;
             0.6.1) echo 'v0.6.1 hotfix already generated.' ;;
             *) echo "Unexpected source version: $version" >&2; exit 1 ;;
           esac
@@ -56,7 +74,7 @@ jobs:
           git add VERSION CHANGELOG.md README.md RELEASE_NOTES_v0.6.1.md \
             client/SCBL.Version.props client/README.md client/scbl-process-router/main.go \
             docs/index.html server/install_public_server.sh server/scbl_control_plane.py \
-            .github/workflows/release.yml
+            scripts/apply_v061_server_menu_hotfix.py .github/workflows/release.yml
           if git diff --cached --quiet; then
             echo 'Generated source already committed.'
           else

@@ -1,0 +1,119 @@
+name: Apply v0.6.1 server menu hotfix
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/triggers/v0.6.1-server-menu-fix'
+
+permissions:
+  contents: write
+  actions: write
+
+concurrency:
+  group: scbl-v0.6.1-server-menu-hotfix
+  cancel-in-progress: false
+
+jobs:
+  apply-test-release:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+
+      - name: Apply v0.6.1 source hotfix
+        run: python3 scripts/apply_v061_server_menu_hotfix.py
+
+      - name: Validate patched source
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(tr -d '\r\n ' < VERSION)" = "0.6.1"
+          grep -Fq '<ScblVersion>0.6.1</ScblVersion>' client/SCBL.Version.props
+          grep -Fq 'SERVER_TOOL_VERSION="0.6.1"' server/install_public_server.sh
+          grep -Fq '已进入首次安装 / 重新安装流程' server/install_public_server.sh
+          grep -Fq '正在检测公网 IPv4（最多约 8 秒' server/install_public_server.sh
+          bash -n server/install_public_server.sh
+          bash -n scripts/install-server.sh
+          python3 -m py_compile server/scbl_control_plane.py server/test_control_plane.py scripts/apply_v061_server_menu_hotfix.py
+          python3 server/test_control_plane.py
+          git diff --check
+
+      - name: Validate Route Guard source
+        working-directory: client/scbl-process-router
+        shell: bash
+        run: |
+          set -euo pipefail
+          go mod download
+          GOOS=windows GOARCH=amd64 go vet .
+          GOOS=windows GOARCH=amd64 go build -trimpath -o /tmp/scbl-process-router.exe .
+          test -s /tmp/scbl-process-router.exe
+
+      - name: Commit hotfix to main
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add VERSION CHANGELOG.md README.md RELEASE_NOTES_v0.6.1.md \
+            client/SCBL.Version.props client/README.md client/scbl-process-router/main.go \
+            docs/index.html server/install_public_server.sh server/scbl_control_plane.py \
+            .github/workflows/release.yml
+          if git diff --cached --quiet; then
+            echo 'No source changes to commit.'
+          else
+            git commit -m 'Release SCBL v0.6.1 server installation hotfix'
+            git push origin HEAD:main
+          fi
+
+      - name: Dispatch formal v0.6.1 Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          gh workflow run release.yml --ref main -f version=0.6.1
+          sleep 10
+          run_id="$(gh run list --workflow release.yml --event workflow_dispatch --limit 1 --json databaseId --jq '.[0].databaseId')"
+          test -n "$run_id"
+          echo "Formal Release workflow run: $run_id"
+          gh run watch "$run_id" --exit-status --interval 10
+
+      - name: Record Release assets
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          git pull --rebase origin main
+          mkdir -p .github/release-status
+          gh release view v0.6.1 \
+            --json tagName,name,isDraft,isPrerelease,publishedAt,url,assets \
+            > .github/release-status/v0.6.1.json
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+          p = Path('.github/release-status/v0.6.1.json')
+          d = json.loads(p.read_text())
+          required = {
+              'SCBL-Client-v0.6.1-win-x86.zip',
+              'SCBL-Client-v0.6.1-win-x86.zip.sha256',
+              'SCBL-Server-v0.6.1-linux-x86_64.tar.gz',
+              'SCBL-Server-v0.6.1-linux-x86_64.tar.gz.sha256',
+              'SCBL-Server-latest-linux-x86_64.tar.gz',
+              'install-server.sh',
+              'release-manifest.json',
+              'SHA256SUMS.txt',
+          }
+          names = {a['name'] for a in d.get('assets', [])}
+          missing = sorted(required - names)
+          if d.get('isDraft') or d.get('isPrerelease') or missing:
+              raise SystemExit(f'Invalid formal Release: missing={missing}, data={d}')
+          print('Formal v0.6.1 Release assets verified')
+          PY
+          git add .github/release-status/v0.6.1.json
+          git commit -m 'Record SCBL v0.6.1 formal Release assets'
+          git push origin HEAD:main

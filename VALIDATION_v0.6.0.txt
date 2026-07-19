@@ -1,0 +1,30 @@
+SCBL v0.6.0 release-source validation
+====================================
+
+Validated locally:
+- VERSION, client version props and server tool version are all 0.6.0.
+- Hooks source snapshot is present under client/hooks-source/hooks.
+- Embedded uplay_r1_loader.dll and four supplied save/meta files pass SCBL_EMBEDDED_SHA256.txt.
+- Newly supplied 00000001.sav and 00000002.sav SHA256:
+  599c5a7718d4d6a0cd542b65d422919e3b84ec7baa8cf4a8b6dfac939b826803
+- Shell syntax passed for server/install_public_server.sh and scripts/install-server.sh.
+- Python syntax and server/test_control_plane.py passed.
+- Go route guard passed Windows amd64 go vet and cross-build; output is a PE32+ x86-64 executable.
+- All GitHub Actions YAML files parsed successfully.
+- Client startup source confirms public update preflight runs before EasyTier network lifecycle.
+- Public preflight uses the existing update protocol over public-host TCP/18080.
+- Private 10.66.0.1:18080 fallback remains available when public preflight is unavailable.
+- Basic credential/private-key pattern scan found no committed runtime secrets.
+- No launcher_settings.json, server database or scbl.env runtime file is included.
+
+Not executable in this Linux validation environment:
+- .NET 8 WPF win-x86 build.
+- Full Windows client package generation.
+- GitHub-hosted Release creation.
+
+Those Windows and GitHub checks are implemented in .github/workflows/build-client.yml and release.yml and will run after the source is pushed.
+
+Hooks build note:
+- The supplied hooks directory is a crate snapshot from the caox233/5th-echelon Rust workspace.
+- It is not a standalone Cargo workspace and requires the complete scbl-public-stable workspace to compile.
+- SCBL v0.6.0 Release embeds the already confirmed uplay_r1_loader.dll while publishing the corresponding source snapshot for review and maintenance.

@@ -1,0 +1,21 @@
+* text=auto
+*.sh text eol=lf
+*.py text eol=lf
+*.yml text eol=lf
+*.yaml text eol=lf
+*.md text eol=lf
+*.json text eol=lf
+*.toml text eol=lf
+*.ps1 text eol=crlf
+*.cs text eol=crlf
+*.xaml text eol=crlf
+*.csproj text eol=crlf
+*.props text eol=crlf
+*.sln text eol=crlf
+*.png binary
+*.ico binary
+*.mp3 binary
+*.wav binary
+*.dll binary
+*.sav binary
+*.meta binary

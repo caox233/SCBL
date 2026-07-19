@@ -1,0 +1,49 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net8.0-windows</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <UseWPF>true</UseWPF>
+    <PlatformTarget>x86</PlatformTarget>
+    <RuntimeIdentifier>win-x86</RuntimeIdentifier>
+    <RootNamespace>SplinterCellCNLauncher</RootNamespace>
+    <AssemblyName>SplinterCellCNLauncher</AssemblyName>
+	<ApplicationIcon>logo.ico</ApplicationIcon>
+    <ApplicationManifest>app.manifest</ApplicationManifest>
+    <!-- 发布时可打开这几项，生成单文件自包含启动器 -->
+    <PublishSingleFile>true</PublishSingleFile>
+    <SelfContained>true</SelfContained>
+    <IncludeNativeLibrariesForSelfExtract>true</IncludeNativeLibrariesForSelfExtract>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Google.Protobuf" Version="3.35.1" />
+    <PackageReference Include="Grpc.Net.Client" Version="2.80.0" />
+    <PackageReference Include="Grpc.Tools" Version="2.81.1">
+      <PrivateAssets>all</PrivateAssets>
+      <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
+    </PackageReference>
+  </ItemGroup>
+
+  <ItemGroup>
+    <Protobuf Include="users.proto" GrpcServices="Client" />
+  </ItemGroup>
+  <ItemGroup>
+    <Compile Remove="Services\NetworkRiskService.cs" />
+    <None Remove="Services\NetworkRiskService.cs" />
+  </ItemGroup>
+
+	<ItemGroup>
+		<Resource Include="logo.ico" />
+	</ItemGroup>
+  <!-- 把 EmbeddedFiles 下的文件作为内置资源。
+       你需要把旧项目里的 uplay_r1_loader.dll、00000001/2.sav、00000001/2.meta 复制进来。 -->
+  <ItemGroup>
+    <None Remove="EmbeddedFiles\**\*" />
+    <EmbeddedResource Include="EmbeddedFiles\**\*" />
+  </ItemGroup>
+
+  <Import Project="..\SCBL.Version.props" />
+</Project>

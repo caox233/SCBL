@@ -1,0 +1,7 @@
+<Project>
+  <PropertyGroup>
+    <BaseIntermediateOutputPath>obj\SplinterCellCNLauncher\</BaseIntermediateOutputPath>
+    <BaseOutputPath>bin\SplinterCellCNLauncher\</BaseOutputPath>
+    <MSBuildProjectExtensionsPath>$(BaseIntermediateOutputPath)</MSBuildProjectExtensionsPath>
+  </PropertyGroup>
+</Project>

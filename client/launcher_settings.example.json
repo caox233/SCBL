@@ -1,0 +1,11 @@
+{
+  "PublicEndpoint": "your-scbl-domain.example:11010",
+  "PublicUpdatePort": 18080,
+  "TunnelSecret": "REPLACE_WITH_YOUR_SERVER_SECRET",
+  "UseCustomPublicEndpoint": true,
+  "EasyTierNetworkName": "scbl-public",
+  "EasyTierWssPort": 10443,
+  "EasyTierLatencyFirst": true,
+  "EasyTierEnableP2P": true,
+  "ForceGameVirtualAdapter": true
+}

@@ -1,0 +1,10 @@
+<Project>
+  <PropertyGroup>
+    <!-- SCBL Public 客户端唯一版本号来源。只允许三段纯数字语义版本。 -->
+    <ScblVersion>0.6.0</ScblVersion>
+    <Version>$(ScblVersion)</Version>
+    <AssemblyVersion>$(ScblVersion).0</AssemblyVersion>
+    <FileVersion>$(ScblVersion).0</FileVersion>
+    <InformationalVersion>$(ScblVersion)</InformationalVersion>
+  </PropertyGroup>
+</Project>

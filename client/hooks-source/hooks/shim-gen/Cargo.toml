@@ -1,0 +1,8 @@
+[package]
+name = "shim-gen"
+version = "0.2.5"
+edition = "2021"
+
+[dependencies]
+argh = { workspace = true }
+goblin = { workspace = true, features = ["pe32", "pe64", "std"] }

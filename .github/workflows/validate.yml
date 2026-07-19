@@ -1,0 +1,58 @@
+name: Validate source
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  linux-validation:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.23.2'
+
+      - name: Validate versions and text files
+        shell: bash
+        run: |
+          set -euo pipefail
+          version="$(tr -d '\r\n ' < VERSION)"
+          grep -Fq "<ScblVersion>${version}</ScblVersion>" client/SCBL.Version.props
+          grep -Fq "SERVER_TOOL_VERSION=\"${version}\"" server/install_public_server.sh
+          ! grep -RIl $'\r' server .github docs scripts --include='*.sh' --include='*.py' --include='*.yml' --include='*.yaml'
+
+      - name: Validate hooks snapshot and embedded files
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -f client/hooks-source/hooks/Cargo.toml
+          test -f client/hooks-source/hooks/src/lib.rs
+          test -f client/ScblPublicLauncher/EmbeddedFiles/SCBL_EMBEDDED_SHA256.txt
+          (cd client/ScblPublicLauncher/EmbeddedFiles && sha256sum -c SCBL_EMBEDDED_SHA256.txt)
+
+      - name: Validate shell and Python
+        shell: bash
+        run: |
+          set -euo pipefail
+          bash -n server/install_public_server.sh
+          bash -n scripts/install-server.sh
+          python3 -m py_compile server/scbl_control_plane.py server/test_control_plane.py
+          python3 server/test_control_plane.py
+
+      - name: Validate Go route guard
+        working-directory: client/scbl-process-router
+        shell: bash
+        run: |
+          set -euo pipefail
+          go mod download
+          GOOS=windows GOARCH=amd64 go vet .
+          GOOS=windows GOARCH=amd64 go build -trimpath -o /tmp/scbl-process-router.exe .
+          test -s /tmp/scbl-process-router.exe

@@ -1,0 +1,62 @@
+# Visual Studio / .NET
+.vs/
+**/bin/
+**/obj/
+**/publish/
+**/publish-single/
+*.user
+*.suo
+*.pdb
+
+# Go build output
+client/scbl-process-router/scbl-process-router.exe
+client/scbl-process-router/WinDivert.dll
+client/scbl-process-router/WinDivert64.sys
+client/scbl-process-router/WinDivert-*-A.zip
+client/scbl-process-router/_windivert_extract/
+
+# Download caches
+client/easytier/bin/
+client/easytier/cache/
+
+# Release output
+/dist/
+client/dist/
+*.zip
+*.tar.gz
+*.sha256
+SHA256SUMS.txt
+release-manifest.json
+
+# Runtime data / secrets
+*.db
+*.db-*
+*.log
+*.log.*
+*.bak
+*.backup*
+.env
+.env.*
+!.env.example
+launcher_settings.json
+server/scbl.env
+server/data/
+runtime/
+logs/
+updates/
+backup/
+diagnostics/
+
+# Editors / OS
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db
+
+# Python
+__pycache__/
+*.py[cod]
+.pytest_cache/
+
+# Rust Hooks snapshot build output
+client/hooks-source/**/target/

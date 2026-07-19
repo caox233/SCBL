@@ -1,0 +1,17 @@
+Repository: caox233/5th-echelon
+Branch: scbl-public-stable
+Base branch: main
+
+SCBL host migration commits:
+- ae8cdebc8d2f3b39ecdfb4b45e131c460f3449dd
+- 5a65c404e73e167ee2c1b1432827ceb36b75ccae
+- 91881239d60778638ad34c10f22c1324bbf9e153
+
+GitHub Actions binary release workflow:
+- fe495bd916736a4601c67d2ddb1b230af26bafcc
+- path: .github/workflows/scbl-public-stable-build.yml
+- rolling release tag: scbl-public-stable-latest
+- binary asset: dedicated_server-linux-x86_64
+- checksum asset: dedicated_server-linux-x86_64.sha256
+
+The install script downloads the rolling release binary, validates SHA256 and ELF x86_64 format, then installs it with backup and rollback support.

@@ -32,17 +32,19 @@ jobs:
               from pathlib import Path
               p = Path('scripts/apply_v061_server_menu_hotfix.py')
               s = p.read_text(encoding='utf-8')
-              old = '''    marker = "# Changelog\\n\\n"
-                  if marker not in changelog:
-                      raise SystemExit("CHANGELOG header not found")
-                  changelog = changelog.replace(marker, marker + entry, 1)'''
-              new = '''    marker = next((candidate for candidate in ("# 更新记录\\n\\n", "# Changelog\\n\\n") if candidate in changelog), None)
-                  if marker is None:
-                      raise SystemExit("CHANGELOG header not found")
-                  changelog = changelog.replace(marker, marker + entry, 1)'''
-              if old not in s:
-                  raise SystemExit('generator changelog block not found')
-              p.write_text(s.replace(old, new, 1), encoding='utf-8', newline='\n')
+              old_marker = '    marker = "# Changelog\\n\\n"'
+              new_marker = '    marker = next((candidate for candidate in ("# 更新记录\\n\\n", "# Changelog\\n\\n") if candidate in changelog), None)'
+              old_check = '    if marker not in changelog:'
+              new_check = '    if marker is None:'
+              if old_marker in s:
+                  s = s.replace(old_marker, new_marker, 1)
+              elif new_marker not in s:
+                  raise SystemExit('generator changelog marker line not found')
+              if old_check in s:
+                  s = s.replace(old_check, new_check, 1)
+              elif new_check not in s:
+                  raise SystemExit('generator changelog check line not found')
+              p.write_text(s, encoding='utf-8', newline='\n')
               PY
               python3 scripts/apply_v061_server_menu_hotfix.py
               ;;

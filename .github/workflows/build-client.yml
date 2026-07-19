@@ -75,7 +75,21 @@ jobs:
         shell: powershell
         run: |
           Set-ExecutionPolicy -Scope Process Bypass -Force
-          .\client\build_all_windows.ps1
+          $ErrorActionPreference = 'Stop'
+          $log = Join-Path $env:RUNNER_TEMP 'assemble-client.log'
+          try {
+            .\client\build_all_windows.ps1 *> $log
+          }
+          catch {
+            Write-Host '===== assemble-client.log tail ====='
+            if (Test-Path -LiteralPath $log) {
+              Get-Content -LiteralPath $log -Tail 120
+            }
+            Write-Host '===== exception ====='
+            Write-Host $_.Exception.ToString()
+            throw
+          }
+          Get-Content -LiteralPath $log -Tail 40
 
       - name: Package complete client ZIP
         shell: powershell

@@ -1,4 +1,4 @@
-# Temporary PR trigger used to verify the v0.6.0 Windows build.
+# Temporary PR workflow used to isolate the v0.6.0 Windows build failure.
 name: Build Windows client
 
 on:
@@ -46,7 +46,32 @@ jobs:
             throw "VERSION and client/SCBL.Version.props do not match."
           }
 
-      - name: Build complete Windows client
+      - name: Prepare EasyTier runtime
+        shell: powershell
+        run: |
+          Set-ExecutionPolicy -Scope Process Bypass -Force
+          .\client\stop_runtime_processes.ps1
+          .\client\easytier\download_easytier_windows.ps1
+
+      - name: Build route guard
+        shell: powershell
+        run: |
+          Set-ExecutionPolicy -Scope Process Bypass -Force
+          .\client\scbl-process-router\build_windows.ps1
+
+      - name: Build WPF launcher
+        shell: powershell
+        run: |
+          Set-ExecutionPolicy -Scope Process Bypass -Force
+          .\client\ScblPublicLauncher\build_publish.ps1
+
+      - name: Build updater
+        shell: powershell
+        run: |
+          Set-ExecutionPolicy -Scope Process Bypass -Force
+          .\client\SCBL.Updater\build_windows.ps1
+
+      - name: Assemble and package complete client
         shell: powershell
         run: |
           Set-ExecutionPolicy -Scope Process Bypass -Force

@@ -1,0 +1,11 @@
+{
+  "workflow": "Publish SCBL release",
+  "runId": "29686443415",
+  "runNumber": "2",
+  "runAttempt": "1",
+  "conclusion": "success",
+  "headSha": "ffa0597ddcbcd1271bc59ffdc67a292a8e8a16e3",
+  "headBranch": "main",
+  "event": "push",
+  "htmlUrl": "https://github.com/caox233/SCBL/actions/runs/29686443415"
+}

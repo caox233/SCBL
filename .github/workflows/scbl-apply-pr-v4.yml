@@ -1,0 +1,96 @@
+name: Run SCBL v0.6.2 integration patch v4
+
+on:
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    if: github.head_ref == 'scbl-v0.6.2-integration'
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: scbl-v0.6.2-integration
+          fetch-depth: 0
+      - name: Run patch with robust source anchors
+        shell: bash
+        run: |
+          set -euo pipefail
+          git show origin/main:.github/workflows/scbl-apply-v062.yml > /tmp/apply.yml
+          python3 <<'PY'
+          from pathlib import Path
+          lines=Path('/tmp/apply.yml').read_text(encoding='utf-8').splitlines()
+          start=next(i for i,l in enumerate(lines) if l=='        run: |')+1
+          body=[]
+          for l in lines[start:]:
+              if l and not l.startswith('          '): break
+              body.append(l[10:] if l.startswith('          ') else '')
+          s='\n'.join(body)+'\n'
+          pairs=[
+          ("""if 'game process ended normally' not in text:
+              if old not in text:
+                  raise SystemExit('ProcessRouter exit classification anchor not found')
+              text = text.replace(old, new, 1)""", """if 'game process ended normally' not in text:
+              a=text.find('            if (intentional)'); marker='            Interlocked.Increment(ref _unexpectedExitCount);'; b=text.find(marker,a)
+              if a < 0 or b < 0: raise SystemExit('ProcessRouter exit classification anchor not found')
+              text=text[:a]+new+text[b+len(marker):]"""),
+          ("""if 'refreshRequest chan struct{}' not in text:
+              if old_struct not in text:
+                  raise SystemExit('OwnerResolver struct anchor not found')
+              text = text.replace(old_struct, new_struct, 1)""", """if 'refreshRequest chan struct{}' not in text:
+              pattern=r'type OwnerResolver struct \\{.*?^\\}\\n\\nfunc newOwnerResolver\\(session \\*launcherSessionGuard\\) \\*OwnerResolver \\{.*?^\\}'
+              text,count=re.subn(pattern,new_struct.strip(),text,count=1,flags=re.S|re.M)
+              if count != 1: raise SystemExit('OwnerResolver struct anchor not found')"""),
+          ("""if 'case <-r.refreshRequest:' not in text:
+              if old_start not in text:
+                  raise SystemExit('OwnerResolver Start anchor not found')
+              text = text.replace(old_start, new_start, 1)""", """if 'case <-r.refreshRequest:' not in text:
+              pattern=r'func \\(r \\*OwnerResolver\\) Start\\(\\) \\{.*?^\\}'
+              text,count=re.subn(pattern,new_start.strip(),text,count=1,flags=re.S|re.M)
+              if count != 1: raise SystemExit('OwnerResolver Start anchor not found')"""),
+          ("""if 'func (r *OwnerResolver) requestRefresh()' not in text:
+              if old_resolve not in text:
+                  raise SystemExit('OwnerResolver resolve anchor not found')
+              text = text.replace(old_resolve, new_resolve, 1)""", """if 'func (r *OwnerResolver) requestRefresh()' not in text:
+              pattern=r'func \\(r \\*OwnerResolver\\) ResolveOutbound\\(m \\*PacketMeta\\) \\(uint32, bool\\) \\{.*?^\\}\\n\\nfunc \\(r \\*OwnerResolver\\) fastRefresh\\(\\) \\{.*?^\\}'
+              text,count=re.subn(pattern,new_resolve.strip(),text,count=1,flags=re.S|re.M)
+              if count != 1: raise SystemExit('OwnerResolver resolve anchor not found')"""),
+          ("""if 'SCBL_5TH_REPOSITORY="${SCBL_5TH_REPOSITORY' not in text:
+              if set_anchor not in text:
+                  raise SystemExit('5th defaults anchor not found')
+              text = text.replace(set_anchor, set_new, 1)""", """if 'SCBL_5TH_REPOSITORY="${SCBL_5TH_REPOSITORY' not in text:
+              pattern=r'^  DEDICATED_URL=.*$\\n^  DEDICATED_SHA256_URL=.*$'
+              text,count=re.subn(pattern,set_new.strip(),text,count=1,flags=re.M)
+              if count != 1: raise SystemExit('5th defaults anchor not found')"""),
+          ("""if 'SCBL_5TH_SOURCE_MODE=$(quote' not in text:
+              if env_anchor not in text:
+                  raise SystemExit('write_env 5th anchor not found')
+              text = text.replace(env_anchor, env_new, 1)""", """if 'SCBL_5TH_SOURCE_MODE=$(quote' not in text:
+              pattern=r'^DEDICATED_URL=.*$\\n^DEDICATED_SHA256_URL=.*$'
+              text,count=re.subn(pattern,env_new.strip(),text,count=1,flags=re.M)
+              if count != 1: raise SystemExit('write_env 5th anchor not found')"""),
+          ("""if 'download_5th_asset dedicated_server-linux-x86_64 "$tmp"' not in text:
+              if old_download not in text:
+                  raise SystemExit('dedicated download call anchor not found')
+              text = text.replace(old_download, new_download, 1)""", """if 'download_5th_asset dedicated_server-linux-x86_64 "$tmp"' not in text:
+              pattern=r'^  echo "下载 SCBL 专用 dedicated_server.*?^  fi'
+              text,count=re.subn(pattern,new_download.strip(),text,count=1,flags=re.S|re.M)
+              if count != 1: raise SystemExit('dedicated download call anchor not found')"""),
+          ("""if 'GitHub Personal Access Token（只用于本次下载' not in text:
+              if prompt_anchor not in text:
+                  raise SystemExit('5th source prompt anchor not found')
+              text = text.replace(prompt_anchor, prompt_new, 1)""", """if 'GitHub Personal Access Token（只用于本次下载' not in text:
+              marker='  prompt_value SCBL_MIN_CLIENT_VERSION "控制平面允许的最低客户端版本" "$SCBL_MIN_CLIENT_VERSION"'
+              pos=text.find(marker)
+              if pos < 0: raise SystemExit('5th source prompt anchor not found')
+              text=text[:pos]+prompt_new.strip()+text[pos+len(marker):]""")]
+          for old,new in pairs:
+              if old not in s: raise SystemExit('wrapper block not found: '+old.splitlines()[0])
+              s=s.replace(old,new,1)
+          Path('/tmp/apply-v4.sh').write_text(s,encoding='utf-8')
+          PY
+          bash /tmp/apply-v4.sh

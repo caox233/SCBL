@@ -450,6 +450,21 @@ public sealed class ProcessRouterService
                 return;
             }
 
+            bool normalGameEnd;
+            lock (_sessionSync)
+            {
+                normalGameEnd = exitCode == 0
+                    && !_allowEmptyGamePids
+                    && !_gamePids.Any(IsProcessAlive);
+            }
+            if (normalGameEnd)
+            {
+                _lastExitReason = "game process ended normally";
+                LogService.Info($"Process router exited normally after the launcher-owned game process ended. pid={pid}, exit={exitCode}");
+                WriteGuardHealthSnapshot("game-ended");
+                return;
+            }
+
             Interlocked.Increment(ref _unexpectedExitCount);
             Interlocked.Exchange(ref _lastUnexpectedExitUnixMs, DateTimeOffset.UtcNow.ToUnixTimeMilliseconds());
             _lastExitReason = $"unexpected exit code {exitCode}";

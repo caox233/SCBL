@@ -25,6 +25,9 @@ DEFAULT_SCBL_CONTROL_PORT="19080"
 DEFAULT_SCBL_MIN_CLIENT_VERSION="0.6.0"
 DEFAULT_SCBL_HEARTBEAT_TTL="20"
 DEFAULT_DEDICATED_RELEASE_TAG="scbl-public-stable-latest"
+DEFAULT_5TH_REPOSITORY="caox233/5th-echelon"
+DEFAULT_5TH_BRANCH=""
+DEFAULT_5TH_SOURCE_MODE="release"
 DEFAULT_DEDICATED_URL="https://github.com/caox233/5th-echelon/releases/download/${DEFAULT_DEDICATED_RELEASE_TAG}/dedicated_server-linux-x86_64"
 DEFAULT_DEDICATED_SHA256_URL="https://github.com/caox233/5th-echelon/releases/download/${DEFAULT_DEDICATED_RELEASE_TAG}/dedicated_server-linux-x86_64.sha256"
 DEFAULT_UPSTREAM_DEDICATED_URL="https://github.com/unixoide/5th-echelon/releases/latest/download/dedicated_server-linux-x86_64"
@@ -34,7 +37,7 @@ DEFAULT_DDNS_GO_LISTEN="127.0.0.1:9876"
 DEFAULT_DDNS_GO_INTERVAL="300"
 DEFAULT_DDNS_GO_CONFIG="/opt/ddns-go/.ddns_go_config.yaml"
 DEFAULT_DDNS_GO_VERSION="latest"
-SERVER_TOOL_VERSION="0.6.1"
+SERVER_TOOL_VERSION="0.6.2"
 
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
@@ -50,6 +53,19 @@ if [[ $EUID -ne 0 ]]; then
   echo "请用 root 运行：sudo bash install_public_server.sh"
   exit 1
 fi
+
+SCBL_ORIGINAL_STTY=""
+setup_terminal() {
+  [[ -t 0 ]] || return 0
+  SCBL_ORIGINAL_STTY="$(stty -g 2>/dev/null || true)"
+  stty -ixon 2>/dev/null || true
+}
+restore_terminal() {
+  [[ -t 0 && -n "${SCBL_ORIGINAL_STTY:-}" ]] || return 0
+  stty "$SCBL_ORIGINAL_STTY" 2>/dev/null || true
+}
+trap restore_terminal EXIT
+setup_terminal
 
 is_interactive() { [[ -t 0 && "${SCBL_NONINTERACTIVE:-0}" != "1" ]]; }
 
@@ -957,8 +973,12 @@ set_defaults() {
   EASYTIER_INSTANCE_NAME="${EASYTIER_INSTANCE_NAME:-$DEFAULT_EASYTIER_INSTANCE_NAME}"
   EASYTIER_INSTANCE_ID="${EASYTIER_INSTANCE_ID:-$DEFAULT_EASYTIER_INSTANCE_ID}"
   EASYTIER_RPC_PORT="${EASYTIER_RPC_PORT:-$DEFAULT_EASYTIER_RPC_PORT}"
-  DEDICATED_URL="${DEDICATED_URL:-$DEFAULT_DEDICATED_URL}"
-  DEDICATED_SHA256_URL="${DEDICATED_SHA256_URL:-$DEFAULT_DEDICATED_SHA256_URL}"
+SCBL_5TH_REPOSITORY="${SCBL_5TH_REPOSITORY:-$DEFAULT_5TH_REPOSITORY}"
+    SCBL_5TH_RELEASE_TAG="${SCBL_5TH_RELEASE_TAG:-$DEFAULT_DEDICATED_RELEASE_TAG}"
+    SCBL_5TH_BRANCH="${SCBL_5TH_BRANCH:-$DEFAULT_5TH_BRANCH}"
+    SCBL_5TH_SOURCE_MODE="${SCBL_5TH_SOURCE_MODE:-$DEFAULT_5TH_SOURCE_MODE}"
+    DEDICATED_URL="https://github.com/${SCBL_5TH_REPOSITORY}/releases/download/${SCBL_5TH_RELEASE_TAG}/dedicated_server-linux-x86_64"
+    DEDICATED_SHA256_URL="https://github.com/${SCBL_5TH_REPOSITORY}/releases/download/${SCBL_5TH_RELEASE_TAG}/dedicated_server-linux-x86_64.sha256"
   SCBL_CONTROL_PORT="${SCBL_CONTROL_PORT:-$DEFAULT_SCBL_CONTROL_PORT}"
   SCBL_MIN_CLIENT_VERSION="${SCBL_MIN_CLIENT_VERSION:-$DEFAULT_SCBL_MIN_CLIENT_VERSION}"
   SCBL_HEARTBEAT_TTL="${SCBL_HEARTBEAT_TTL:-$DEFAULT_SCBL_HEARTBEAT_TTL}"
@@ -1006,6 +1026,10 @@ SCBL_CONTROL_PORT=$(quote "$SCBL_CONTROL_PORT")
 SCBL_MIN_CLIENT_VERSION=$(quote "$SCBL_MIN_CLIENT_VERSION")
 SCBL_HEARTBEAT_TTL=$(quote "$SCBL_HEARTBEAT_TTL")
 SCBL_SERVER_TOOL_VERSION=$(quote "$SERVER_TOOL_VERSION")
+SCBL_5TH_REPOSITORY=$(quote "$SCBL_5TH_REPOSITORY")
+SCBL_5TH_RELEASE_TAG=$(quote "$SCBL_5TH_RELEASE_TAG")
+SCBL_5TH_BRANCH=$(quote "$SCBL_5TH_BRANCH")
+SCBL_5TH_SOURCE_MODE=$(quote "$SCBL_5TH_SOURCE_MODE")
 DEDICATED_URL=$(quote "$DEDICATED_URL")
 DEDICATED_SHA256_URL=$(quote "$DEDICATED_SHA256_URL")
 DDNS_GO_INSTALL=$(quote "${DDNS_GO_INSTALL:-n}")
@@ -1232,30 +1256,70 @@ install_tunnel_binary() {
   write_easytier_notices
 }
 
+github_asset_headers() {
+    if [[ -n "${SCBL_5TH_GITHUB_TOKEN:-}" ]]; then
+        printf '%s\n' "Authorization: Bearer ${SCBL_5TH_GITHUB_TOKEN}"
+    fi
+}
+
+download_5th_asset() {
+    local asset="$1" destination="$2" auth_header="" api archive_url zip tmp found
+    mkdir -p "$(dirname "$destination")"
+    rm -f "$destination"
+    if [[ "${SCBL_5TH_SOURCE_MODE:-release}" == "branch" ]]; then
+        [[ -n "${SCBL_5TH_BRANCH:-}" ]] || { echo "5th 分支为空。" >&2; return 1; }
+        [[ -n "${SCBL_5TH_GITHUB_TOKEN:-}" ]] || {
+            echo "下载分支构建产物需要 GitHub Personal Access Token；GitHub 不接受账号密码下载 Actions Artifact。" >&2
+            return 1
+        }
+        api="https://api.github.com/repos/${SCBL_5TH_REPOSITORY}/actions/artifacts?name=scbl-dedicated-linux&per_page=100"
+        archive_url="$(curl -fsSL --connect-timeout 10 --max-time 60 --retry 3 \
+            -H "Accept: application/vnd.github+json" \
+            -H "Authorization: Bearer ${SCBL_5TH_GITHUB_TOKEN}" \
+            -H "X-GitHub-Api-Version: 2022-11-28" "$api" | \
+            python3 -c 'import json,sys; branch=sys.argv[1]; data=json.load(sys.stdin); items=[x for x in data.get("artifacts",[]) if not x.get("expired") and (x.get("workflow_run") or {}).get("head_branch")==branch]; items.sort(key=lambda x:x.get("created_at", ""), reverse=True); print(items[0]["archive_download_url"] if items else "")' "$SCBL_5TH_BRANCH")"
+        [[ -n "$archive_url" ]] || { echo "未找到分支 ${SCBL_5TH_BRANCH} 的 scbl-dedicated-linux Artifact。" >&2; return 1; }
+        zip="$(mktemp)"
+        tmp="$(mktemp -d)"
+        curl -fL --connect-timeout 10 --max-time 240 --retry 3 \
+            -H "Accept: application/vnd.github+json" \
+            -H "Authorization: Bearer ${SCBL_5TH_GITHUB_TOKEN}" \
+            -H "X-GitHub-Api-Version: 2022-11-28" "$archive_url" -o "$zip"
+        unzip -q "$zip" -d "$tmp"
+        found="$(find "$tmp" -type f -name "$asset" | head -n 1 || true)"
+        [[ -n "$found" ]] || { rm -rf "$tmp" "$zip"; echo "Artifact 中缺少 $asset。" >&2; return 1; }
+        cp -f "$found" "$destination"
+        rm -rf "$tmp" "$zip"
+        return 0
+    fi
+    local url="https://github.com/${SCBL_5TH_REPOSITORY}/releases/download/${SCBL_5TH_RELEASE_TAG}/${asset}"
+    local args=(-fL --connect-timeout 10 --max-time 240 --retry 3 --retry-all-errors)
+    if [[ -n "${SCBL_5TH_GITHUB_TOKEN:-}" ]]; then
+        args+=(-H "Authorization: Bearer ${SCBL_5TH_GITHUB_TOKEN}")
+    fi
+    curl "${args[@]}" "$url" -o "$destination"
+}
+
 fetch_scbl_dedicated_expected_sha256() {
-  local checksum_tmp expected
-  checksum_tmp="$SCBL_ROOT/cache/dedicated_server-linux-x86_64.sha256.check.$$"
-  mkdir -p "$SCBL_ROOT/cache"
-  rm -f "$checksum_tmp"
-
-  if ! curl -fsSL --connect-timeout 10 --max-time 60 --retry 3 --retry-all-errors \
-    "$DEDICATED_SHA256_URL" -o "$checksum_tmp"; then
+    local checksum_tmp expected
+    checksum_tmp="$SCBL_ROOT/cache/dedicated_server-linux-x86_64.sha256.check.$$"
+    mkdir -p "$SCBL_ROOT/cache"
     rm -f "$checksum_tmp"
-    return 1
-  fi
-
-  expected="$(awk 'NF {print tolower($1); exit}' "$checksum_tmp")"
-  rm -f "$checksum_tmp"
-  [[ "$expected" =~ ^[0-9a-f]{64}$ ]] || return 1
-  printf '%s\n' "$expected"
+    download_5th_asset dedicated_server-linux-x86_64.sha256 "$checksum_tmp" || { rm -f "$checksum_tmp"; return 1; }
+    expected="$(awk 'NF {print tolower($1); exit}' "$checksum_tmp")"
+    rm -f "$checksum_tmp"
+    [[ "$expected" =~ ^[0-9a-f]{64}$ ]] || return 1
+    printf '%s\n' "$expected"
 }
 
 record_scbl_dedicated_release() {
   local sha256="$1"
   local state_file="$SCBL_ROOT/server/dedicated_server.scbl-release"
   cat > "$state_file" <<STATE_EOF
-source=scbl-public-stable
-release_tag=$DEFAULT_DEDICATED_RELEASE_TAG
+source_repository=$SCBL_5TH_REPOSITORY
+source_mode=$SCBL_5TH_SOURCE_MODE
+release_tag=$SCBL_5TH_RELEASE_TAG
+branch=$SCBL_5TH_BRANCH
 sha256=$sha256
 source_url=$DEDICATED_URL
 verified_at=$(date -u +'%Y-%m-%dT%H:%M:%SZ')
@@ -1288,13 +1352,12 @@ download_scbl_dedicated_binary() {
     fi
   fi
 
-  echo "下载 SCBL 专用 dedicated_server：$DEDICATED_URL"
-  if ! curl -fL --connect-timeout 10 --max-time 240 --retry 3 --retry-all-errors --progress-bar \
-    "$DEDICATED_URL" -o "$tmp"; then
+echo "下载 SCBL 专用 dedicated_server：仓库=$SCBL_5TH_REPOSITORY，模式=$SCBL_5TH_SOURCE_MODE，分支=${SCBL_5TH_BRANCH:-无}，标签=$SCBL_5TH_RELEASE_TAG"
+    if ! download_5th_asset dedicated_server-linux-x86_64 "$tmp"; then
     rm -f "$tmp"
     echo "专用 dedicated_server 下载失败。"
     return 1
-  fi
+    fi
 
   actual="$(sha256sum "$tmp" | awk '{print tolower($1)}')"
   if [[ "$actual" != "$expected" ]]; then
@@ -2791,7 +2854,22 @@ install_or_reinstall() {
   prompt_value EASYTIER_NETWORK_NAME "EasyTier 网络名称" "$EASYTIER_NETWORK_NAME"
   prompt_value SCBL_MTU "EasyTier MTU" "$SCBL_MTU"
   prompt_value EASYTIER_VERSION "EasyTier 官方版本标签" "$EASYTIER_VERSION"
-  prompt_value SCBL_MIN_CLIENT_VERSION "控制平面允许的最低客户端版本" "$SCBL_MIN_CLIENT_VERSION"
+prompt_value SCBL_MIN_CLIENT_VERSION "控制平面允许的最低客户端版本" "$SCBL_MIN_CLIENT_VERSION"
+    prompt_value SCBL_5TH_REPOSITORY "5th Echelon 二进制仓库（owner/repo）" "$SCBL_5TH_REPOSITORY"
+    prompt_value SCBL_5TH_BRANCH "5th 构建分支，留空则下载 Release" "$SCBL_5TH_BRANCH"
+    if [[ -n "$SCBL_5TH_BRANCH" ]]; then
+    SCBL_5TH_SOURCE_MODE="branch"
+    if is_interactive; then
+        read -r -s -p "GitHub Personal Access Token（只用于本次下载，不写入磁盘）: " SCBL_5TH_GITHUB_TOKEN || true
+        echo
+    fi
+    [[ -n "${SCBL_5TH_GITHUB_TOKEN:-}" ]] || echo "警告：分支 Artifact 下载需要 PAT，GitHub 账号密码不能用于脚本下载。"
+    else
+    SCBL_5TH_SOURCE_MODE="release"
+    prompt_value SCBL_5TH_RELEASE_TAG "5th Release 标签" "$SCBL_5TH_RELEASE_TAG"
+    fi
+    DEDICATED_URL="https://github.com/${SCBL_5TH_REPOSITORY}/releases/download/${SCBL_5TH_RELEASE_TAG}/dedicated_server-linux-x86_64"
+    DEDICATED_SHA256_URL="https://github.com/${SCBL_5TH_REPOSITORY}/releases/download/${SCBL_5TH_RELEASE_TAG}/dedicated_server-linux-x86_64.sha256"
   SCBL_LISTEN="udp://0.0.0.0:${SCBL_PORT}"
 
   stage "安装或复用 EasyTier ${EASYTIER_VERSION}"

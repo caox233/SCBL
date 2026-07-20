@@ -2,7 +2,7 @@
 
 SCBL 是面向《细胞分裂：黑名单》社区联机环境的自建客户端、服务端部署和客户端更新管理项目。每位部署者运行自己的 Linux 服务端、EasyTier 私有网络、用户数据库和客户端更新源。
 
-> 首个公开测试版本：**v0.6.1**
+> 首个公开测试版本：**v0.6.2**
 
 ## 快速开始
 
@@ -11,7 +11,7 @@ SCBL 是面向《细胞分裂：黑名单》社区联机环境的自建客户端
 普通用户请前往 [GitHub Releases](https://github.com/caox233/SCBL/releases/latest) 下载：
 
 ```text
-SCBL-Client-v0.6.1-win-x86.zip
+SCBL-Client-v0.6.2-win-x86.zip
 ```
 
 解压后运行 `SplinterCellCNLauncher.exe`。本项目不提供 Windows 在线安装脚本。

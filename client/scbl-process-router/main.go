@@ -26,7 +26,7 @@ import (
 )
 
 const (
-	routerVersion         = "0.6.1"
+	routerVersion         = "0.6.2"
 	windivertLayerNetwork = 0
 	divertBufSize         = 0xFFFF
 	protoTCP              = 6
@@ -848,7 +848,7 @@ func (t *gameTrafficTracker) RecentPeers(now time.Time, maxAge time.Duration, li
 }
 
 func (t *gameTrafficTracker) writeLoop() {
-	ticker := time.NewTicker(500 * time.Millisecond)
+	ticker := time.NewTicker(1 * time.Second)
 	defer ticker.Stop()
 	for {
 		select {
@@ -1378,18 +1378,25 @@ type udpKey struct {
 }
 
 type OwnerResolver struct {
-	session         *launcherSessionGuard
-	mu              sync.RWMutex
-	refreshMu       sync.Mutex
-	lastFastRefresh time.Time
-	targetPIDs      map[uint32]bool
-	tcpOwners       map[ownerKey]uint32
-	udpOwners       map[udpKey][]uint32
-	stop            chan struct{}
+	session        *launcherSessionGuard
+	mu             sync.RWMutex
+	refreshMu      sync.Mutex
+	targetPIDs     map[uint32]bool
+	tcpOwners      map[ownerKey]uint32
+	udpOwners      map[udpKey][]uint32
+	refreshRequest chan struct{}
+	stop           chan struct{}
 }
 
 func newOwnerResolver(session *launcherSessionGuard) *OwnerResolver {
-	return &OwnerResolver{session: session, stop: make(chan struct{})}
+	return &OwnerResolver{
+		session:        session,
+		targetPIDs:     map[uint32]bool{},
+		tcpOwners:      map[ownerKey]uint32{},
+		udpOwners:      map[udpKey][]uint32{},
+		refreshRequest: make(chan struct{}, 1),
+		stop:           make(chan struct{}),
+	}
 }
 
 func (r *OwnerResolver) Start() {
@@ -1400,6 +1407,8 @@ func (r *OwnerResolver) Start() {
 		for {
 			select {
 			case <-t.C:
+				r.refresh()
+			case <-r.refreshRequest:
 				r.refresh()
 			case <-r.stop:
 				return
@@ -1429,8 +1438,7 @@ func (r *OwnerResolver) ResolveOutbound(m *PacketMeta) (uint32, bool) {
 		return pid, true
 	}
 	if r.HasTargetProcesses() {
-		r.fastRefresh()
-		return r.Owner(m)
+		r.requestRefresh()
 	}
 	return 0, false
 }
@@ -1440,20 +1448,16 @@ func (r *OwnerResolver) ResolveInbound(m *PacketMeta) (uint32, bool) {
 		return pid, true
 	}
 	if r.HasTargetProcesses() {
-		r.fastRefresh()
-		return r.OwnerInbound(m)
+		r.requestRefresh()
 	}
 	return 0, false
 }
 
-func (r *OwnerResolver) fastRefresh() {
-	r.refreshMu.Lock()
-	defer r.refreshMu.Unlock()
-	if !r.lastFastRefresh.IsZero() && time.Since(r.lastFastRefresh) < 120*time.Millisecond {
-		return
+func (r *OwnerResolver) requestRefresh() {
+	select {
+	case r.refreshRequest <- struct{}{}:
+	default:
 	}
-	r.lastFastRefresh = time.Now()
-	r.refreshOwnersUnlocked()
 }
 
 func (r *OwnerResolver) Owner(m *PacketMeta) (uint32, bool) {

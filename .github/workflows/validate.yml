@@ -27,16 +27,19 @@ jobs:
           version="$(tr -d '\r\n ' < VERSION)"
           grep -Fq "<ScblVersion>${version}</ScblVersion>" client/SCBL.Version.props
           grep -Fq "SERVER_TOOL_VERSION=\"${version}\"" server/install_public_server.sh
+          grep -Fq "routerVersion         = \"${version}\"" client/scbl-process-router/main.go
           ! grep -RIl $'\r' server .github docs scripts --include='*.sh' --include='*.py' --include='*.yml' --include='*.yaml'
 
-      - name: Validate hooks snapshot and embedded files
+      - name: Validate external Hooks ownership and embedded files
         shell: bash
         run: |
           set -euo pipefail
-          test -f client/hooks-source/hooks/Cargo.toml
-          test -f client/hooks-source/hooks/src/lib.rs
-          test -f client/ScblPublicLauncher/EmbeddedFiles/SCBL_EMBEDDED_SHA256.txt
-          (cd client/ScblPublicLauncher/EmbeddedFiles && sha256sum -c SCBL_EMBEDDED_SHA256.txt)
+          test ! -e client/hooks-source
+          test ! -f client/ScblPublicLauncher/EmbeddedFiles/uplay_r1_loader.dll
+          manifest=client/ScblPublicLauncher/EmbeddedFiles/SCBL_EMBEDDED_SHA256.txt
+          test -f "$manifest"
+          grep -Eq '^[0-9a-fA-F]{64}[[:space:]]+\*?uplay_r1_loader\.dll$' "$manifest"
+          grep -Ev 'uplay_r1_loader\.dll$' "$manifest" | (cd client/ScblPublicLauncher/EmbeddedFiles && sha256sum -c -)
 
       - name: Validate shell and Python
         shell: bash

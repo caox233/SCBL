@@ -1,4 +1,123 @@
+param(
+    [string]$FifthRepository = "",
+    [string]$FifthReleaseTag = "",
+    [string]$FifthBranch = "",
+    [string]$GitHubToken = ""
+)
+
 $ErrorActionPreference = "Stop"
+
+if ([string]::IsNullOrWhiteSpace($FifthRepository)) {
+    $FifthRepository = if ([string]::IsNullOrWhiteSpace($env:SCBL_5TH_REPOSITORY)) { "caox233/5th-echelon" } else { $env:SCBL_5TH_REPOSITORY.Trim() }
+}
+if ([string]::IsNullOrWhiteSpace($FifthReleaseTag)) {
+    $FifthReleaseTag = if ([string]::IsNullOrWhiteSpace($env:SCBL_5TH_RELEASE_TAG)) { "scbl-public-stable-latest" } else { $env:SCBL_5TH_RELEASE_TAG.Trim() }
+}
+if ([string]::IsNullOrWhiteSpace($FifthBranch)) {
+    $FifthBranch = if ($null -eq $env:SCBL_5TH_BRANCH) { "" } else { $env:SCBL_5TH_BRANCH.Trim() }
+}
+if ([string]::IsNullOrWhiteSpace($GitHubToken)) {
+    $GitHubToken = if ($null -eq $env:SCBL_GITHUB_TOKEN) { "" } else { $env:SCBL_GITHUB_TOKEN.Trim() }
+}
+
+function Get-GitHubHeaders {
+    $Headers = @{
+        "Accept" = "application/vnd.github+json"
+        "X-GitHub-Api-Version" = "2022-11-28"
+        "User-Agent" = "SCBL-Windows-Builder"
+    }
+    if (![string]::IsNullOrWhiteSpace($GitHubToken)) {
+        $Headers["Authorization"] = "Bearer $GitHubToken"
+    }
+    return $Headers
+}
+
+function Update-HooksManifest {
+    param(
+        [Parameter(Mandatory=$true)][string]$Manifest,
+        [Parameter(Mandatory=$true)][string]$Hash
+    )
+    $Lines = if (Test-Path -LiteralPath $Manifest) { @(Get-Content -LiteralPath $Manifest -Encoding ASCII) } else { @() }
+    $Found = $false
+    $Output = foreach ($Line in $Lines) {
+        if ($Line -match '(?i)uplay_r1_loader\.dll\s*$') {
+            $Found = $true
+            "$Hash  uplay_r1_loader.dll"
+        }
+        else {
+            $Line
+        }
+    }
+    if (!$Found) {
+        $Output += "$Hash  uplay_r1_loader.dll"
+    }
+    $Output | Set-Content -LiteralPath $Manifest -Encoding ASCII
+}
+
+function Install-5thHooksBinary {
+    $EmbeddedDir = Join-Path $PSScriptRoot "ScblPublicLauncher\EmbeddedFiles"
+    $DllPath = Join-Path $EmbeddedDir "uplay_r1_loader.dll"
+    $Manifest = Join-Path $EmbeddedDir "SCBL_EMBEDDED_SHA256.txt"
+    New-Item -ItemType Directory -Force -Path $EmbeddedDir | Out-Null
+    $TempRoot = Join-Path ([System.IO.Path]::GetTempPath()) ("scbl-hooks-" + [Guid]::NewGuid().ToString("N"))
+    New-Item -ItemType Directory -Force -Path $TempRoot | Out-Null
+    try {
+        $DownloadedDll = Join-Path $TempRoot "uplay_r1_loader.dll"
+        $ExpectedHash = ""
+        if (![string]::IsNullOrWhiteSpace($FifthBranch)) {
+            if ([string]::IsNullOrWhiteSpace($GitHubToken)) {
+                throw "Downloading a GitHub Actions artifact from branch '$FifthBranch' requires a GitHub Personal Access Token. Set SCBL_GITHUB_TOKEN or pass -GitHubToken. GitHub account passwords are not accepted or stored."
+            }
+            Write-Host "Downloading Hooks artifact from $FifthRepository branch $FifthBranch ..."
+            $Headers = Get-GitHubHeaders
+            $MetaUri = "https://api.github.com/repos/$FifthRepository/actions/artifacts?name=scbl-hooks-windows-x86&per_page=100"
+            $Response = Invoke-RestMethod -Uri $MetaUri -Headers $Headers -Method Get
+            $Artifact = @($Response.artifacts) |
+                Where-Object { !$_.expired -and $_.workflow_run -and $_.workflow_run.head_branch -eq $FifthBranch } |
+                Sort-Object { [DateTimeOffset]$_.created_at } -Descending |
+                Select-Object -First 1
+            if ($null -eq $Artifact) {
+                throw "No non-expired 'scbl-hooks-windows-x86' artifact was found for $FifthRepository branch $FifthBranch. Run the 5th binary workflow on that branch first."
+            }
+            $Zip = Join-Path $TempRoot "hooks-artifact.zip"
+            Invoke-WebRequest -Uri $Artifact.archive_download_url -Headers $Headers -OutFile $Zip -UseBasicParsing
+            $Expanded = Join-Path $TempRoot "expanded"
+            Expand-Archive -LiteralPath $Zip -DestinationPath $Expanded -Force
+            $SourceDll = Get-ChildItem -LiteralPath $Expanded -Recurse -File -Filter "uplay_r1_loader.dll" | Select-Object -First 1
+            if ($null -eq $SourceDll) { throw "The selected Actions artifact does not contain uplay_r1_loader.dll." }
+            Copy-Item -Force $SourceDll.FullName $DownloadedDll
+            $SourceChecksum = Get-ChildItem -LiteralPath $Expanded -Recurse -File -Filter "uplay_r1_loader.dll.sha256" | Select-Object -First 1
+            if ($null -ne $SourceChecksum) {
+                $ChecksumText = Get-Content -LiteralPath $SourceChecksum.FullName -Raw -Encoding ASCII
+                $Match = [regex]::Match($ChecksumText, '(?i)\b[0-9a-f]{64}\b')
+                if ($Match.Success) { $ExpectedHash = $Match.Value.ToLowerInvariant() }
+            }
+        }
+        else {
+            Write-Host "Downloading Hooks release from $FifthRepository tag $FifthReleaseTag ..."
+            $Base = "https://github.com/$FifthRepository/releases/download/$FifthReleaseTag"
+            $Headers = Get-GitHubHeaders
+            Invoke-WebRequest -Uri "$Base/uplay_r1_loader.dll" -Headers $Headers -OutFile $DownloadedDll -UseBasicParsing
+            $ChecksumFile = Join-Path $TempRoot "uplay_r1_loader.dll.sha256"
+            Invoke-WebRequest -Uri "$Base/uplay_r1_loader.dll.sha256" -Headers $Headers -OutFile $ChecksumFile -UseBasicParsing
+            $ChecksumText = Get-Content -LiteralPath $ChecksumFile -Raw -Encoding ASCII
+            $Match = [regex]::Match($ChecksumText, '(?i)\b[0-9a-f]{64}\b')
+            if (!$Match.Success) { throw "Hooks release checksum file is invalid." }
+            $ExpectedHash = $Match.Value.ToLowerInvariant()
+        }
+
+        $ActualHash = (Get-FileHash -LiteralPath $DownloadedDll -Algorithm SHA256).Hash.ToLowerInvariant()
+        if (![string]::IsNullOrWhiteSpace($ExpectedHash) -and $ActualHash -ne $ExpectedHash) {
+            throw "Hooks SHA256 mismatch. expected=$ExpectedHash actual=$ActualHash"
+        }
+        Copy-Item -Force $DownloadedDll $DllPath
+        Update-HooksManifest -Manifest $Manifest -Hash $ActualHash
+        Write-Host "5th Hooks installed: repository=$FifthRepository, source=$(if ($FifthBranch) { 'branch ' + $FifthBranch } else { 'release ' + $FifthReleaseTag }), sha256=$ActualHash"
+    }
+    finally {
+        Remove-Item -LiteralPath $TempRoot -Recurse -Force -ErrorAction SilentlyContinue
+    }
+}
 
 function Test-EmbeddedFilesIntegrity {
     $EmbeddedDir = Join-Path $PSScriptRoot "ScblPublicLauncher\EmbeddedFiles"
@@ -24,6 +143,7 @@ function Test-EmbeddedFilesIntegrity {
     Write-Host "Embedded Hooks DLL and save files verified."
 }
 
+Install-5thHooksBinary
 Test-EmbeddedFilesIntegrity
 
 $VersionProps = Join-Path -Path $PSScriptRoot -ChildPath "SCBL.Version.props"
@@ -61,8 +181,6 @@ Invoke-Step (Join-Path $Root "SCBL.Updater\build_windows.ps1")
 
 Write-Host "[5/6] Copy EasyTier, route guard and updater tools"
 New-Item -ItemType Directory -Force -Path $Tools | Out-Null
-
-# Remove the obsolete custom tunnel client from the publish tree during migration.
 Remove-Item -Force (Join-Path $Tools "scbl-tunnel-client.exe") -ErrorAction SilentlyContinue
 
 Get-ChildItem (Join-Path $Root "easytier\bin") -File | ForEach-Object {

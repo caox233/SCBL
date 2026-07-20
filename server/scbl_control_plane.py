@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """SCBL Public sidecar control plane.
 
-This service deliberately does not modify or embed EasyTier or 5th Echelon.
-It only provides signed overlay-only JSON APIs for bootstrap, health, active
-client heartbeats and lightweight topology summaries.
+The sidecar exposes signed overlay-only JSON APIs. Slow system and SQLite
+sampling is performed by background workers so HTTP request threads only read
+immutable in-memory snapshots.
 """
 from __future__ import annotations
 
@@ -30,7 +30,7 @@ CONTROL_PORT = int(os.environ.get("SCBL_CONTROL_PORT", "19080"))
 SECRET = os.environ.get("SCBL_SECRET", "").encode("utf-8")
 SCBL_ROOT = Path(os.environ.get("SCBL_ROOT", "/opt/scbl-public"))
 DB_PATH = Path(os.environ.get("SCBL_DB_PATH", str(SCBL_ROOT / "server" / "5th-echelon.db")))
-SERVER_TOOL_VERSION = os.environ.get("SCBL_SERVER_TOOL_VERSION", "0.6.1").strip()
+SERVER_TOOL_VERSION = os.environ.get("SCBL_SERVER_TOOL_VERSION", "0.6.2").strip()
 MIN_CLIENT_VERSION = os.environ.get("SCBL_MIN_CLIENT_VERSION", "0.6.0").strip()
 MAINTENANCE = os.environ.get("SCBL_MAINTENANCE", "n").strip().lower() in {"1", "y", "yes", "true", "on"}
 HEARTBEAT_TTL_SECONDS = max(10, int(os.environ.get("SCBL_HEARTBEAT_TTL", "20")))
@@ -38,6 +38,8 @@ MAX_BODY_BYTES = 32 * 1024
 MAX_CLOCK_SKEW_SECONDS = 90
 OVERLAY = ipaddress.ip_network("10.66.0.0/24")
 ALLOW_LOOPBACK = os.environ.get("SCBL_ALLOW_LOOPBACK", "n").strip().lower() in {"1", "y", "yes", "true", "on"}
+SESSION_REFRESH_SECONDS = 0.75
+HEALTH_REFRESH_SECONDS = 5.0
 
 
 def utc_ms() -> int:
@@ -45,8 +47,7 @@ def utc_ms() -> int:
 
 
 def clean_text(value: Any, limit: int = 128) -> str:
-    text = str(value or "").replace("\x00", "").strip()
-    return text[:limit]
+    return str(value or "").replace("\x00", "").strip()[:limit]
 
 
 def clean_int(value: Any, minimum: int = 0, maximum: int = 10_000_000) -> int | None:
@@ -144,7 +145,6 @@ class RuntimeState:
     def __init__(self) -> None:
         self.lock = threading.RLock()
         self.clients: dict[str, ClientState] = {}
-        self.health_cache: tuple[float, dict[str, Any]] = (0.0, {})
 
     def cleanup(self) -> None:
         cutoff = utc_ms() - HEARTBEAT_TTL_SECONDS * 1000
@@ -156,8 +156,6 @@ class RuntimeState:
     def upsert(self, state: ClientState) -> None:
         self.cleanup()
         with self.lock:
-            # A virtual IP is the authoritative current overlay identity. Remove an
-            # older record for the same instance if DHCP assigned it a new address.
             for key, existing in list(self.clients.items()):
                 if key != state.virtual_ip and state.instance_id and existing.instance_id == state.instance_id:
                     self.clients.pop(key, None)
@@ -183,90 +181,117 @@ class AuthoritativeGameSession:
     participant_ips: set[str] = field(default_factory=set)
     participant_user_ids: set[int] = field(default_factory=set)
 
+    def score(self) -> tuple[int, int, int]:
+        return (len(self.participant_ips), self.participant_count, self.session_id)
 
-_GAME_SESSION_CACHE_LOCK = threading.RLock()
-_GAME_SESSION_CACHE_AT = 0.0
-_GAME_SESSION_CACHE: dict[str, AuthoritativeGameSession] = {}
-_GAME_SESSION_ERROR_LOG_AT = 0.0
+
 _OVERLAY_IP_REGEX = re.compile(r"(?<![0-9])10\.66\.0\.(?:[2-9]|[1-9][0-9]|1[0-9]{2}|2[0-4][0-9]|25[0-4])(?![0-9])")
+_SESSION_LOCK = threading.RLock()
+_SESSION_CACHE: dict[str, AuthoritativeGameSession] = {}
+_SESSION_SNAPSHOT_AT_MS = 0
+_SESSION_SNAPSHOT_ERROR = ""
+_HEALTH_LOCK = threading.RLock()
+_HEALTH_CACHE: dict[str, Any] = {}
+_HEALTH_SNAPSHOT_AT_MS = 0
+_HEALTH_SNAPSHOT_ERROR = ""
 
 
 def extract_overlay_ips(value: str) -> list[str]:
     return [ip for ip in dict.fromkeys(_OVERLAY_IP_REGEX.findall(value or "")) if is_client_overlay_ip(ip)]
 
 
-def authoritative_sessions_by_ip() -> dict[str, AuthoritativeGameSession]:
-    global _GAME_SESSION_CACHE_AT, _GAME_SESSION_CACHE
-    now = time.monotonic()
-    with _GAME_SESSION_CACHE_LOCK:
-        if _GAME_SESSION_CACHE and now - _GAME_SESSION_CACHE_AT < 0.75:
-            return dict(_GAME_SESSION_CACHE)
+def _load_authoritative_sessions() -> dict[str, AuthoritativeGameSession]:
+    if not DB_PATH.exists():
+        return {}
+    with sqlite3.connect(f"file:{DB_PATH}?mode=ro", uri=True, timeout=0.35) as conn:
+        conn.execute("PRAGMA query_only=ON")
+        conn.execute("PRAGMA busy_timeout=350")
+        rows = conn.execute(
+            """
+            SELECT g.id, g.type_id, g.creator_id, host.username,
+                   p.user_id, COALESCE(s.url, '')
+            FROM game_sessions AS g
+            JOIN users AS host ON host.id = g.creator_id
+            JOIN participants AS p ON p.game_id = g.id
+            LEFT JOIN station_urls AS s ON s.user_id = p.user_id
+            WHERE g.destroyed_at IS NULL
+            ORDER BY g.id DESC
+            """
+        ).fetchall()
+
+    sessions: dict[int, AuthoritativeGameSession] = {}
+    user_ips: dict[tuple[int, int], set[str]] = {}
+    for session_id, session_type, creator_id, host_username, user_id, url in rows:
+        sid = int(session_id)
+        uid = int(user_id)
+        session = sessions.setdefault(
+            sid,
+            AuthoritativeGameSession(
+                session_id=sid,
+                session_type=int(session_type),
+                host_user_id=int(creator_id),
+                host_username=clean_text(host_username, 64),
+            ),
+        )
+        session.participant_user_ids.add(uid)
+        user_ips.setdefault((sid, uid), set()).update(extract_overlay_ips(str(url or "")))
 
     result: dict[str, AuthoritativeGameSession] = {}
-    if not DB_PATH.exists():
-        return result
-    try:
-        with sqlite3.connect(f"file:{DB_PATH}?mode=ro", uri=True, timeout=0.5) as conn:
-            rows = conn.execute(
-                """
-                SELECT g.id, g.type_id, g.creator_id, host.username,
-                       p.user_id, COALESCE(s.url, '')
-                FROM game_sessions AS g
-                JOIN users AS host ON host.id = g.creator_id
-                JOIN participants AS p ON p.game_id = g.id
-                LEFT JOIN station_urls AS s ON s.user_id = p.user_id
-                WHERE g.destroyed_at IS NULL
-                ORDER BY g.id DESC
-                """
-            ).fetchall()
+    for session in sessions.values():
+        session.participant_count = len(session.participant_user_ids)
+        for user_id in session.participant_user_ids:
+            ips = user_ips.get((session.session_id, user_id), set())
+            session.participant_ips.update(ips)
+            if user_id == session.host_user_id and ips and not session.host_virtual_ip:
+                session.host_virtual_ip = sorted(ips, key=lambda x: int(x.rsplit(".", 1)[-1]))[0]
 
-        sessions: dict[int, AuthoritativeGameSession] = {}
-        user_ips: dict[tuple[int, int], set[str]] = {}
-        for session_id, session_type, creator_id, host_username, user_id, url in rows:
-            session_id = int(session_id)
-            user_id = int(user_id)
-            session = sessions.setdefault(
-                session_id,
-                AuthoritativeGameSession(
-                    session_id=session_id,
-                    session_type=int(session_type),
-                    host_user_id=int(creator_id),
-                    host_username=clean_text(host_username, 64),
-                ),
-            )
-            session.participant_user_ids.add(user_id)
-            ips = user_ips.setdefault((session_id, user_id), set())
-            ips.update(extract_overlay_ips(str(url or "")))
-
-        for session in sessions.values():
-            session.participant_count = len(session.participant_user_ids)
-            for user_id in session.participant_user_ids:
-                ips = user_ips.get((session.session_id, user_id), set())
-                session.participant_ips.update(ips)
-                if user_id == session.host_user_id and ips and not session.host_virtual_ip:
-                    session.host_virtual_ip = sorted(ips, key=lambda x: int(x.rsplit('.', 1)[-1]))[0]
-            if not session.host_virtual_ip:
-                continue
-            for ip in session.participant_ips:
-                current = result.get(ip)
-                if current is None or session.session_id > current.session_id:
-                    result[ip] = session
-    except Exception as exc:
-        global _GAME_SESSION_ERROR_LOG_AT
-        with _GAME_SESSION_CACHE_LOCK:
-            if now - _GAME_SESSION_ERROR_LOG_AT >= 10.0:
-                _GAME_SESSION_ERROR_LOG_AT = now
-                print(f"game-session snapshot failed: {exc}", flush=True)
-        return {}
-
-    with _GAME_SESSION_CACHE_LOCK:
-        _GAME_SESSION_CACHE_AT = now
-        _GAME_SESSION_CACHE = dict(result)
+        # A one-person or one-IP record is not enough evidence to declare an
+        # authoritative multiplayer host. This prevents newer personal sessions
+        # from overriding a real multiplayer session for the same virtual IP.
+        if not session.host_virtual_ip or session.participant_count < 2 or len(session.participant_ips) < 2:
+            continue
+        for ip in session.participant_ips:
+            current = result.get(ip)
+            if current is None or session.score() > current.score():
+                result[ip] = session
     return result
+
+
+def refresh_game_session_snapshot() -> bool:
+    global _SESSION_CACHE, _SESSION_SNAPSHOT_AT_MS, _SESSION_SNAPSHOT_ERROR
+    try:
+        snapshot = _load_authoritative_sessions()
+    except Exception as exc:
+        with _SESSION_LOCK:
+            _SESSION_SNAPSHOT_ERROR = clean_text(exc, 256)
+        return False
+    with _SESSION_LOCK:
+        _SESSION_CACHE = snapshot
+        _SESSION_SNAPSHOT_AT_MS = utc_ms()
+        _SESSION_SNAPSHOT_ERROR = ""
+    return True
+
+
+def _session_refresh_loop() -> None:
+    while True:
+        refresh_game_session_snapshot()
+        time.sleep(SESSION_REFRESH_SECONDS)
+
+
+def authoritative_sessions_by_ip() -> dict[str, AuthoritativeGameSession]:
+    with _SESSION_LOCK:
+        return dict(_SESSION_CACHE)
+
+
+def session_snapshot_metadata() -> tuple[int | None, str]:
+    with _SESSION_LOCK:
+        age = utc_ms() - _SESSION_SNAPSHOT_AT_MS if _SESSION_SNAPSHOT_AT_MS else None
+        return age, _SESSION_SNAPSHOT_ERROR
 
 
 def game_session_payload(source_ip: str) -> dict[str, Any]:
     session = authoritative_sessions_by_ip().get(source_ip)
+    snapshot_age, snapshot_error = session_snapshot_metadata()
     if session is None:
         return {
             "active": False,
@@ -279,6 +304,8 @@ def game_session_payload(source_ip: str) -> dict[str, Any]:
             "requesterIsHost": False,
             "participantCount": 0,
             "source": "game-server",
+            "snapshotAgeMs": snapshot_age,
+            "snapshotError": snapshot_error,
             "observedAtUnixMs": utc_ms(),
         }
     return {
@@ -292,6 +319,8 @@ def game_session_payload(source_ip: str) -> dict[str, Any]:
         "requesterIsHost": source_ip == session.host_virtual_ip,
         "participantCount": session.participant_count,
         "source": "game-server",
+        "snapshotAgeMs": snapshot_age,
+        "snapshotError": snapshot_error,
         "observedAtUnixMs": utc_ms(),
     }
 
@@ -353,7 +382,8 @@ def database_health() -> tuple[bool, int | None]:
     if not DB_PATH.exists():
         return False, None
     try:
-        with sqlite3.connect(f"file:{DB_PATH}?mode=ro", uri=True, timeout=0.5) as conn:
+        with sqlite3.connect(f"file:{DB_PATH}?mode=ro", uri=True, timeout=0.35) as conn:
+            conn.execute("PRAGMA query_only=ON")
             row = conn.execute("SELECT COUNT(*) FROM users").fetchone()
             return True, int(row[0]) if row else 0
     except Exception:
@@ -365,19 +395,15 @@ def account_exists(username: str) -> bool | None:
     if not username or not DB_PATH.exists():
         return None
     try:
-        with sqlite3.connect(f"file:{DB_PATH}?mode=ro", uri=True, timeout=0.5) as conn:
+        with sqlite3.connect(f"file:{DB_PATH}?mode=ro", uri=True, timeout=0.35) as conn:
+            conn.execute("PRAGMA query_only=ON")
             row = conn.execute("SELECT 1 FROM users WHERE username = ? LIMIT 1", (username,)).fetchone()
             return bool(row)
     except Exception:
         return None
 
 
-def get_health() -> dict[str, Any]:
-    now = time.monotonic()
-    cached_at, cached = STATE.health_cache
-    if cached and now - cached_at < 3.0:
-        return cached
-
+def _compute_health() -> dict[str, Any]:
     db_ok, user_count = database_health()
     tunnel = service_active("scbl-tunnel.service") and scbl0_ready()
     dedicated = service_active("scbl-dedicated.service")
@@ -393,14 +419,50 @@ def get_health() -> dict[str, Any]:
     }
     critical = services["tunnel"] and services["grpc"] and services["database"]
     all_ok = all(services.values())
-    overall = "healthy" if all_ok else "degraded" if critical else "down"
-    health = {
-        "overall": overall,
+    return {
+        "overall": "healthy" if all_ok else "degraded" if critical else "down",
         "services": services,
         "userCount": user_count,
         "checkedAtUnixMs": utc_ms(),
     }
-    STATE.health_cache = (now, health)
+
+
+def refresh_health_snapshot() -> bool:
+    global _HEALTH_CACHE, _HEALTH_SNAPSHOT_AT_MS, _HEALTH_SNAPSHOT_ERROR
+    try:
+        health = _compute_health()
+    except Exception as exc:
+        with _HEALTH_LOCK:
+            _HEALTH_SNAPSHOT_ERROR = clean_text(exc, 256)
+        return False
+    with _HEALTH_LOCK:
+        _HEALTH_CACHE = health
+        _HEALTH_SNAPSHOT_AT_MS = utc_ms()
+        _HEALTH_SNAPSHOT_ERROR = ""
+    return True
+
+
+def _health_refresh_loop() -> None:
+    while True:
+        refresh_health_snapshot()
+        time.sleep(HEALTH_REFRESH_SECONDS)
+
+
+def get_health() -> dict[str, Any]:
+    with _HEALTH_LOCK:
+        health = dict(_HEALTH_CACHE)
+        snapshot_at = _HEALTH_SNAPSHOT_AT_MS
+        error = _HEALTH_SNAPSHOT_ERROR
+    if not health:
+        refresh_health_snapshot()
+        with _HEALTH_LOCK:
+            health = dict(_HEALTH_CACHE)
+            snapshot_at = _HEALTH_SNAPSHOT_AT_MS
+            error = _HEALTH_SNAPSHOT_ERROR
+    age = utc_ms() - snapshot_at if snapshot_at else None
+    health["snapshotAgeMs"] = age
+    health["stale"] = age is None or age > int(HEALTH_REFRESH_SECONDS * 3000)
+    health["snapshotError"] = error
     return health
 
 
@@ -414,17 +476,11 @@ def topology_summary(peers: list[dict[str, Any]]) -> dict[str, Any]:
     }
     for client in peers:
         family = clean_text(client.get("serverAddressFamily"), 16).lower()
-        family_key = "ipv6" if family == "ipv6" else "ipv4" if family == "ipv4" else "unknown"
-        summary["serverUnderlay"][family_key] += 1
-
+        summary["serverUnderlay"]["ipv6" if family == "ipv6" else "ipv4" if family == "ipv4" else "unknown"] += 1
         transport = clean_text(client.get("serverTransport"), 32).lower()
-        transport_key = "wss" if "wss" in transport else "tcp" if "tcp" in transport else "udp" if "udp" in transport else "other"
-        summary["serverTransport"][transport_key] += 1
-
+        summary["serverTransport"]["wss" if "wss" in transport else "tcp" if "tcp" in transport else "udp" if "udp" in transport else "other"] += 1
         role = clean_text(client.get("gameRole"), 16).lower()
-        role_key = role if role in {"host", "client", "running", "idle"} else "other"
-        summary["gameRoles"][role_key] += 1
-
+        summary["gameRoles"][role if role in {"host", "client", "running", "idle"} else "other"] += 1
         peer_ip = clean_text(client.get("gamePeerIp"), 64)
         if role != "client" or not is_client_overlay_ip(peer_ip):
             continue
@@ -438,6 +494,7 @@ def topology_summary(peers: list[dict[str, Any]]) -> dict[str, Any]:
         else:
             summary["gamePaths"]["pending"] += 1
     return summary
+
 
 def capabilities() -> dict[str, Any]:
     return {
@@ -453,6 +510,7 @@ def capabilities() -> dict[str, Any]:
         "wssEnabled": True,
         "p2pEnabled": True,
         "relayEnabled": True,
+        "distributedMesh": True,
         "controlPlanePort": CONTROL_PORT,
     }
 
@@ -462,22 +520,84 @@ def expected_signature(timestamp: str, method: str, path_with_query: str, body: 
     return hmac.new(SECRET, message, hashlib.sha256).hexdigest()
 
 
+class RequestMetrics:
+    def __init__(self) -> None:
+        self.lock = threading.Lock()
+        self.samples: dict[str, list[int]] = {}
+        self.write_errors = 0
+
+    def record(self, endpoint: str, duration_ms: int, write_error: bool = False) -> None:
+        with self.lock:
+            values = self.samples.setdefault(endpoint, [])
+            values.append(max(0, duration_ms))
+            if len(values) > 512:
+                del values[: len(values) - 512]
+            if write_error:
+                self.write_errors += 1
+
+    def drain_summary(self) -> tuple[dict[str, tuple[int, int, int, int]], int]:
+        with self.lock:
+            data = self.samples
+            self.samples = {}
+            errors = self.write_errors
+            self.write_errors = 0
+        summary: dict[str, tuple[int, int, int, int]] = {}
+        for endpoint, values in data.items():
+            ordered = sorted(values)
+            if not ordered:
+                continue
+            p50 = ordered[(len(ordered) - 1) * 50 // 100]
+            p95 = ordered[(len(ordered) - 1) * 95 // 100]
+            summary[endpoint] = (len(ordered), p50, p95, ordered[-1])
+        return summary, errors
+
+
+METRICS = RequestMetrics()
+
+
+def _metrics_loop() -> None:
+    while True:
+        time.sleep(30)
+        summary, write_errors = METRICS.drain_summary()
+        if not summary and not write_errors:
+            continue
+        text = ", ".join(
+            f"{endpoint}:n={values[0]},p50={values[1]}ms,p95={values[2]}ms,max={values[3]}ms"
+            for endpoint, values in sorted(summary.items())
+        )
+        print(f"control-plane metrics: {text}; response-write-errors={write_errors}", flush=True)
+
+
 class Handler(BaseHTTPRequestHandler):
-    server_version = "SCBLControlPlane/0.6.1"
+    server_version = "SCBLControlPlane/0.6.2"
     protocol_version = "HTTP/1.1"
 
     def log_message(self, fmt: str, *args: Any) -> None:
         print(f"{self.address_string()} - {fmt % args}", flush=True)
 
+    def _begin_request(self) -> None:
+        self._request_started = time.monotonic()
+        self._request_recorded = False
+
     def send_json(self, status: HTTPStatus, payload: dict[str, Any]) -> None:
         data = json.dumps(payload, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
-        self.send_response(status.value)
-        self.send_header("Content-Type", "application/json; charset=utf-8")
-        self.send_header("Content-Length", str(len(data)))
-        self.send_header("Cache-Control", "no-store")
-        self.send_header("X-Content-Type-Options", "nosniff")
-        self.end_headers()
-        self.wfile.write(data)
+        write_error = False
+        try:
+            self.send_response(status.value)
+            self.send_header("Content-Type", "application/json; charset=utf-8")
+            self.send_header("Content-Length", str(len(data)))
+            self.send_header("Cache-Control", "no-store")
+            self.send_header("X-Content-Type-Options", "nosniff")
+            self.end_headers()
+            self.wfile.write(data)
+        except (BrokenPipeError, ConnectionResetError, OSError):
+            write_error = True
+        finally:
+            if not getattr(self, "_request_recorded", False):
+                self._request_recorded = True
+                started = getattr(self, "_request_started", time.monotonic())
+                endpoint = urlsplit(self.path).path
+                METRICS.record(endpoint, int((time.monotonic() - started) * 1000), write_error)
 
     def read_body(self) -> bytes | None:
         try:
@@ -508,14 +628,14 @@ class Handler(BaseHTTPRequestHandler):
             source = ipaddress.ip_address(source_ip)
         except ValueError:
             return False
-        if source not in OVERLAY:
-            if not (ALLOW_LOOPBACK and source.is_loopback):
-                return False
+        if source not in OVERLAY and not (ALLOW_LOOPBACK and source.is_loopback):
+            return False
         if payload_ip and source_ip != payload_ip:
             return bool(ALLOW_LOOPBACK and source.is_loopback)
         return True
 
     def do_GET(self) -> None:  # noqa: N802
+        self._begin_request()
         body = b""
         if not self.authorized(body):
             self.send_json(HTTPStatus.UNAUTHORIZED, {"error": "invalid signature"})
@@ -530,17 +650,8 @@ class Handler(BaseHTTPRequestHandler):
             self.send_json(HTTPStatus.OK, {"health": get_health(), "serverTimeUnixMs": utc_ms()})
             return
         if parsed.path == "/v1/peers":
-            clients = STATE.active_clients()
-            peers = decorated_clients(clients)
-            self.send_json(
-                HTTPStatus.OK,
-                {
-                    "peers": peers,
-                    "onlineCount": len(peers),
-                    "ttlSeconds": HEARTBEAT_TTL_SECONDS,
-                    "topology": topology_summary(peers),
-                },
-            )
+            peers = decorated_clients(STATE.active_clients())
+            self.send_json(HTTPStatus.OK, {"peers": peers, "onlineCount": len(peers), "ttlSeconds": HEARTBEAT_TTL_SECONDS, "topology": topology_summary(peers)})
             return
         if parsed.path == "/v1/game-session":
             self.send_json(HTTPStatus.OK, game_session_payload(self.client_address[0]))
@@ -548,8 +659,7 @@ class Handler(BaseHTTPRequestHandler):
         if parsed.path == "/v1/bootstrap":
             username = clean_text((query.get("username") or [""])[0], 64)
             client_version = clean_text((query.get("clientVersion") or [""])[0], 32)
-            clients = STATE.active_clients()
-            peers = decorated_clients(clients)
+            peers = decorated_clients(STATE.active_clients())
             self.send_json(
                 HTTPStatus.OK,
                 {
@@ -569,6 +679,7 @@ class Handler(BaseHTTPRequestHandler):
         self.send_json(HTTPStatus.NOT_FOUND, {"error": "not found"})
 
     def do_POST(self) -> None:  # noqa: N802
+        self._begin_request()
         body = self.read_body()
         if body is None:
             self.send_json(HTTPStatus.REQUEST_ENTITY_TOO_LARGE, {"error": "invalid body size"})
@@ -619,9 +730,18 @@ class Handler(BaseHTTPRequestHandler):
 def main() -> None:
     if not SECRET:
         raise SystemExit("SCBL_SECRET is empty; control plane will not start")
+    refresh_game_session_snapshot()
+    refresh_health_snapshot()
+    threading.Thread(target=_session_refresh_loop, name="scbl-session-snapshot", daemon=True).start()
+    threading.Thread(target=_health_refresh_loop, name="scbl-health-snapshot", daemon=True).start()
+    threading.Thread(target=_metrics_loop, name="scbl-control-metrics", daemon=True).start()
     server = ThreadingHTTPServer((SERVER_IP, CONTROL_PORT), Handler)
     server.daemon_threads = True
-    print(f"SCBL control plane listening on http://{SERVER_IP}:{CONTROL_PORT}; heartbeat TTL={HEARTBEAT_TTL_SECONDS}s", flush=True)
+    print(
+        f"SCBL control plane v{SERVER_TOOL_VERSION} listening on http://{SERVER_IP}:{CONTROL_PORT}; "
+        f"heartbeat TTL={HEARTBEAT_TTL_SECONDS}s; session snapshot={SESSION_REFRESH_SECONDS}s",
+        flush=True,
+    )
     try:
         server.serve_forever(poll_interval=0.5)
     except KeyboardInterrupt:

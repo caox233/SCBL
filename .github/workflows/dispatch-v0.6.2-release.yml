@@ -5,6 +5,10 @@ on:
     branches: [main]
     paths:
       - '.github/workflows/dispatch-v0.6.2-release.yml'
+  pull_request:
+    branches: [main]
+    paths:
+      - '.github/RELEASE_TRIGGER_v0.6.2.md'
 
 permissions:
   actions: write
@@ -12,7 +16,9 @@ permissions:
 
 jobs:
   dispatch:
-    if: github.event.head_commit.message == 'ci: dispatch v0.6.2 release'
+    if: >-
+      (github.event_name == 'push' && github.event.head_commit.message == 'ci: dispatch v0.6.2 release') ||
+      (github.event_name == 'pull_request' && github.head_ref == 'release-v0.6.2-trigger')
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4

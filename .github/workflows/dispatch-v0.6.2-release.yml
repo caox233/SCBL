@@ -1,0 +1,21 @@
+name: Dispatch SCBL v0.6.2 release
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/dispatch-v0.6.2-release.yml'
+
+permissions:
+  actions: write
+  contents: read
+
+jobs:
+  dispatch:
+    if: github.event.head_commit.message == 'ci: dispatch v0.6.2 release'
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Dispatch release workflow
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh workflow run release.yml --repo '${{ github.repository }}' --ref main -f version=0.6.2

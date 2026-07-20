@@ -8,16 +8,50 @@ on:
 
 permissions:
   actions: write
-  contents: read
+  contents: write
 
 jobs:
   dispatch:
     if: github.event.head_commit.message == 'ci: dispatch v0.6.2 release'
     runs-on: ubuntu-24.04
     steps:
-      - name: Dispatch release workflow
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+      - name: Ensure one v0.6.2 release run
         env:
           GH_TOKEN: ${{ github.token }}
-        run: gh workflow run release.yml --repo '${{ github.repository }}' --ref main -f version=0.6.2
+        shell: bash
+        run: |
+          set -euo pipefail
+          action=''
+          run_id=''
+          if gh release view v0.6.2 --repo '${{ github.repository }}' >/dev/null 2>&1; then
+            action='already-released'
+          else
+            run_id="$(gh run list --repo '${{ github.repository }}' --workflow release.yml --branch main --limit 20 --json databaseId,status --jq '[.[] | select(.status != "completed")][0].databaseId // empty')"
+            if [[ -n "$run_id" ]]; then
+              action='existing-run'
+            else
+              gh workflow run release.yml --repo '${{ github.repository }}' --ref main -f version=0.6.2
+              action='dispatched'
+              sleep 8
+              run_id="$(gh run list --repo '${{ github.repository }}' --workflow release.yml --branch main --limit 20 --json databaseId --jq '.[0].databaseId // empty')"
+            fi
+          fi
+          mkdir -p .github
+          cat > .github/SCBL_RELEASE_REQUEST.md <<EOF
+          # SCBL v0.6.2 release request
+
+          - Action: **${action}**
+          - Workflow run ID: **${run_id:-unknown}**
+          - Updated UTC: **$(date -u +'%Y-%m-%dT%H:%M:%SZ')**
+          EOF
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add .github/SCBL_RELEASE_REQUEST.md
+          git commit -m 'ci: record v0.6.2 release request [skip ci]' || exit 0
+          git push origin HEAD:main
 
 # One-shot dispatcher for v0.6.2.

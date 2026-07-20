@@ -19,3 +19,5 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: gh workflow run release.yml --repo '${{ github.repository }}' --ref main -f version=0.6.2
+
+# One-shot dispatcher for v0.6.2.

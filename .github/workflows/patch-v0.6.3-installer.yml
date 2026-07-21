@@ -16,13 +16,17 @@ jobs:
         with:
           ref: scbl-v0.6.3-component-release
           fetch-depth: 0
-      - name: Repair embedded Python and validate all heredocs
+      - id: repair
+        name: Repair embedded Python and validate all heredocs
+        continue-on-error: true
         shell: bash
         run: |
           set -euo pipefail
+          exec > >(tee patch.log) 2>&1
           python3 - <<'PY'
           from pathlib import Path
           import re
+          import textwrap
 
           path = Path('server/install_public_server.sh')
           text = path.read_text(encoding='utf-8')
@@ -30,7 +34,8 @@ jobs:
               r"def version_key\(value: str\):\n.*?\n(?=previous = load_previous_manifest\(\)|prev = previous_files\(\))",
               re.S,
           )
-          replacement = '''def version_key(value: str):
+          replacement = textwrap.dedent('''\
+          def version_key(value: str):
               try:
                   return tuple(int(part) for part in value.strip().lstrip('vV').split('.'))
               except Exception:
@@ -81,7 +86,7 @@ jobs:
                           child.unlink()
                       print(f'removed old client full package: {child}')
 
-          '''
+          ''')
           text, count = pattern.subn(replacement, text)
           if count != 2:
               raise SystemExit(f'expected two embedded cleanup blocks, replaced {count}')
@@ -111,3 +116,13 @@ jobs:
           git add server/install_public_server.sh client/scbl-process-router/main.go
           git commit -m 'server: repair embedded update-package Python validation'
           git push origin HEAD:scbl-v0.6.3-component-release
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: v0.6.3-installer-patch-log
+          path: patch.log
+          if-no-files-found: warn
+      - name: Report result
+        if: always()
+        shell: bash
+        run: test '${{ steps.repair.outcome }}' = 'success'

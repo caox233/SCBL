@@ -1,0 +1,113 @@
+name: Patch SCBL v0.6.3 installer
+
+on:
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    if: github.head_ref == 'agent/v0.6.2-stability'
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: scbl-v0.6.3-component-release
+          fetch-depth: 0
+      - name: Repair embedded Python and validate all heredocs
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+          import re
+
+          path = Path('server/install_public_server.sh')
+          text = path.read_text(encoding='utf-8')
+          pattern = re.compile(
+              r"def version_key\(value: str\):\n.*?\n(?=previous = load_previous_manifest\(\)|prev = previous_files\(\))",
+              re.S,
+          )
+          replacement = '''def version_key(value: str):
+              try:
+                  return tuple(int(part) for part in value.strip().lstrip('vV').split('.'))
+              except Exception:
+                  return (0, 0, 0)
+
+          def full_package_version(name: str):
+              marker = 'SCBL-Client-v'
+              suffix = '-win-x86.zip'
+              if name.startswith(marker) and name.endswith(suffix):
+                  return name[len(marker):-len(suffix)]
+              return '0.0.0'
+
+          def cleanup_old_releases(current_version: str, current_full_name: str):
+              # Keep the current and immediately previous client release so the
+              # administrator can roll back without uploading the old package again.
+              files_root = updates_root / 'files'
+              if files_root.exists():
+                  entries = list(files_root.iterdir())
+                  ordered = sorted(entries, key=lambda p: version_key(p.name), reverse=True)
+                  keep = {current_version}
+                  for child in ordered:
+                      if child.name != current_version:
+                          keep.add(child.name)
+                          break
+                  for child in entries:
+                      if child.name in keep:
+                          continue
+                      if child.is_dir():
+                          shutil.rmtree(child)
+                      else:
+                          child.unlink()
+                      print(f'removed old client file release: {child}')
+
+              if full_dir.exists():
+                  entries = list(full_dir.iterdir())
+                  ordered = sorted(entries, key=lambda p: version_key(full_package_version(p.name)), reverse=True)
+                  keep = {current_full_name}
+                  for child in ordered:
+                      if child.name != current_full_name:
+                          keep.add(child.name)
+                          break
+                  for child in entries:
+                      if child.name in keep:
+                          continue
+                      if child.is_dir():
+                          shutil.rmtree(child)
+                      else:
+                          child.unlink()
+                      print(f'removed old client full package: {child}')
+
+          '''
+          text, count = pattern.subn(replacement, text)
+          if count != 2:
+              raise SystemExit(f'expected two embedded cleanup blocks, replaced {count}')
+          path.write_text(text, encoding='utf-8')
+          PY
+
+          bash -n server/install_public_server.sh
+          python3 - <<'PY'
+          from pathlib import Path
+          import re
+
+          text = Path('server/install_public_server.sh').read_text(encoding='utf-8')
+          blocks = re.findall(r"<<'?(PYEOF_[A-Za-z0-9_]+)'?\n(.*?)\n\1", text, re.S)
+          if not blocks:
+              raise SystemExit('no embedded Python heredocs found')
+          for marker, source in blocks:
+              compile(source, f'install_public_server.sh:{marker}', 'exec')
+          print(f'validated embedded Python heredocs: {len(blocks)}')
+          PY
+          python3 -m py_compile server/scbl_control_plane.py server/test_control_plane.py
+          python3 server/test_control_plane.py
+          gofmt -w client/scbl-process-router/main.go
+          (cd client/scbl-process-router && GOOS=windows GOARCH=amd64 go test ./...)
+
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add server/install_public_server.sh client/scbl-process-router/main.go
+          git commit -m 'server: repair embedded update-package Python validation'
+          git push origin HEAD:scbl-v0.6.3-component-release

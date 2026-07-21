@@ -2514,6 +2514,9 @@ manifest = {
 previous_manifest_path = manifest_path.with_name('client_update_manifest.previous.json')
 if manifest_path.exists():
     shutil.copy2(manifest_path, previous_manifest_path)
+previous_manifest_path = manifest_path.with_name('client_update_manifest.previous.json')
+if manifest_path.exists():
+    shutil.copy2(manifest_path, previous_manifest_path)
 manifest_tmp = manifest_path.with_suffix(manifest_path.suffix + '.tmp')
 manifest_tmp.write_text(json.dumps(manifest, ensure_ascii=False, indent=2), encoding='utf-8')
 manifest_tmp.replace(manifest_path)
@@ -3146,6 +3149,9 @@ manifest = {
     'release_notes': legacy_release_notes,
     'updateAnnouncement': update_announcement or {'enabled': False},
 }
+previous_manifest_path = manifest_path.with_name('client_update_manifest.previous.json')
+if manifest_path.exists():
+    shutil.copy2(manifest_path, previous_manifest_path)
 previous_manifest_path = manifest_path.with_name('client_update_manifest.previous.json')
 if manifest_path.exists():
     shutil.copy2(manifest_path, previous_manifest_path)

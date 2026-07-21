@@ -80,3 +80,5 @@ SCBL 不会自动关闭安全软件、添加杀毒排除项或绕过安全检测
 ## 重要说明
 
 SCBL 是非官方社区项目，与 Ubisoft 无隶属或授权关系。本仓库不应包含游戏本体文件。`dedicated_server` 不打包进 SCBL 源码仓库，而由安装器从专用构建仓库下载。当前 Hooks 源码快照位于 [`client/hooks-source/`](client/hooks-source/)，嵌入 DLL 与存档的固定校验值位于 `SCBL_EMBEDDED_SHA256.txt`。其他第三方组件按 [`THIRD_PARTY_NOTICES.md`](THIRD_PARTY_NOTICES.md) 处理。
+
+<!-- final-v0.6.3-integration-trigger -->

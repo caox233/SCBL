@@ -1,0 +1,1268 @@
+name: Apply SCBL v0.6.3 component release plan
+
+on:
+  push:
+    branches:
+      - scbl-v0.6.3-component-release
+    paths:
+      - '.github/workflows/apply-v0.6.3-component-release.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: scbl-v0.6.3-component-release
+          fetch-depth: 0
+
+      - name: Apply component versioning, update flows and Route Guard indexes
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 <<'PY'
+          from __future__ import annotations
+
+          import json
+          import re
+          from pathlib import Path
+
+          ROOT = Path('.')
+
+          def read(path: str) -> str:
+              return (ROOT / path).read_text(encoding='utf-8')
+
+          def write(path: str, content: str) -> None:
+              target = ROOT / path
+              target.parent.mkdir(parents=True, exist_ok=True)
+              target.write_text(content.rstrip() + '\n', encoding='utf-8')
+
+          def replace_once(text: str, old: str, new: str, label: str) -> str:
+              count = text.count(old)
+              if count != 1:
+                  raise SystemExit(f'{label}: expected exactly one match, found {count}')
+              return text.replace(old, new, 1)
+
+          client_version = '0.6.3'
+          server_version = '0.6.3'
+
+          write('VERSION', client_version)
+          write('VERSION_CLIENT', client_version)
+          write('VERSION_SERVER_TOOL', server_version)
+          write(
+              'COMPONENT_VERSIONS.json',
+              json.dumps(
+                  {
+                      'schemaVersion': 1,
+                      'clientVersion': client_version,
+                      'serverToolVersion': server_version,
+                      'controlApiVersion': 1,
+                      'dedicatedServer': {
+                          'repository': 'caox233/5th-echelon',
+                          'releaseTag': 'scbl-public-stable-latest',
+                          'branch': 'scbl-public-stable',
+                      },
+                  },
+                  ensure_ascii=False,
+                  indent=2,
+              ),
+          )
+
+          props = read('client/SCBL.Version.props')
+          props = re.sub(
+              r'<ScblVersion>[0-9]+\.[0-9]+\.[0-9]+</ScblVersion>',
+              f'<ScblVersion>{client_version}</ScblVersion>',
+              props,
+              count=1,
+          )
+          write('client/SCBL.Version.props', props)
+
+          control = read('server/scbl_control_plane.py')
+          control = control.replace(
+              'SERVER_TOOL_VERSION = os.environ.get("SCBL_SERVER_TOOL_VERSION", "0.6.2").strip()',
+              f'SERVER_TOOL_VERSION = os.environ.get("SCBL_SERVER_TOOL_VERSION", "{server_version}").strip()',
+          )
+          control = control.replace(
+              'server_version = "SCBLControlPlane/0.6.2"',
+              f'server_version = "SCBLControlPlane/{server_version}"',
+          )
+          write('server/scbl_control_plane.py', control)
+
+          router_path = 'client/scbl-process-router/main.go'
+          router = read(router_path)
+          router = router.replace('routerVersion         = "0.6.2"', f'routerVersion         = "{client_version}"')
+          router = replace_once(
+              router,
+              '''\ttcpOwners      map[ownerKey]uint32
+\tudpOwners      map[udpKey][]uint32
+\trefreshRequest chan struct{}''',
+              '''\ttcpOwners       map[ownerKey]uint32
+\ttcpOwnersByPort map[uint16][]uint32
+\tudpOwners       map[udpKey][]uint32
+\tudpOwnersByPort map[uint16][]uint32
+\trefreshRequest  chan struct{}''',
+              'OwnerResolver fields',
+          )
+          router = replace_once(
+              router,
+              '''\t\ttcpOwners:      map[ownerKey]uint32{},
+\t\tudpOwners:      map[udpKey][]uint32{},
+\t\trefreshRequest: make(chan struct{}, 1),''',
+              '''\t\ttcpOwners:       map[ownerKey]uint32{},
+\t\ttcpOwnersByPort: map[uint16][]uint32{},
+\t\tudpOwners:       map[udpKey][]uint32{},
+\t\tudpOwnersByPort: map[uint16][]uint32{},
+\t\trefreshRequest:  make(chan struct{}, 1),''',
+              'OwnerResolver initialization',
+          )
+          router = replace_once(
+              router,
+              '''\t\t// Some stacks expose 0.0.0.0 or do not populate remote tuple immediately; fall back to local endpoint.
+\t\tfor key, pid := range r.tcpOwners {
+\t\t\tif key.LocalPort == m.SrcPort && key.Proto == m.Proto {
+\t\t\t\treturn pid, true
+\t\t\t}
+\t\t}''',
+              '''\t\t// Some stacks expose 0.0.0.0 or do not populate the remote tuple immediately.
+\t\t// The fallback index is built during the background owner-table refresh so
+\t\t// the packet path remains O(1).
+\t\tif pids, ok := r.tcpOwnersByPort[m.SrcPort]; ok {
+\t\t\treturn r.preferredPIDLocked(pids)
+\t\t}''',
+              'outbound TCP fallback',
+          )
+          router = replace_once(
+              router,
+              '''\t\tfor key, pid := range r.tcpOwners {
+\t\t\tif key.LocalPort == m.DstPort && key.Proto == m.Proto {
+\t\t\t\treturn pid, true
+\t\t\t}
+\t\t}''',
+              '''\t\tif pids, ok := r.tcpOwnersByPort[m.DstPort]; ok {
+\t\t\treturn r.preferredPIDLocked(pids)
+\t\t}''',
+              'inbound TCP fallback',
+          )
+
+          helper = r'''
+func appendUniquePID(items []uint32, pid uint32) []uint32 {
+\tif pid == 0 {
+\t\treturn items
+\t}
+\tfor _, existing := range items {
+\t\tif existing == pid {
+\t\t\treturn items
+\t\t}
+\t}
+\treturn append(items, pid)
+}
+
+func buildTCPPortIndex(owners map[ownerKey]uint32) map[uint16][]uint32 {
+\tindex := make(map[uint16][]uint32)
+\tfor key, pid := range owners {
+\t\tindex[key.LocalPort] = appendUniquePID(index[key.LocalPort], pid)
+\t}
+\treturn index
+}
+
+func buildUDPPortIndex(owners map[udpKey][]uint32) map[uint16][]uint32 {
+\tindex := make(map[uint16][]uint32)
+\tfor key, pids := range owners {
+\t\tfor _, pid := range pids {
+\t\t\tindex[key.LocalPort] = appendUniquePID(index[key.LocalPort], pid)
+\t\t}
+\t}
+\treturn index
+}
+
+'''
+          marker = 'func (r *OwnerResolver) ownerByUDPPortLocked(port uint16) (uint32, bool) {'
+          if helper.strip() not in router:
+              router = router.replace(marker, helper + marker, 1)
+
+          owner_pattern = re.compile(
+              r'''func \(r \*OwnerResolver\) ownerByUDPPortLocked\(port uint16\) \(uint32, bool\) \{
+.*?
+\}
+
+func \(r \*OwnerResolver\) refresh\(\) \{''',
+              re.S,
+          )
+          router, owner_count = owner_pattern.subn(
+              '''func (r *OwnerResolver) ownerByUDPPortLocked(port uint16) (uint32, bool) {
+\tpids, ok := r.udpOwnersByPort[port]
+\tif !ok {
+\t\treturn 0, false
+\t}
+\treturn r.preferredPIDLocked(pids)
+}
+
+func (r *OwnerResolver) refresh() {''',
+              router,
+              count=1,
+          )
+          if owner_count != 1:
+              raise SystemExit(f'ownerByUDPPortLocked replacement count={owner_count}')
+
+          refresh_pattern = re.compile(
+              r'''func \(r \*OwnerResolver\) refreshOwnersUnlocked\(\) \{
+.*?
+\}
+
+func findTargetPIDs''',
+              re.S,
+          )
+          refresh_replacement = r'''func (r *OwnerResolver) refreshOwnersUnlocked() {
+\tstarted := time.Now()
+\ttcpOwners, tcpErr := getTCPOwners()
+\tudpOwners, udpErr := getUDPOwners()
+\tif tcpErr != nil {
+\t\tlog.Printf("tcp owner table warning: %v", tcpErr)
+\t}
+\tif udpErr != nil {
+\t\tlog.Printf("udp owner table warning: %v", udpErr)
+\t}
+
+\tvar tcpByPort map[uint16][]uint32
+\tvar udpByPort map[uint16][]uint32
+\tif tcpErr == nil {
+\t\ttcpByPort = buildTCPPortIndex(tcpOwners)
+\t}
+\tif udpErr == nil {
+\t\tudpByPort = buildUDPPortIndex(udpOwners)
+\t}
+
+\tr.mu.Lock()
+\tif tcpErr == nil {
+\t\tr.tcpOwners = tcpOwners
+\t\tr.tcpOwnersByPort = tcpByPort
+\t}
+\tif udpErr == nil {
+\t\tr.udpOwners = udpOwners
+\t\tr.udpOwnersByPort = udpByPort
+\t}
+\tr.mu.Unlock()
+
+\tif elapsed := time.Since(started); elapsed >= 100*time.Millisecond {
+\t\tlog.Printf("[OWNER-REFRESH] duration=%s tcp=%d udp=%d", elapsed.Round(time.Millisecond), len(tcpOwners), len(udpOwners))
+\t}
+}
+
+func findTargetPIDs'''
+          router, refresh_count = refresh_pattern.subn(refresh_replacement, router, count=1)
+          if refresh_count != 1:
+              raise SystemExit(f'owner refresh replacement count={refresh_count}')
+          write(router_path, router)
+
+          installer_path = 'server/install_public_server.sh'
+          installer = read(installer_path)
+          installer = installer.replace('SERVER_TOOL_VERSION="0.6.2"', f'SERVER_TOOL_VERSION="{server_version}"')
+          constants = '''DEFAULT_SCBL_RELEASE_REPOSITORY="caox233/SCBL"
+DEFAULT_CLIENT_RELEASE_TAG="client-stable-latest"
+DEFAULT_SERVER_TOOL_RELEASE_TAG="server-tool-stable-latest"'''
+          if 'DEFAULT_CLIENT_RELEASE_TAG=' not in installer:
+              installer = installer.replace(
+                  f'SERVER_TOOL_VERSION="{server_version}"',
+                  f'SERVER_TOOL_VERSION="{server_version}"\n{constants}',
+                  1,
+              )
+
+          added_functions = r'''
+manifest_value() {
+  local manifest="$1" dotted_key="$2"
+  python3 - "$manifest" "$dotted_key" <<'PYEOF_COMPONENT_MANIFEST'
+import json, sys
+path, dotted = sys.argv[1:3]
+with open(path, encoding='utf-8-sig') as handle:
+    value = json.load(handle)
+for part in dotted.split('.'):
+    value = value[part]
+if isinstance(value, bool):
+    print('true' if value else 'false')
+else:
+    print(value)
+PYEOF_COMPONENT_MANIFEST
+}
+
+semver_compare() {
+  python3 - "$1" "$2" <<'PYEOF_SEMVER_COMPARE'
+import re, sys
+def parse(value):
+    value = value.strip().lstrip('vV')
+    if not re.fullmatch(r'\d+\.\d+\.\d+', value):
+        return (0, 0, 0)
+    return tuple(map(int, value.split('.')))
+left, right = map(parse, sys.argv[1:3])
+print(-1 if left < right else 1 if left > right else 0)
+PYEOF_SEMVER_COMPARE
+}
+
+current_published_client_version() {
+  local manifest="$SCBL_ROOT/client-updates/client_update_manifest.json"
+  if [[ -f "$manifest" ]]; then
+    python3 - "$manifest" <<'PYEOF_CURRENT_CLIENT_VERSION'
+import json, sys
+try:
+    with open(sys.argv[1], encoding='utf-8-sig') as handle:
+        print(str(json.load(handle).get('version', '')).strip().lstrip('vV'))
+except Exception:
+    print('')
+PYEOF_CURRENT_CLIENT_VERSION
+  fi
+}
+
+download_latest_client_release() {
+  load_env_if_exists; set_defaults
+  local repo="${SCBL_RELEASE_REPOSITORY:-$DEFAULT_SCBL_RELEASE_REPOSITORY}"
+  local tag="${SCBL_CLIENT_RELEASE_TAG:-$DEFAULT_CLIENT_RELEASE_TAG}"
+  local base="https://github.com/${repo}/releases/download/${tag}"
+  local tmpdir manifest version package expected actual current cmp staged target
+
+  tmpdir="$(mktemp -d -t scbl-client-release.XXXXXX)"
+  manifest="$tmpdir/client-release-manifest.json"
+  echo "正在读取 GitHub 客户端稳定版：${repo} / ${tag}"
+  if ! curl -fL --connect-timeout 10 --max-time 120 --retry 3 --retry-all-errors \
+      "$base/client-release-manifest.json" -o "$manifest"; then
+    rm -rf "$tmpdir"
+    echo "客户端 Release 清单下载失败。"
+    return 1
+  fi
+
+  version="$(manifest_value "$manifest" version)"
+  package="$(manifest_value "$manifest" file)"
+  expected="$(manifest_value "$manifest" sha256 | tr '[:upper:]' '[:lower:]')"
+  if [[ ! "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ||
+        ! "$package" =~ ^SCBL-Client-v[0-9]+\.[0-9]+\.[0-9]+-win-x86\.zip$ ||
+        ! "$expected" =~ ^[0-9a-f]{64}$ ]]; then
+    rm -rf "$tmpdir"
+    echo "客户端 Release 清单格式不合法，拒绝下载。"
+    return 1
+  fi
+
+  current="$(current_published_client_version)"
+  if [[ -n "$current" ]]; then
+    cmp="$(semver_compare "$current" "$version")"
+    if [[ "$cmp" == "1" ]]; then
+      echo "当前已发布客户端 v$current，高于 GitHub 稳定版 v$version。"
+      prompt_yes_no CONFIRM_CLIENT_DOWNGRADE "确认降级客户端更新源" "n"
+      [[ "$CONFIRM_CLIENT_DOWNGRADE" == "y" ]] || { rm -rf "$tmpdir"; return 0; }
+    elif [[ "$cmp" == "0" && -f "$SCBL_ROOT/client-updates/full/$package" ]]; then
+      actual="$(sha256sum "$SCBL_ROOT/client-updates/full/$package" | awk '{print $1}')"
+      if [[ "$actual" == "$expected" ]]; then
+        echo "当前客户端更新源已是 v$version，SHA256 一致，无需重复发布。"
+        rm -rf "$tmpdir"
+        return 0
+      fi
+    fi
+  fi
+
+  mkdir -p "$SCBL_ROOT/incoming/client/.download" "$SCBL_ROOT/incoming/client"
+  staged="$SCBL_ROOT/incoming/client/.download/${package}.part"
+  target="$SCBL_ROOT/incoming/client/$package"
+  rm -f "$staged"
+  echo "正在下载客户端全量包：$package"
+  if ! curl -fL --connect-timeout 10 --max-time 900 --retry 3 --retry-all-errors \
+      "$base/$package" -o "$staged"; then
+    rm -f "$staged"; rm -rf "$tmpdir"
+    echo "客户端全量包下载失败，当前发布版本未受影响。"
+    return 1
+  fi
+  actual="$(sha256sum "$staged" | awk '{print $1}')"
+  if [[ "$actual" != "$expected" ]]; then
+    rm -f "$staged"; rm -rf "$tmpdir"
+    echo "客户端全量包 SHA256 校验失败。"
+    echo "expected=$expected"
+    echo "actual=$actual"
+    return 1
+  fi
+  if ! python3 - "$staged" <<'PYEOF_VALIDATE_CLIENT_ZIP'
+import sys, zipfile
+path = sys.argv[1]
+with zipfile.ZipFile(path) as archive:
+    names = [name.replace('\\', '/').rstrip('/') for name in archive.namelist()]
+    if not any(name.endswith('/SplinterCellCNLauncher.exe') or name == 'SplinterCellCNLauncher.exe' for name in names):
+        raise SystemExit('全量包内没有 SplinterCellCNLauncher.exe')
+PYEOF_VALIDATE_CLIENT_ZIP
+  then
+    rm -f "$staged"; rm -rf "$tmpdir"
+    echo "客户端 ZIP 结构校验失败。"
+    return 1
+  fi
+
+  mv -f "$staged" "$target"
+  rm -rf "$tmpdir"
+  echo "客户端包已校验并原子投递：$target"
+  if systemctl list-unit-files 2>/dev/null | grep -q '^scbl-package-watch\.service'; then
+    systemctl start scbl-package-watch.service
+  else
+    bash "$MANAGER_SCRIPT" --auto-publish-client "$target"
+  fi
+  echo "后续继续沿用原有文件级差量发布、更新公告和更新服务流程。"
+}
+
+queue_client_package_from_file() {
+  load_env_if_exists; set_defaults
+  local source="${1:-}" base staged target
+  if [[ -z "$source" ]]; then
+    read -e -r -p "请输入客户端全量 ZIP 路径: " source || true
+  fi
+  [[ -f "$source" ]] || { echo "文件不存在：$source"; return 1; }
+  base="$(basename "$source")"
+  if [[ ! "$base" =~ ^SCBL-Client-v[0-9]+\.[0-9]+\.[0-9]+-win-x86\.zip$ ]]; then
+    echo "文件名不合规，应类似：SCBL-Client-v0.6.3-win-x86.zip"
+    return 1
+  fi
+  mkdir -p "$SCBL_ROOT/incoming/client/.download" "$SCBL_ROOT/incoming/client"
+  staged="$SCBL_ROOT/incoming/client/.download/${base}.part"
+  target="$SCBL_ROOT/incoming/client/$base"
+  cp -f "$source" "$staged"
+  mv -f "$staged" "$target"
+  echo "已投递：$target"
+  systemctl start scbl-package-watch.service 2>/dev/null || bash "$MANAGER_SCRIPT" --auto-publish-client "$target"
+}
+
+show_client_update_status() {
+  load_env_if_exists; set_defaults
+  local manifest="$SCBL_ROOT/client-updates/client_update_manifest.json"
+  echo
+  echo "客户端更新状态："
+  if [[ -f "$manifest" ]]; then
+    python3 - "$manifest" <<'PYEOF_CLIENT_UPDATE_STATUS'
+import json, sys
+with open(sys.argv[1], encoding='utf-8-sig') as handle:
+    data = json.load(handle)
+print(f"  当前发布版本：{data.get('version', '未知')}")
+print(f"  更新模式：{data.get('updateMode', '未知')}")
+print(f"  文件数量：{len(data.get('files', []))}")
+print(f"  删除清单：{len(data.get('delete', []))}")
+print(f"  完整包：{data.get('fullPackage', '未知')}")
+PYEOF_CLIENT_UPDATE_STATUS
+  else
+    echo "  尚未发布客户端全量包。"
+  fi
+  echo "  自动投递目录：$SCBL_ROOT/incoming/client/"
+  echo "  完整包目录：$SCBL_ROOT/client-updates/full/"
+  echo "  失败包目录：$SCBL_ROOT/incoming/failed/"
+}
+
+client_package_menu() {
+  while true; do
+    cat <<'CLIENTMENU'
+
+客户端全量包更新：
+  1. 从 GitHub 下载最新正式客户端 Release（推荐）
+  2. 进入 Xshell 全量包投递目录
+  3. 从本地文件路径投递
+  4. 查看当前发布状态
+  5. 查看失败的客户端包
+  0. 返回
+CLIENTMENU
+    read -e -r -p "请选择: " c || true
+    case "$c" in
+      1) download_latest_client_release; pause ;;
+      2) choose_manual_client_package; pause ;;
+      3) queue_client_package_from_file; pause ;;
+      4) show_client_update_status; pause ;;
+      5) ls -lah "$SCBL_ROOT/incoming/failed/" 2>/dev/null || echo "暂无失败包。"; pause ;;
+      0) return 0 ;;
+      *) echo "无效选择。" ;;
+    esac
+  done
+}
+
+update_server_tool_online() {
+  load_env_if_exists; set_defaults
+  local repo="${SCBL_RELEASE_REPOSITORY:-$DEFAULT_SCBL_RELEASE_REPOSITORY}"
+  local tag="${SCBL_SERVER_TOOL_RELEASE_TAG:-$DEFAULT_SERVER_TOOL_RELEASE_TAG}"
+  local base="https://github.com/${repo}/releases/download/${tag}"
+  local tmpdir manifest version package expected actual cmp extract_root manager_new control_new
+  local backup_root control_changed=0 binary_check_new branch_new
+
+  tmpdir="$(mktemp -d -t scbl-server-tool.XXXXXX)"
+  manifest="$tmpdir/server-tool-release-manifest.json"
+  echo "正在读取 GitHub 服务端工具稳定版：${repo} / ${tag}"
+  if ! curl -fL --connect-timeout 10 --max-time 120 --retry 3 --retry-all-errors \
+      "$base/server-tool-release-manifest.json" -o "$manifest"; then
+    rm -rf "$tmpdir"
+    echo "服务端工具 Release 清单下载失败。"
+    return 1
+  fi
+
+  version="$(manifest_value "$manifest" version)"
+  package="$(manifest_value "$manifest" file)"
+  expected="$(manifest_value "$manifest" sha256 | tr '[:upper:]' '[:lower:]')"
+  if [[ ! "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ||
+        ! "$package" =~ ^SCBL-Server-Tool-v[0-9]+\.[0-9]+\.[0-9]+-linux-x86_64\.tar\.gz$ ||
+        ! "$expected" =~ ^[0-9a-f]{64}$ ]]; then
+    rm -rf "$tmpdir"
+    echo "服务端工具 Release 清单格式不合法。"
+    return 1
+  fi
+
+  cmp="$(semver_compare "$SERVER_TOOL_VERSION" "$version")"
+  if [[ "$cmp" == "0" ]]; then
+    echo "当前服务端工具已是 v$version，无需升级。"
+    rm -rf "$tmpdir"
+    return 0
+  elif [[ "$cmp" == "1" ]]; then
+    echo "当前服务端工具 v$SERVER_TOOL_VERSION 高于 GitHub 稳定版 v$version。"
+    prompt_yes_no CONFIRM_SERVER_DOWNGRADE "确认降级服务端工具" "n"
+    [[ "$CONFIRM_SERVER_DOWNGRADE" == "y" ]] || { rm -rf "$tmpdir"; return 0; }
+  fi
+
+  echo "正在下载服务端工具包：$package"
+  curl -fL --connect-timeout 10 --max-time 600 --retry 3 --retry-all-errors \
+    "$base/$package" -o "$tmpdir/$package"
+  actual="$(sha256sum "$tmpdir/$package" | awk '{print $1}')"
+  if [[ "$actual" != "$expected" ]]; then
+    rm -rf "$tmpdir"
+    echo "服务端工具包 SHA256 校验失败。"
+    return 1
+  fi
+
+  extract_root="$tmpdir/extract"
+  mkdir -p "$extract_root"
+  python3 - "$tmpdir/$package" "$extract_root" <<'PYEOF_SAFE_SERVER_EXTRACT'
+import sys, tarfile
+from pathlib import PurePosixPath
+archive_path, target = sys.argv[1:3]
+with tarfile.open(archive_path, 'r:gz') as archive:
+    for member in archive.getmembers():
+        path = PurePosixPath(member.name)
+        if path.is_absolute() or '..' in path.parts:
+            raise SystemExit(f'unsafe tar member: {member.name}')
+    archive.extractall(target)
+PYEOF_SAFE_SERVER_EXTRACT
+
+  manager_new="$(find "$extract_root" -type f -name install_public_server.sh -print -quit)"
+  control_new="$(find "$extract_root" -type f -name scbl_control_plane.py -print -quit)"
+  [[ -n "$manager_new" && -n "$control_new" ]] || {
+    rm -rf "$tmpdir"; echo "服务端工具包缺少必要文件。"; return 1;
+  }
+  bash -n "$manager_new"
+  python3 -m py_compile "$control_new"
+
+  backup_root="$SCBL_ROOT/backups/server-tool/$(date +%Y%m%d_%H%M%S)"
+  mkdir -p "$backup_root"
+  [[ -f "$MANAGER_SCRIPT" ]] && cp -a "$MANAGER_SCRIPT" "$backup_root/install_public_server.sh"
+  [[ -f "$SCBL_ROOT/server/scbl_control_plane.py" ]] && cp -a "$SCBL_ROOT/server/scbl_control_plane.py" "$backup_root/scbl_control_plane.py"
+  [[ -f "$SCBL_ROOT/server/check_scbl_binary_release.sh" ]] && cp -a "$SCBL_ROOT/server/check_scbl_binary_release.sh" "$backup_root/check_scbl_binary_release.sh"
+  [[ -f "$SCBL_ROOT/server/5th-echelon_branch.txt" ]] && cp -a "$SCBL_ROOT/server/5th-echelon_branch.txt" "$backup_root/5th-echelon_branch.txt"
+
+  if [[ ! -f "$SCBL_ROOT/server/scbl_control_plane.py" ]] ||
+     ! cmp -s "$control_new" "$SCBL_ROOT/server/scbl_control_plane.py"; then
+    control_changed=1
+  fi
+
+  if ! {
+    install -m 0755 "$manager_new" "$MANAGER_SCRIPT"
+    install -d -m 0755 "$SCBL_ROOT/server"
+    install -m 0644 "$control_new" "$SCBL_ROOT/server/scbl_control_plane.py"
+    binary_check_new="$(find "$extract_root" -type f -name check_scbl_binary_release.sh -print -quit)"
+    branch_new="$(find "$extract_root" -type f -name 5th-echelon_branch.txt -print -quit)"
+    [[ -z "$binary_check_new" ]] || install -m 0755 "$binary_check_new" "$SCBL_ROOT/server/check_scbl_binary_release.sh"
+    [[ -z "$branch_new" ]] || install -m 0644 "$branch_new" "$SCBL_ROOT/server/5th-echelon_branch.txt"
+    python3 - "$SCBL_ROOT/server-tool-version.json" "$version" "$tag" "$actual" <<'PYEOF_SERVER_TOOL_STATE'
+import json, sys
+from datetime import datetime, timezone
+path, version, tag, digest = sys.argv[1:5]
+with open(path, 'w', encoding='utf-8') as handle:
+    json.dump({
+        'version': version,
+        'releaseTag': tag,
+        'installedAt': datetime.now(timezone.utc).isoformat(),
+        'source': 'github-release',
+        'packageSha256': digest,
+    }, handle, ensure_ascii=False, indent=2)
+PYEOF_SERVER_TOOL_STATE
+    if [[ "$control_changed" == "1" ]]; then
+      systemctl restart scbl-control-plane.service
+      sleep 2
+      systemctl is-active --quiet scbl-control-plane.service
+    fi
+  }; then
+    echo "升级失败，正在回滚服务端工具..."
+    [[ -f "$backup_root/install_public_server.sh" ]] && install -m 0755 "$backup_root/install_public_server.sh" "$MANAGER_SCRIPT"
+    [[ -f "$backup_root/scbl_control_plane.py" ]] && install -m 0644 "$backup_root/scbl_control_plane.py" "$SCBL_ROOT/server/scbl_control_plane.py"
+    [[ -f "$backup_root/check_scbl_binary_release.sh" ]] && install -m 0755 "$backup_root/check_scbl_binary_release.sh" "$SCBL_ROOT/server/check_scbl_binary_release.sh"
+    [[ -f "$backup_root/5th-echelon_branch.txt" ]] && install -m 0644 "$backup_root/5th-echelon_branch.txt" "$SCBL_ROOT/server/5th-echelon_branch.txt"
+    systemctl restart scbl-control-plane.service 2>/dev/null || true
+    rm -rf "$tmpdir"
+    return 1
+  fi
+
+  find "$SCBL_ROOT/backups/server-tool" -mindepth 1 -maxdepth 1 -type d -printf '%T@ %p\n' 2>/dev/null |
+    sort -nr | awk 'NR>5 {sub(/^[^ ]+ /, ""); print}' | xargs -r rm -rf
+  rm -rf "$tmpdir"
+  echo "SCBL 服务端工具已升级到 v$version。"
+  echo "配置、数据库、客户端更新数据和 DDNS-GO 配置均未覆盖。"
+  echo "升级备份：$backup_root"
+}
+
+server_tool_update_menu() {
+  while true; do
+    cat <<SERVERTOOLMENU
+
+SCBL 服务端工具在线升级：
+  当前版本：$SERVER_TOOL_VERSION
+  1. 检查并升级到 GitHub 稳定版
+  2. 查看本地升级状态
+  3. 查看升级备份
+  0. 返回
+SERVERTOOLMENU
+    read -e -r -p "请选择: " c || true
+    case "$c" in
+      1) update_server_tool_online; pause ;;
+      2) cat "$SCBL_ROOT/server-tool-version.json" 2>/dev/null || echo "尚无在线升级记录。"; pause ;;
+      3) ls -lah "$SCBL_ROOT/backups/server-tool/" 2>/dev/null || echo "暂无服务端工具升级备份。"; pause ;;
+      0) return 0 ;;
+      *) echo "无效选择。" ;;
+    esac
+  done
+}
+
+'''
+          if 'download_latest_client_release() {' not in installer:
+              installer = installer.replace('infer_version_from_name() {', added_functions + '\ninfer_version_from_name() {', 1)
+
+          cleanup_pattern = re.compile(
+              r'''def cleanup_old_releases\(current_version: str, current_full_name: str\):
+.*?
+(?=previous = load_previous_manifest\(\)|prev = previous_files\(\))''',
+              re.S,
+          )
+          cleanup_replacement = r'''def version_key(value: str):
+    try:
+        return tuple(int(part) for part in value.strip().lstrip('vV').split('.'))
+    except Exception:
+        return (0, 0, 0)
+
+def full_package_version(name: str):
+    marker = 'SCBL-Client-v'
+    suffix = '-win-x86.zip'
+    if name.startswith(marker) and name.endswith(suffix):
+        return name[len(marker):-len(suffix)]
+    return '0.0.0'
+
+def cleanup_old_releases(current_version: str, current_full_name: str):
+    # Keep the current and immediately previous client release so the
+    # administrator can roll back without uploading the old package again.
+    files_root = updates_root / 'files'
+    if files_root.exists():
+        entries = list(files_root.iterdir())
+        ordered = sorted(entries, key=lambda p: version_key(p.name), reverse=True)
+        keep = {current_version}
+        for child in ordered:
+            if child.name != current_version:
+                keep.add(child.name)
+                break
+        for child in entries:
+            if child.name in keep:
+                continue
+            if child.is_dir():
+                shutil.rmtree(child)
+            else:
+                child.unlink()
+            print(f'removed old client file release: {child}')
+
+    if full_dir.exists():
+        entries = list(full_dir.iterdir())
+        ordered = sorted(entries, key=lambda p: version_key(full_package_version(p.name)), reverse=True)
+        keep = {current_full_name}
+        for child in ordered:
+            if child.name != current_full_name:
+                keep.add(child.name)
+                break
+        for child in entries:
+            if child.name in keep:
+                continue
+            if child.is_dir():
+                shutil.rmtree(child)
+            else:
+                child.unlink()
+            print(f'removed old client full package: {child}')
+
+'''
+          installer, cleanup_count = cleanup_pattern.subn(cleanup_replacement, installer)
+          if cleanup_count != 2:
+              raise SystemExit(f'cleanup_old_releases replacement count={cleanup_count}')
+
+          installer = installer.replace(
+              "manifest_path.write_text(json.dumps(manifest, ensure_ascii=False, indent=2), encoding='utf-8')",
+              "manifest_tmp = manifest_path.with_suffix(manifest_path.suffix + '.tmp')\nmanifest_tmp.write_text(json.dumps(manifest, ensure_ascii=False, indent=2), encoding='utf-8')\nmanifest_tmp.replace(manifest_path)",
+          )
+
+          installer = replace_once(
+              installer,
+              '''11. 进入客户端全量包自动投递目录（Xshell 拖拽）
+12. 查看客户端自动投递目录
+13. 客户端公告管理
+0. 退出''',
+              '''11. 客户端全量包更新（GitHub / Xshell / 本地）
+12. 查看客户端更新状态
+13. 客户端公告管理
+14. SCBL 服务端工具在线升级
+0. 退出''',
+              'main menu text',
+          )
+          installer = replace_once(
+              installer,
+              '''      11) choose_manual_client_package; pause ;;
+      12) echo "客户端全量包上传到：$SCBL_ROOT/incoming/client/"; echo "系统每 60 秒自动检测并发布；服务端脚本更新请直接覆盖 install_public_server.sh。"; pause ;;
+      13) configure_client_announcements; pause ;;
+      0) exit 0 ;;''',
+              '''      11) client_package_menu ;;
+      12) show_client_update_status; pause ;;
+      13) configure_client_announcements; pause ;;
+      14) server_tool_update_menu ;;
+      0) exit 0 ;;''',
+              'main menu cases',
+          )
+          write(installer_path, installer)
+
+          write(
+              'scripts/install-server.sh',
+              r'''#!/usr/bin/env bash
+set -euo pipefail
+
+# Stable bootstrap installer for the independently versioned SCBL server tool.
+# It deliberately uses the rolling server-tool release instead of GitHub's
+# repository-wide "latest" release, because Windows client and server tool
+# versions are published independently.
+
+REPO="${SCBL_GITHUB_REPO:-caox233/SCBL}"
+TAG="${SCBL_SERVER_TOOL_RELEASE_TAG:-server-tool-stable-latest}"
+BASE="${SCBL_RELEASE_BASE_URL:-https://github.com/${REPO}/releases/download/${TAG}}"
+PACKAGE="SCBL-Server-Tool-latest-linux-x86_64.tar.gz"
+CHECKSUM="${PACKAGE}.sha256"
+TMP="$(mktemp -d -t scbl-server-bootstrap.XXXXXX)"
+cleanup() { rm -rf "$TMP"; }
+trap cleanup EXIT
+
+if [[ ${EUID:-$(id -u)} -ne 0 ]]; then
+  echo "请使用 root 运行：curl -fsSL ${BASE}/install-server.sh | sudo bash" >&2
+  exit 1
+fi
+
+need() {
+  command -v "$1" >/dev/null 2>&1 || {
+    echo "缺少必要命令：$1" >&2
+    exit 1
+  }
+}
+need curl
+need tar
+need sha256sum
+
+case "$(uname -m)" in
+  x86_64|amd64) ;;
+  *) echo "当前一键部署包仅支持 Linux x86_64。" >&2; exit 1 ;;
+esac
+
+echo "[SCBL] 下载服务端工具稳定版：${REPO} / ${TAG}"
+curl -fL --retry 3 --retry-all-errors --connect-timeout 10 "${BASE}/${PACKAGE}" -o "${TMP}/${PACKAGE}"
+curl -fL --retry 3 --retry-all-errors --connect-timeout 10 "${BASE}/${CHECKSUM}" -o "${TMP}/${CHECKSUM}"
+
+expected="$(awk 'NF {print $1; exit}' "${TMP}/${CHECKSUM}" | tr '[:upper:]' '[:lower:]')"
+actual="$(sha256sum "${TMP}/${PACKAGE}" | awk '{print $1}')"
+if [[ ! "$expected" =~ ^[0-9a-f]{64}$ || "$actual" != "$expected" ]]; then
+  echo "SCBL 服务端工具包 SHA256 校验失败。" >&2
+  echo "expected=$expected" >&2
+  echo "actual=$actual" >&2
+  exit 1
+fi
+
+mkdir -p "${TMP}/extract"
+tar -xzf "${TMP}/${PACKAGE}" -C "${TMP}/extract"
+installer="$(find "${TMP}/extract" -type f -name install_public_server.sh -print -quit)"
+[[ -n "$installer" ]] || { echo "部署包中没有 install_public_server.sh。" >&2; exit 1; }
+bash -n "$installer"
+chmod 0755 "$installer"
+cd "$(dirname "$installer")"
+
+if [[ "${SCBL_NONINTERACTIVE:-0}" == "1" ]]; then
+  exec bash "$installer"
+fi
+if (: </dev/tty) 2>/dev/null; then
+  exec bash "$installer" </dev/tty
+fi
+echo "当前环境没有交互式终端。请下载 install-server.sh 后执行，或设置 SCBL_NONINTERACTIVE=1。" >&2
+exit 1
+''',
+          )
+
+          write(
+              '.github/workflows/client-release.yml',
+              r'''name: Publish SCBL Windows client
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'VERSION_CLIENT'
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Client version; leave empty to use VERSION_CLIENT'
+        required: false
+        type: string
+
+permissions:
+  contents: write
+
+concurrency:
+  group: scbl-client-release
+  cancel-in-progress: false
+
+jobs:
+  metadata:
+    runs-on: ubuntu-24.04
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+      tag: ${{ steps.version.outputs.tag }}
+    steps:
+      - uses: actions/checkout@v4
+      - id: version
+        shell: bash
+        run: |
+          set -euo pipefail
+          source_version="$(tr -d '\r\n ' < VERSION_CLIENT)"
+          props_version="$(sed -n 's:.*<ScblVersion>\([^<]*\)</ScblVersion>.*:\1:p' client/SCBL.Version.props | head -1)"
+          requested='${{ inputs.version }}'
+          requested="${requested#v}"
+          [[ -n "$requested" ]] || requested="$source_version"
+          [[ "$requested" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]
+          [[ "$requested" == "$source_version" ]]
+          [[ "$requested" == "$props_version" ]]
+          echo "version=$requested" >> "$GITHUB_OUTPUT"
+          echo "tag=client-v$requested" >> "$GITHUB_OUTPUT"
+
+  build:
+    needs: metadata
+    runs-on: windows-2022
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.23.2'
+          cache: true
+          cache-dependency-path: client/scbl-process-router/go.sum
+      - name: Build and package client
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          Set-ExecutionPolicy -Scope Process Bypass -Force
+          .\client\build_all_windows.ps1
+          .\client\create_client_full_package.ps1 -Version '${{ needs.metadata.outputs.version }}' -OutputDir "$env:GITHUB_WORKSPACE\dist"
+          $zip = Get-ChildItem .\dist\SCBL-Client-v*-win-x86.zip | Select-Object -First 1
+          if ($null -eq $zip) { throw 'Client ZIP was not generated.' }
+          $hash = (Get-FileHash $zip.FullName -Algorithm SHA256).Hash.ToLowerInvariant()
+          "$hash  $($zip.Name)" | Set-Content -Encoding ascii "$($zip.FullName).sha256"
+          $manifest = [ordered]@{
+            schemaVersion = 2
+            component = 'client'
+            product = 'SCBL'
+            channel = 'stable'
+            version = '${{ needs.metadata.outputs.version }}'
+            file = $zip.Name
+            sha256 = $hash
+            controlApiVersion = 1
+            minimumServerToolVersion = '0.6.2'
+            dedicatedServer = [ordered]@{
+              repository = 'caox233/5th-echelon'
+              releaseTag = 'scbl-public-stable-latest'
+            }
+          } | ConvertTo-Json -Depth 5
+          [IO.File]::WriteAllText(
+            (Join-Path $env:GITHUB_WORKSPACE 'dist\client-release-manifest.json'),
+            $manifest,
+            (New-Object Text.UTF8Encoding($false)))
+      - uses: actions/upload-artifact@v4
+        with:
+          name: scbl-client-release
+          path: dist/*
+          if-no-files-found: error
+
+  publish:
+    needs: [metadata, build]
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/download-artifact@v4
+        with:
+          name: scbl-client-release
+          path: dist
+      - name: Publish immutable and rolling client releases
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          version='${{ needs.metadata.outputs.version }}'
+          tag='${{ needs.metadata.outputs.tag }}'
+          notes="docs/releases/CLIENT_v${version}.md"
+          test -f "$notes"
+          (cd dist && sha256sum $(find . -maxdepth 1 -type f ! -name SHA256SUMS.txt -printf '%f\n' | sort) > SHA256SUMS.txt)
+
+          if gh release view "$tag" >/dev/null 2>&1; then
+            gh release upload "$tag" dist/* --clobber
+            gh release edit "$tag" --title "SCBL Windows Client v${version}" --notes-file "$notes" --latest
+          else
+            gh release create "$tag" dist/* --title "SCBL Windows Client v${version}" --notes-file "$notes" --latest
+          fi
+
+          git tag -f client-stable-latest "$GITHUB_SHA"
+          git push origin refs/tags/client-stable-latest --force
+          if gh release view client-stable-latest >/dev/null 2>&1; then
+            while read -r asset; do
+              [[ -z "$asset" ]] || gh release delete-asset client-stable-latest "$asset" -y
+            done < <(gh release view client-stable-latest --json assets --jq '.assets[].name')
+            gh release edit client-stable-latest \
+              --title "SCBL Windows Client Stable v${version}" \
+              --notes-file "$notes" \
+              --latest=false
+            gh release upload client-stable-latest dist/*
+          else
+            gh release create client-stable-latest dist/* \
+              --title "SCBL Windows Client Stable v${version}" \
+              --notes-file "$notes" \
+              --latest=false
+          fi
+''',
+          )
+
+          write(
+              '.github/workflows/server-tool-release.yml',
+              r'''name: Publish SCBL server tool
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'VERSION_SERVER_TOOL'
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Server tool version; leave empty to use VERSION_SERVER_TOOL'
+        required: false
+        type: string
+
+permissions:
+  contents: write
+
+concurrency:
+  group: scbl-server-tool-release
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+      tag: ${{ steps.version.outputs.tag }}
+    steps:
+      - uses: actions/checkout@v4
+      - id: version
+        shell: bash
+        run: |
+          set -euo pipefail
+          source_version="$(tr -d '\r\n ' < VERSION_SERVER_TOOL)"
+          requested='${{ inputs.version }}'
+          requested="${requested#v}"
+          [[ -n "$requested" ]] || requested="$source_version"
+          [[ "$requested" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]
+          grep -Fq "SERVER_TOOL_VERSION=\"$requested\"" server/install_public_server.sh
+          echo "version=$requested" >> "$GITHUB_OUTPUT"
+          echo "tag=server-tool-v$requested" >> "$GITHUB_OUTPUT"
+      - name: Validate and package server tool
+        shell: bash
+        run: |
+          set -euo pipefail
+          version='${{ steps.version.outputs.version }}'
+          bash -n server/install_public_server.sh
+          bash -n scripts/install-server.sh
+          python3 -m py_compile server/scbl_control_plane.py server/test_control_plane.py
+          python3 server/test_control_plane.py
+
+          root="SCBL-Server-Tool-v${version}-linux-x86_64"
+          mkdir -p "stage/$root/THIRD_PARTY_LICENSES" dist
+          cp server/install_public_server.sh \
+             server/scbl_control_plane.py \
+             server/check_scbl_binary_release.sh \
+             server/5th-echelon_branch.txt \
+             scripts/install-server.sh \
+             VERSION_SERVER_TOOL VERSION_CLIENT COMPONENT_VERSIONS.json \
+             README.md CHANGELOG.md THIRD_PARTY_NOTICES.md \
+             "stage/$root/"
+          cp THIRD_PARTY_LICENSES/EasyTier-LGPL-3.0.txt "stage/$root/THIRD_PARTY_LICENSES/"
+          chmod 0755 "stage/$root/install_public_server.sh" \
+                     "stage/$root/install-server.sh" \
+                     "stage/$root/check_scbl_binary_release.sh"
+
+          package="${root}.tar.gz"
+          tar -C stage -czf "dist/$package" "$root"
+          cp "dist/$package" dist/SCBL-Server-Tool-latest-linux-x86_64.tar.gz
+          cp scripts/install-server.sh dist/install-server.sh
+
+          for file in dist/*.tar.gz; do
+            hash="$(sha256sum "$file" | awk '{print $1}')"
+            printf '%s  %s\n' "$hash" "$(basename "$file")" > "${file}.sha256"
+          done
+          package_sha="$(sha256sum "dist/$package" | awk '{print $1}')"
+          cat > dist/server-tool-release-manifest.json <<JSON
+          {
+            "schemaVersion": 2,
+            "component": "server-tool",
+            "product": "SCBL",
+            "channel": "stable",
+            "version": "${version}",
+            "file": "${package}",
+            "sha256": "${package_sha}",
+            "latestAlias": "SCBL-Server-Tool-latest-linux-x86_64.tar.gz",
+            "controlApiVersion": 1,
+            "minimumClientVersion": "0.6.0",
+            "preserves": [
+              "scbl.env",
+              "server/5th-echelon.db",
+              "client-updates",
+              "incoming",
+              "backups",
+              "DDNS-GO configuration"
+            ]
+          }
+          JSON
+          (cd dist && sha256sum $(find . -maxdepth 1 -type f ! -name SHA256SUMS.txt -printf '%f\n' | sort) > SHA256SUMS.txt)
+      - uses: actions/upload-artifact@v4
+        with:
+          name: scbl-server-tool-release
+          path: dist/*
+          if-no-files-found: error
+
+  publish:
+    needs: build
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/download-artifact@v4
+        with:
+          name: scbl-server-tool-release
+          path: dist
+      - name: Publish immutable and rolling server-tool releases
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          version='${{ needs.build.outputs.version }}'
+          tag='${{ needs.build.outputs.tag }}'
+          notes="docs/releases/SERVER_TOOL_v${version}.md"
+          test -f "$notes"
+
+          if gh release view "$tag" >/dev/null 2>&1; then
+            gh release upload "$tag" dist/* --clobber
+            gh release edit "$tag" --title "SCBL Server Tool v${version}" --notes-file "$notes" --latest=false
+          else
+            gh release create "$tag" dist/* --title "SCBL Server Tool v${version}" --notes-file "$notes" --latest=false
+          fi
+
+          git tag -f server-tool-stable-latest "$GITHUB_SHA"
+          git push origin refs/tags/server-tool-stable-latest --force
+          if gh release view server-tool-stable-latest >/dev/null 2>&1; then
+            while read -r asset; do
+              [[ -z "$asset" ]] || gh release delete-asset server-tool-stable-latest "$asset" -y
+            done < <(gh release view server-tool-stable-latest --json assets --jq '.assets[].name')
+            gh release edit server-tool-stable-latest \
+              --title "SCBL Server Tool Stable v${version}" \
+              --notes-file "$notes" \
+              --latest=false
+            gh release upload server-tool-stable-latest dist/*
+          else
+            gh release create server-tool-stable-latest dist/* \
+              --title "SCBL Server Tool Stable v${version}" \
+              --notes-file "$notes" \
+              --latest=false
+          fi
+''',
+          )
+
+          write(
+              'docs/RELEASE_ARCHITECTURE.md',
+              r'''# SCBL component release architecture
+
+SCBL uses independent component versions so a client-only change does not rebuild or
+renumber the Linux server tool, and a server-script-only change does not start a
+Windows build.
+
+## Components
+
+| Component | Version source | Immutable release | Rolling stable release |
+|---|---|---|---|
+| Windows client | `VERSION_CLIENT` and `client/SCBL.Version.props` | `client-vX.Y.Z` | `client-stable-latest` |
+| Linux server tool | `VERSION_SERVER_TOOL` and `SERVER_TOOL_VERSION` | `server-tool-vX.Y.Z` | `server-tool-stable-latest` |
+| 5th dedicated server and Hooks | `caox233/5th-echelon` | project release | `scbl-public-stable-latest` |
+
+The root `VERSION` remains a compatibility alias for the public Windows client.
+`COMPONENT_VERSIONS.json` records the current compatible component set.
+
+## Client delivery
+
+The server manager can download `client-release-manifest.json` and the client ZIP
+from `client-stable-latest`. It verifies SHA256 and the ZIP structure, then moves the
+validated package into `/opt/scbl-public/incoming/client/`. The existing package
+watcher continues to generate file-level delta manifests, update announcements and
+the locally hosted full package.
+
+The server keeps the current and immediately previous client release for rollback.
+The update manifest is written through a temporary file and atomically replaced.
+
+## Server-tool upgrade
+
+The installed `SCBL` manager downloads only from `server-tool-stable-latest`.
+It validates the release manifest, SHA256, tar paths, Bash syntax and Python syntax.
+Before replacement it backs up the manager and control plane. Configuration, the
+5th database, client update data, incoming files, backups and DDNS-GO settings are
+not overwritten. Only the control plane is restarted when its source changed.
+
+## Route Guard
+
+Route Guard still authorizes the exact launcher-owned game PID set. Game IPv4
+TCP/UDP packets addressed to the SCBL virtual subnet are pinned to the EasyTier
+interface and source address; other destinations from those PIDs are blocked.
+Other applications are reinjected unchanged.
+
+Version 0.6.3 precomputes TCP and UDP local-port owner indexes during the background
+IP Helper refresh. Packet-path fallback lookups are O(1), removing the previous
+full owner-table scans. `owner-unknown` remains fail-open for unrelated-system
+safety and is recorded for diagnostics; IPv6, loopback-proxy transfer and fragment
+hardening remain separate compatibility-sensitive work.
+''',
+          )
+
+          write(
+              f'docs/releases/CLIENT_v{client_version}.md',
+              f'''# SCBL Windows Client v{client_version}
+
+## Main changes
+
+- Separates the Windows client release from the Linux server-tool release.
+- Keeps the exact launcher-owned PID authorization model for Route Guard.
+- Replaces TCP and UDP fallback owner-table scans with precomputed O(1) indexes.
+- Keeps owner-table refresh in the background and logs unusually slow refreshes.
+- Continues to obtain the approved 5th Hooks DLL from `caox233/5th-echelon`.
+- Does not require a Linux server-tool upgrade solely because this client version changes.
+
+## Compatibility
+
+- Control API version: 1
+- Minimum server tool: 0.6.2
+- 5th binary channel: `scbl-public-stable-latest`
+
+## Files
+
+- `SCBL-Client-v{client_version}-win-x86.zip`
+- `SCBL-Client-v{client_version}-win-x86.zip.sha256`
+- `client-release-manifest.json`
+- `SHA256SUMS.txt`
+''',
+          )
+
+          write(
+              f'docs/releases/SERVER_TOOL_v{server_version}.md',
+              f'''# SCBL Server Tool v{server_version}
+
+## Main changes
+
+- Adds direct download of the latest stable Windows client Release.
+- Reuses the existing incoming-directory and file-level delta publication flow.
+- Adds online self-upgrade for the installed `SCBL` manager and control plane.
+- Verifies release manifests, SHA256, archive paths and script syntax.
+- Backs up the existing manager and control plane and rolls back on health failure.
+- Preserves `scbl.env`, `5th-echelon.db`, client updates, incoming packages,
+  backups and DDNS-GO configuration.
+- Keeps the current and immediately previous client release for rollback.
+- Uses independent `client-stable-latest`, `server-tool-stable-latest` and
+  `scbl-public-stable-latest` channels.
+
+## Files
+
+- `SCBL-Server-Tool-v{server_version}-linux-x86_64.tar.gz`
+- `SCBL-Server-Tool-v{server_version}-linux-x86_64.tar.gz.sha256`
+- `SCBL-Server-Tool-latest-linux-x86_64.tar.gz`
+- `SCBL-Server-Tool-latest-linux-x86_64.tar.gz.sha256`
+- `server-tool-release-manifest.json`
+- `install-server.sh`
+- `SHA256SUMS.txt`
+''',
+          )
+
+          changelog = read('CHANGELOG.md')
+          entry = f'''## Client {client_version} / Server Tool {server_version}
+
+- Split Windows client and Linux server-tool versions and release workflows.
+- Added GitHub client Release import through the existing package watcher.
+- Added verified server-tool online self-upgrade with backup and rollback.
+- Retained the newest two locally published client packages.
+- Changed Route Guard TCP/UDP fallback owner resolution to precomputed O(1) indexes.
+
+'''
+          if entry.strip() not in changelog:
+              if changelog.startswith('#'):
+                  first_newline = changelog.find('\n')
+                  changelog = changelog[:first_newline + 1] + '\n' + entry + changelog[first_newline + 1:]
+              else:
+                  changelog = entry + changelog
+          write('CHANGELOG.md', changelog)
+
+          readme = read('README.md')
+          marker = '## Component releases'
+          section = r'''
+## Component releases
+
+The Windows client, Linux server tool and 5th binary project are independently
+versioned. This prevents client-only work from rebuilding the server package and
+prevents server-script-only work from starting a Windows build.
+
+- Client stable channel: `client-stable-latest`
+- Server-tool stable channel: `server-tool-stable-latest`
+- 5th dedicated server and Hooks: `scbl-public-stable-latest`
+
+Run `SCBL` on the server to import the latest client package or upgrade the
+installed server tool. See `docs/RELEASE_ARCHITECTURE.md` for integrity,
+backup, rollback and compatibility details.
+'''
+          if marker not in readme:
+              readme = readme.rstrip() + '\n\n' + section.strip() + '\n'
+          write('README.md', readme)
+
+          for obsolete in (
+              '.github/workflows/release.yml',
+              '.github/workflows/dispatch-v0.6.2-release.yml',
+              '.github/SCBL_RELEASE_REQUEST.md',
+          ):
+              path = ROOT / obsolete
+              if path.exists():
+                  path.unlink()
+          PY
+
+          gofmt -w client/scbl-process-router/main.go
+          bash -n server/install_public_server.sh
+          bash -n scripts/install-server.sh
+          python3 -m py_compile server/scbl_control_plane.py server/test_control_plane.py
+          python3 server/test_control_plane.py
+
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add -A
+          git commit -m 'SCBL v0.6.3: component releases and online update flows'
+          git push origin HEAD:scbl-v0.6.3-component-release

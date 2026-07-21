@@ -30,6 +30,7 @@ jobs:
           script = '\n'.join(lines) + '\n'
           script = script.replace("helper = r'''", "helper = '''", 1)
           script = script.replace("refresh_replacement = r'''", "refresh_replacement = '''", 1)
+          script = script.replace("git add -A\n", "git add -A -- ':!.github/workflows/**'\n", 1)
           Path('/tmp/apply-v0.6.3.sh').write_text(script, encoding='utf-8')
           PY
           bash -n /tmp/apply-v0.6.3.sh
@@ -44,6 +45,14 @@ jobs:
           name: v0.6.3-migration-log
           path: migration.log
           if-no-files-found: error
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: v0.6.3-component-workflows
+          path: |
+            .github/workflows/client-release.yml
+            .github/workflows/server-tool-release.yml
+          if-no-files-found: warn
       - name: Report migration result
         if: always()
         shell: bash

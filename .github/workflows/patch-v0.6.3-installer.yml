@@ -1,14 +1,14 @@
-name: Export SCBL v0.6.3 source
+name: Repair SCBL v0.6.3 integration
 
 on:
   pull_request:
     branches: [main]
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
-  export:
+  repair:
     if: github.head_ref == 'agent/v0.6.2-stability'
     runs-on: ubuntu-24.04
     steps:
@@ -16,24 +16,213 @@ jobs:
         with:
           ref: agent/v0.6.2-stability
           fetch-depth: 0
-      - uses: actions/upload-artifact@v4
-        with:
-          name: scbl-v0.6.3-source-export
-          path: |
-            CHANGELOG.md
-            COMPONENT_VERSIONS.json
-            README.md
-            VERSION
-            VERSION_CLIENT
-            VERSION_SERVER_TOOL
-            client/SCBL.Version.props
-            client/scbl-process-router/main.go
-            docs/RELEASE_ARCHITECTURE.md
-            docs/releases/CLIENT_v0.6.3.md
-            docs/releases/SERVER_TOOL_v0.6.3.md
-            scripts/install-server.sh
-            server/install_public_server.sh
-            server/scbl_control_plane.py
-            .github/workflows/client-release.yml
-            .github/workflows/server-tool-release.yml
-          if-no-files-found: error
+      - name: Repair embedded Python and component validation
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+          import re, textwrap
+
+          path = Path('server/install_public_server.sh')
+          text = path.read_text(encoding='utf-8')
+          cleanup = textwrap.dedent('''\
+          def version_key(value: str):
+              try:
+                  parts = tuple(int(part) for part in value.strip().lstrip('vV').split('.'))
+                  return parts if len(parts) == 3 else (0, 0, 0)
+              except Exception:
+                  return (0, 0, 0)
+
+          def full_package_version(name: str):
+              marker = 'SCBL-Client-v'
+              suffix = '-win-x86.zip'
+              if name.startswith(marker) and name.endswith(suffix):
+                  return name[len(marker):-len(suffix)]
+              return '0.0.0'
+
+          def cleanup_old_releases(current_version: str, current_full_name: str):
+              files_root = updates_root / 'files'
+              if files_root.exists():
+                  entries = list(files_root.iterdir())
+                  ordered = sorted(entries, key=lambda item: version_key(item.name), reverse=True)
+                  keep = {current_version}
+                  for child in ordered:
+                      if child.name != current_version and version_key(child.name) != (0, 0, 0):
+                          keep.add(child.name)
+                          break
+                  for child in entries:
+                      if child.name in keep:
+                          continue
+                      if child.is_dir():
+                          shutil.rmtree(child)
+                      else:
+                          child.unlink()
+                      print(f'removed old client file release: {child}')
+
+              if full_dir.exists():
+                  entries = list(full_dir.iterdir())
+                  ordered = sorted(entries, key=lambda item: version_key(full_package_version(item.name)), reverse=True)
+                  keep = {current_full_name}
+                  for child in ordered:
+                      if child.name != current_full_name and version_key(full_package_version(child.name)) != (0, 0, 0):
+                          keep.add(child.name)
+                          break
+                  for child in entries:
+                      if child.name in keep:
+                          continue
+                      if child.is_dir():
+                          shutil.rmtree(child)
+                      else:
+                          child.unlink()
+                      print(f'removed old client full package: {child}')
+
+          ''')
+          pattern = re.compile(r"def version_key\(value: str\):\n.*?\n(?=previous = load_previous_manifest\(\)|prev = previous_files\(\))", re.S)
+          text, count = pattern.subn(cleanup, text)
+          if count != 2:
+              raise SystemExit(f'expected two client cleanup blocks, replaced {count}')
+
+          safe_extract = textwrap.dedent('''\
+          import sys, tarfile
+          from pathlib import Path, PurePosixPath
+          archive_path, target = sys.argv[1:3]
+          target_root = Path(target).resolve()
+          with tarfile.open(archive_path, 'r:gz') as archive:
+              members = archive.getmembers()
+              for member in members:
+                  member_path = PurePosixPath(member.name)
+                  if member_path.is_absolute() or '..' in member_path.parts:
+                      raise SystemExit(f'unsafe tar member path: {member.name}')
+                  if member.issym() or member.islnk() or member.isdev():
+                      raise SystemExit(f'unsafe tar member type: {member.name}')
+                  destination = (target_root / Path(*member_path.parts)).resolve()
+                  if destination != target_root and target_root not in destination.parents:
+                      raise SystemExit(f'tar member escapes extraction root: {member.name}')
+              archive.extractall(target_root, members=members, filter='data')
+          ''')
+          safe_pattern = re.compile(r"(?<=<<'PYEOF_SAFE_SERVER_EXTRACT'\n).*?(?=\nPYEOF_SAFE_SERVER_EXTRACT)", re.S)
+          text, count = safe_pattern.subn(safe_extract.rstrip('\n'), text)
+          if count != 1:
+              raise SystemExit(f'expected one server extraction block, replaced {count}')
+
+          marker = "manifest_tmp = manifest_path.with_suffix(manifest_path.suffix + '.tmp')"
+          preserve = "previous_manifest_path = manifest_path.with_name('client_update_manifest.previous.json')\nif manifest_path.exists():\n    shutil.copy2(manifest_path, previous_manifest_path)\n" + marker
+          if text.count(marker) != 2:
+              raise SystemExit('unexpected client manifest write block count')
+          text = text.replace(marker, preserve)
+          path.write_text(text, encoding='utf-8')
+          PY
+
+          cat > .github/workflows/validate.yml <<'YAML'
+          name: Validate source
+
+          on:
+            push:
+              branches: [main]
+            pull_request:
+            workflow_dispatch:
+
+          permissions:
+            contents: read
+
+          jobs:
+            linux-validation:
+              runs-on: ubuntu-24.04
+              steps:
+                - uses: actions/checkout@v4
+                - uses: actions/setup-go@v5
+                  with:
+                    go-version: '1.23.2'
+                    cache: true
+                    cache-dependency-path: client/scbl-process-router/go.sum
+                - name: Validate independent component versions
+                  shell: bash
+                  run: |
+                    set -euo pipefail
+                    client_version="$(tr -d '\r\n ' < VERSION_CLIENT)"
+                    server_version="$(tr -d '\r\n ' < VERSION_SERVER_TOOL)"
+                    compatibility_version="$(tr -d '\r\n ' < VERSION)"
+                    [[ "$client_version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]
+                    [[ "$server_version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]
+                    [[ "$compatibility_version" == "$client_version" ]]
+                    grep -Fq "<ScblVersion>${client_version}</ScblVersion>" client/SCBL.Version.props
+                    grep -Fq "routerVersion         = \"${client_version}\"" client/scbl-process-router/main.go
+                    grep -Fq "SERVER_TOOL_VERSION=\"${server_version}\"" server/install_public_server.sh
+                    grep -Fq "SCBLControlPlane/${server_version}" server/scbl_control_plane.py
+                    python3 - "$client_version" "$server_version" <<'PY'
+                    import json, sys
+                    client_version, server_version = sys.argv[1:3]
+                    data = json.load(open('COMPONENT_VERSIONS.json', encoding='utf-8'))
+                    assert data['clientVersion'] == client_version
+                    assert data['serverToolVersion'] == server_version
+                    assert data['controlApiVersion'] == 1
+                    assert data['dedicatedServer']['repository'] == 'caox233/5th-echelon'
+                    assert data['dedicatedServer']['releaseTag'] == 'scbl-public-stable-latest'
+                    PY
+                    ! grep -RIl $'\r' server .github docs scripts --include='*.sh' --include='*.py' --include='*.yml' --include='*.yaml'
+                - name: Validate Hooks ownership
+                  shell: bash
+                  run: |
+                    set -euo pipefail
+                    test ! -e client/hooks-source
+                    test ! -f client/ScblPublicLauncher/EmbeddedFiles/uplay_r1_loader.dll
+                    manifest=client/ScblPublicLauncher/EmbeddedFiles/SCBL_EMBEDDED_SHA256.txt
+                    test -f "$manifest"
+                    grep -Eq '^[0-9a-fA-F]{64}[[:space:]]+\*?uplay_r1_loader\.dll$' "$manifest"
+                    grep -Ev 'uplay_r1_loader\.dll$' "$manifest" | (cd client/ScblPublicLauncher/EmbeddedFiles && sha256sum -c -)
+                - name: Validate shell and embedded Python
+                  shell: bash
+                  run: |
+                    set -euo pipefail
+                    bash -n server/install_public_server.sh
+                    bash -n scripts/install-server.sh
+                    python3 - <<'PY'
+                    from pathlib import Path
+                    import re
+                    for path in (Path('server/install_public_server.sh'), Path('scripts/install-server.sh')):
+                        text = path.read_text(encoding='utf-8')
+                        blocks = re.findall(r"<<'?(PYEOF_[A-Za-z0-9_]+)'?\n(.*?)\n\1", text, re.S)
+                        if not blocks:
+                            raise SystemExit(f'{path}: no embedded Python heredocs found')
+                        for marker, source in blocks:
+                            compile(source, f'{path}:{marker}', 'exec')
+                    PY
+                    python3 -m py_compile server/scbl_control_plane.py server/test_control_plane.py
+                    python3 server/test_control_plane.py
+                - name: Validate Go Route Guard
+                  working-directory: client/scbl-process-router
+                  shell: bash
+                  run: |
+                    set -euo pipefail
+                    go mod download
+                    test -z "$(gofmt -l .)"
+                    GOOS=windows GOARCH=amd64 go vet .
+                    GOOS=windows GOARCH=amd64 go test .
+                    GOOS=windows GOARCH=amd64 go build -trimpath -o /tmp/scbl-process-router.exe .
+                    test -s /tmp/scbl-process-router.exe
+          YAML
+
+          bash -n server/install_public_server.sh
+          bash -n scripts/install-server.sh
+          python3 - <<'PY'
+          from pathlib import Path
+          import re
+          for path in (Path('server/install_public_server.sh'), Path('scripts/install-server.sh')):
+              text = path.read_text(encoding='utf-8')
+              blocks = re.findall(r"<<'?(PYEOF_[A-Za-z0-9_]+)'?\n(.*?)\n\1", text, re.S)
+              if not blocks:
+                  raise SystemExit(f'{path}: no embedded Python heredocs found')
+              for marker, source in blocks:
+                  compile(source, f'{path}:{marker}', 'exec')
+          PY
+          python3 -m py_compile server/scbl_control_plane.py server/test_control_plane.py
+          python3 server/test_control_plane.py
+          gofmt -w client/scbl-process-router/main.go
+          (cd client/scbl-process-router && GOOS=windows GOARCH=amd64 go test ./...)
+
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add server/install_public_server.sh .github/workflows/validate.yml client/scbl-process-router/main.go
+          git commit -m 'fix: validate component releases and embedded server scripts'
+          git push origin HEAD:agent/v0.6.2-stability

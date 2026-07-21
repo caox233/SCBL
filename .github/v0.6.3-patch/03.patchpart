@@ -1,0 +1,71 @@
++- Added verified server-tool online self-upgrade with safe extraction, backup, health checks and manual rollback.
++- Retained the newest two locally published client packages, preserved the previous manifest and added explicit client rollback.
++- Added CI validation for independent component versions and every embedded Python heredoc.
++- Changed Route Guard TCP/UDP fallback owner resolution to precomputed O(1) indexes while preserving exact Launcher-authorized PID isolation.
+ 
+ 
+ ## v0.6.1
+diff -ruN '--exclude=__pycache__' '--exclude=*.pyc' scbl063orig/README.md scbl063full/README.md
+--- scbl063orig/README.md	2026-07-21 09:33:54.000000000 +0000
++++ scbl063full/README.md	2026-07-21 09:41:46.576715902 +0000
+@@ -101,8 +101,8 @@
+ 
+ 服务器运行 `SCBL` 后，可以分别：
+ 
+-- 从 GitHub 拉取最新 Windows 客户端并继续使用原有差量发布流程；
+-- 在线升级 SCBL 服务端管理工具和控制平面；
++- 从 GitHub 拉取最新 Windows 客户端并继续使用原有差量发布流程，也可回滚到保留的上一版；
++- 在线升级 SCBL 服务端管理工具和控制平面，并可回滚到最近一次升级备份；
+ - 独立更新 5th Echelon 游戏服务端。
+ 
+ 完整的校验、备份、回滚和兼容关系见 [`docs/RELEASE_ARCHITECTURE.md`](docs/RELEASE_ARCHITECTURE.md)。
+diff -ruN '--exclude=__pycache__' '--exclude=*.pyc' scbl063orig/docs/RELEASE_ARCHITECTURE.md scbl063full/docs/RELEASE_ARCHITECTURE.md
+--- scbl063orig/docs/RELEASE_ARCHITECTURE.md	2026-07-21 09:33:54.000000000 +0000
++++ scbl063full/docs/RELEASE_ARCHITECTURE.md	2026-07-21 09:41:46.575113308 +0000
+@@ -23,16 +23,15 @@
+ watcher continues to generate file-level delta manifests, update announcements and
+ the locally hosted full package.
+ 
+-The server keeps the current and immediately previous client release for rollback.
+-The update manifest is written through a temporary file and atomically replaced.
++The server keeps the current and immediately previous client release and exposes an explicit rollback action that reuses the same package watcher. Before an atomic manifest replacement, the previous manifest is preserved as `client_update_manifest.previous.json`.
+ 
+ ## Server-tool upgrade
+ 
+ The installed `SCBL` manager downloads only from `server-tool-stable-latest`.
+-It validates the release manifest, SHA256, tar paths, Bash syntax and Python syntax.
++It validates the component manifest, version/file consistency, SHA256, safe tar member types and paths, Bash syntax, every embedded Python heredoc and control-plane Python syntax.
+ Before replacement it backs up the manager and control plane. Configuration, the
+ 5th database, client update data, incoming files, backups and DDNS-GO settings are
+-not overwritten. Only the control plane is restarted when its source changed.
++not overwritten. Only the control plane is restarted when its source changed. The manager can also restore the latest upgrade backup; a pre-rollback safety copy is created first.
+ 
+ ## Route Guard
+ 
+diff -ruN '--exclude=__pycache__' '--exclude=*.pyc' scbl063orig/docs/releases/SERVER_TOOL_v0.6.3.md scbl063full/docs/releases/SERVER_TOOL_v0.6.3.md
+--- scbl063orig/docs/releases/SERVER_TOOL_v0.6.3.md	2026-07-21 09:33:54.000000000 +0000
++++ scbl063full/docs/releases/SERVER_TOOL_v0.6.3.md	2026-07-21 09:41:46.574458724 +0000
+@@ -5,11 +5,11 @@
+ - Adds direct download of the latest stable Windows client Release.
+ - Reuses the existing incoming-directory and file-level delta publication flow.
+ - Adds online self-upgrade for the installed `SCBL` manager and control plane.
+-- Verifies release manifests, SHA256, archive paths and script syntax.
+-- Backs up the existing manager and control plane and rolls back on health failure.
++- Verifies component manifests, version/file consistency, SHA256, safe archive members, Bash syntax and every embedded Python heredoc.
++- Backs up the existing manager and control plane, rolls back on health failure, and supports manual rollback to the latest upgrade backup.
+ - Preserves `scbl.env`, `5th-echelon.db`, client updates, incoming packages,
+   backups and DDNS-GO configuration.
+-- Keeps the current and immediately previous client release for rollback.
++- Keeps the current and immediately previous client release and provides an explicit rollback action.
+ - Uses independent `client-stable-latest`, `server-tool-stable-latest` and
+   `scbl-public-stable-latest` channels.
+ 
+diff -ruN '--exclude=__pycache__' '--exclude=*.pyc' scbl063orig/scripts/install-server.sh scbl063full/scripts/install-server.sh
+--- scbl063orig/scripts/install-server.sh	2026-07-21 09:33:54.000000000 +0000
++++ scbl063full/scripts/install-server.sh	2026-07-21 09:40:21.816333930 +0000
+@@ -29,6 +29,7 @@
+ need curl
+ need tar
+ need sha256sum
++need python3
+ 

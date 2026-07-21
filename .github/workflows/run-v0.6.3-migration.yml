@@ -23,11 +23,14 @@ jobs:
           set -euo pipefail
           python3 - <<'PY'
           from pathlib import Path
-          text = Path('.github/workflows/apply-v0.6.3-component-release.yml').read_text(encoding='utf-8')
+          source = Path('.github/workflows/apply-v0.6.3-component-release.yml').read_text(encoding='utf-8')
           marker = '        run: |\n'
-          block = text.split(marker, 1)[1]
+          block = source.split(marker, 1)[1]
           lines = [line[10:] if line.startswith('          ') else line for line in block.splitlines()]
-          Path('/tmp/apply-v0.6.3.sh').write_text('\n'.join(lines) + '\n', encoding='utf-8')
+          script = '\n'.join(lines) + '\n'
+          script = script.replace("helper = r'''", "helper = '''", 1)
+          script = script.replace("refresh_replacement = r'''", "refresh_replacement = '''", 1)
+          Path('/tmp/apply-v0.6.3.sh').write_text(script, encoding='utf-8')
           PY
           bash -n /tmp/apply-v0.6.3.sh
       - id: migration

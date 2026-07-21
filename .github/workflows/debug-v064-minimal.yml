@@ -1,41 +1,36 @@
-name: Apply v0.6.4 finalizer to validation branch
+name: Check v0.6.4 embedded Python
 
 on:
   pull_request:
     branches: [main]
-    paths:
-      - '.github/SERVER_TOOL_V064_RETRY'
 
 permissions:
-  contents: write
+  contents: read
 
 jobs:
-  apply:
+  check:
     if: github.head_ref == 'server-tool-v064-retry'
     runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v4
-        with:
-          ref: server-tool-v064-retry
-          fetch-depth: 0
-      - name: Apply finalizer and commit generated sources
+      - name: Compile embedded Python blocks
         shell: bash
         run: |
           set -euo pipefail
+          git clone -q --branch server-tool-v064-retry --single-branch https://github.com/${{ github.repository }} work
+          cd work
           python3 - <<'PY'
           from pathlib import Path
-          workflow = Path('.github/workflows/finalize-server-tool-v0.6.4.yml').read_text(encoding='utf-8')
-          lines = workflow.splitlines()
-          start = next(i for i, line in enumerate(lines) if line.strip() == "python3 - <<'PY'")
-          end = next(i for i in range(start + 1, len(lines)) if lines[i].strip() == 'PY')
-          source = '\n'.join(line[10:] if line.startswith('          ') else line for line in lines[start + 1:end]) + '\n'
-          Path('/tmp/finalizer.py').write_text(source, encoding='utf-8')
+          import re
+          path = Path('server/install_public_server.sh')
+          text = path.read_text(encoding='utf-8')
+          blocks = re.findall(r"<<'?(PYEOF_[A-Za-z0-9_]+)'?\n(.*?)\n\1", text, re.S)
+          print(f'blocks={len(blocks)}')
+          for marker, source in blocks:
+              try:
+                  compile(source, f'{path}:{marker}', 'exec')
+              except Exception as exc:
+                  print(f'FAILED {marker}: {exc}')
+                  print(source)
+                  raise
+              print(f'OK {marker}')
           PY
-          python3 /tmp/finalizer.py
-          git config user.name 'github-actions[bot]'
-          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          git add VERSION_SERVER_TOOL COMPONENT_VERSIONS.json CHANGELOG.md \
-            scripts/install-server.sh server/install_public_server.sh server/scbl_control_plane.py \
-            docs/releases/SERVER_TOOL_v0.6.4.md
-          git commit -m 'SCBL Server Tool v0.6.4: rollback and upgrade hardening'
-          git push origin HEAD:server-tool-v064-retry

@@ -76,9 +76,7 @@ from pathlib import Path
 import re, sys
 path = Path(sys.argv[1])
 text = path.read_text(encoding='utf-8')
-blocks = re.findall(r"<<'?(PYEOF_[A-Za-z0-9_]+)'?
-(.*?)
-", text, re.S)
+blocks = re.findall(r"<<'?(PYEOF_[A-Za-z0-9_]+)'?\n(.*?)\n\1", text, re.S)
 if not blocks:
     raise SystemExit('manager script has no embedded Python heredocs')
 for marker, block in blocks:

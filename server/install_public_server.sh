@@ -37,7 +37,7 @@ DEFAULT_DDNS_GO_LISTEN="127.0.0.1:9876"
 DEFAULT_DDNS_GO_INTERVAL="300"
 DEFAULT_DDNS_GO_CONFIG="/opt/ddns-go/.ddns_go_config.yaml"
 DEFAULT_DDNS_GO_VERSION="latest"
-SERVER_TOOL_VERSION="0.6.3"
+SERVER_TOOL_VERSION="0.6.4"
 DEFAULT_SCBL_RELEASE_REPOSITORY="caox233/SCBL"
 DEFAULT_CLIENT_RELEASE_TAG="client-stable-latest"
 DEFAULT_SERVER_TOOL_RELEASE_TAG="server-tool-stable-latest"
@@ -2514,9 +2514,6 @@ manifest = {
 previous_manifest_path = manifest_path.with_name('client_update_manifest.previous.json')
 if manifest_path.exists():
     shutil.copy2(manifest_path, previous_manifest_path)
-previous_manifest_path = manifest_path.with_name('client_update_manifest.previous.json')
-if manifest_path.exists():
-    shutil.copy2(manifest_path, previous_manifest_path)
 manifest_tmp = manifest_path.with_suffix(manifest_path.suffix + '.tmp')
 manifest_tmp.write_text(json.dumps(manifest, ensure_ascii=False, indent=2), encoding='utf-8')
 manifest_tmp.replace(manifest_path)
@@ -2570,6 +2567,24 @@ else:
 PYEOF_COMPONENT_MANIFEST
 }
 
+
+validate_manager_script_file() {
+  local candidate="$1"
+  bash -n "$candidate" || return 1
+  python3 - "$candidate" <<'PYEOF_VALIDATE_MANAGER_SCRIPT'
+from pathlib import Path
+import re, sys
+source_path = Path(sys.argv[1])
+source_text = source_path.read_text(encoding='utf-8')
+blocks = re.findall(r"<<'?(PYEOF_[A-Za-z0-9_]+)'?\n(.*?)\n\1", source_text, re.S)
+if not blocks:
+    raise SystemExit('manager script has no embedded Python heredocs')
+for marker, source in blocks:
+    compile(source, f'{source_path}:{marker}', 'exec')
+print(f'validated embedded Python heredocs: {len(blocks)}')
+PYEOF_VALIDATE_MANAGER_SCRIPT
+}
+
 semver_compare() {
   python3 - "$1" "$2" <<'PYEOF_SEMVER_COMPARE'
 import re, sys
@@ -2602,7 +2617,7 @@ download_latest_client_release() {
   local repo="${SCBL_RELEASE_REPOSITORY:-$DEFAULT_SCBL_RELEASE_REPOSITORY}"
   local tag="${SCBL_CLIENT_RELEASE_TAG:-$DEFAULT_CLIENT_RELEASE_TAG}"
   local base="https://github.com/${repo}/releases/download/${tag}"
-  local tmpdir manifest version package expected actual current cmp staged target
+  local tmpdir manifest version package expected actual current cmp staged target component expected_package
 
   tmpdir="$(mktemp -d -t scbl-client-release.XXXXXX)"
   manifest="$tmpdir/client-release-manifest.json"
@@ -2617,8 +2632,11 @@ download_latest_client_release() {
   version="$(manifest_value "$manifest" version)"
   package="$(manifest_value "$manifest" file)"
   expected="$(manifest_value "$manifest" sha256 | tr '[:upper:]' '[:lower:]')"
-  if [[ ! "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ||
-        ! "$package" =~ ^SCBL-Client-v[0-9]+\.[0-9]+\.[0-9]+-win-x86\.zip$ ||
+  component="$(manifest_value "$manifest" component)"
+  expected_package="SCBL-Client-v${version}-win-x86.zip"
+  if [[ "$component" != "client" ||
+        ! "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ||
+        "$package" != "$expected_package" ||
         ! "$expected" =~ ^[0-9a-f]{64}$ ]]; then
     rm -rf "$tmpdir"
     echo "客户端 Release 清单格式不合法，拒绝下载。"
@@ -2707,6 +2725,43 @@ queue_client_package_from_file() {
   systemctl start scbl-package-watch.service 2>/dev/null || bash "$MANAGER_SCRIPT" --auto-publish-client "$target"
 }
 
+
+rollback_client_release() {
+  load_env_if_exists; set_defaults
+  local current selection version package
+  current="$(current_published_client_version)"
+  selection="$(python3 - "$SCBL_ROOT/client-updates/full" "$current" <<'PYEOF_SELECT_CLIENT_ROLLBACK'
+from pathlib import Path
+import re, sys
+root = Path(sys.argv[1])
+current = sys.argv[2].strip().lstrip('vV')
+pattern = re.compile(r'^SCBL-Client-v(\d+\.\d+\.\d+)-win-x86\.zip$')
+choices = []
+if root.exists():
+    for candidate in root.iterdir():
+        match = pattern.fullmatch(candidate.name)
+        if candidate.is_file() and match and match.group(1) != current:
+            version = match.group(1)
+            choices.append((tuple(map(int, version.split('.'))), version, candidate))
+if choices:
+    _, version, candidate = sorted(choices, reverse=True)[0]
+    print(f'{version}\t{candidate}')
+PYEOF_SELECT_CLIENT_ROLLBACK
+)"
+  if [[ -z "$selection" ]]; then
+    echo "没有可回滚的上一版客户端全量包。"
+    return 1
+  fi
+  version="${selection%%$'\t'*}"
+  package="${selection#*$'\t'}"
+  echo "当前发布版本：${current:-未知}"
+  echo "准备回滚到：v$version"
+  echo "使用全量包：$package"
+  prompt_yes_no CONFIRM_CLIENT_ROLLBACK "确认回滚客户端更新源到 v$version" "n"
+  [[ "$CONFIRM_CLIENT_ROLLBACK" == "y" ]] || return 0
+  queue_client_package_from_file "$package"
+}
+
 show_client_update_status() {
   load_env_if_exists; set_defaults
   local manifest="$SCBL_ROOT/client-updates/client_update_manifest.json"
@@ -2740,7 +2795,8 @@ client_package_menu() {
   2. 进入 Xshell 全量包投递目录
   3. 从本地文件路径投递
   4. 查看当前发布状态
-  5. 查看失败的客户端包
+  5. 回滚到保留的上一版客户端
+  6. 查看失败的客户端包
   0. 返回
 CLIENTMENU
     read -e -r -p "请选择: " c || true
@@ -2749,7 +2805,8 @@ CLIENTMENU
       2) choose_manual_client_package; pause ;;
       3) queue_client_package_from_file; pause ;;
       4) show_client_update_status; pause ;;
-      5) ls -lah "$SCBL_ROOT/incoming/failed/" 2>/dev/null || echo "暂无失败包。"; pause ;;
+      5) rollback_client_release; pause ;;
+      6) ls -lah "$SCBL_ROOT/incoming/failed/" 2>/dev/null || echo "暂无失败包。"; pause ;;
       0) return 0 ;;
       *) echo "无效选择。" ;;
     esac
@@ -2762,7 +2819,7 @@ update_server_tool_online() {
   local tag="${SCBL_SERVER_TOOL_RELEASE_TAG:-$DEFAULT_SERVER_TOOL_RELEASE_TAG}"
   local base="https://github.com/${repo}/releases/download/${tag}"
   local tmpdir manifest version package expected actual cmp extract_root manager_new control_new
-  local backup_root control_changed=0 binary_check_new branch_new
+  local backup_root control_changed=0 binary_check_new branch_new component expected_package package_root
 
   tmpdir="$(mktemp -d -t scbl-server-tool.XXXXXX)"
   manifest="$tmpdir/server-tool-release-manifest.json"
@@ -2777,8 +2834,11 @@ update_server_tool_online() {
   version="$(manifest_value "$manifest" version)"
   package="$(manifest_value "$manifest" file)"
   expected="$(manifest_value "$manifest" sha256 | tr '[:upper:]' '[:lower:]')"
-  if [[ ! "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ||
-        ! "$package" =~ ^SCBL-Server-Tool-v[0-9]+\.[0-9]+\.[0-9]+-linux-x86_64\.tar\.gz$ ||
+  component="$(manifest_value "$manifest" component)"
+  expected_package="SCBL-Server-Tool-v${version}-linux-x86_64.tar.gz"
+  if [[ "$component" != "server-tool" ||
+        ! "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ||
+        "$package" != "$expected_package" ||
         ! "$expected" =~ ^[0-9a-f]{64}$ ]]; then
     rm -rf "$tmpdir"
     echo "服务端工具 Release 清单格式不合法。"
@@ -2824,7 +2884,7 @@ with tarfile.open(archive_path, 'r:gz') as archive:
         destination = (target_root / Path(*member_path.parts)).resolve()
         if destination != target_root and target_root not in destination.parents:
             raise SystemExit(f'tar member escapes extraction root: {member.name}')
-    archive.extractall(target_root, members=members, filter='data')
+    archive.extractall(target_root, members=members)
 PYEOF_SAFE_SERVER_EXTRACT
 
   manager_new="$(find "$extract_root" -type f -name install_public_server.sh -print -quit)"
@@ -2832,7 +2892,7 @@ PYEOF_SAFE_SERVER_EXTRACT
   [[ -n "$manager_new" && -n "$control_new" ]] || {
     rm -rf "$tmpdir"; echo "服务端工具包缺少必要文件。"; return 1;
   }
-  bash -n "$manager_new"
+  validate_manager_script_file "$manager_new"
   python3 -m py_compile "$control_new"
 
   backup_root="$SCBL_ROOT/backups/server-tool/$(date +%Y%m%d_%H%M%S)"
@@ -2892,6 +2952,74 @@ PYEOF_SERVER_TOOL_STATE
   echo "升级备份：$backup_root"
 }
 
+
+rollback_server_tool_latest() {
+  load_env_if_exists; set_defaults
+  local backup_root safety_root target_version control_changed=0
+  backup_root="$(find "$SCBL_ROOT/backups/server-tool" -mindepth 1 -maxdepth 1 -type d -printf '%T@ %p\n' 2>/dev/null | sort -nr | head -1 | cut -d' ' -f2-)"
+  if [[ -z "$backup_root" || ! -f "$backup_root/install_public_server.sh" ]]; then
+    echo "没有可用的服务端工具升级备份。"
+    return 1
+  fi
+  validate_manager_script_file "$backup_root/install_public_server.sh" || {
+    echo "备份中的管理脚本校验失败，拒绝回滚。"; return 1;
+  }
+  [[ ! -f "$backup_root/scbl_control_plane.py" ]] || python3 -m py_compile "$backup_root/scbl_control_plane.py"
+  target_version="$(sed -n 's/^SERVER_TOOL_VERSION="\([^"]*\)"/\1/p' "$backup_root/install_public_server.sh" | head -1)"
+  echo "当前服务端工具：v$SERVER_TOOL_VERSION"
+  echo "最近升级备份：$backup_root"
+  echo "备份版本：v${target_version:-未知}"
+  prompt_yes_no CONFIRM_SERVER_TOOL_ROLLBACK "确认回滚到最近一次升级前状态" "n"
+  [[ "$CONFIRM_SERVER_TOOL_ROLLBACK" == "y" ]] || return 0
+
+  safety_root="$SCBL_ROOT/backups/server-tool-rollback-safety/$(date +%Y%m%d_%H%M%S)"
+  mkdir -p "$safety_root"
+  [[ -f "$MANAGER_SCRIPT" ]] && cp -a "$MANAGER_SCRIPT" "$safety_root/install_public_server.sh"
+  [[ -f "$SCBL_ROOT/server/scbl_control_plane.py" ]] && cp -a "$SCBL_ROOT/server/scbl_control_plane.py" "$safety_root/scbl_control_plane.py"
+  [[ -f "$SCBL_ROOT/server/check_scbl_binary_release.sh" ]] && cp -a "$SCBL_ROOT/server/check_scbl_binary_release.sh" "$safety_root/check_scbl_binary_release.sh"
+  [[ -f "$SCBL_ROOT/server/5th-echelon_branch.txt" ]] && cp -a "$SCBL_ROOT/server/5th-echelon_branch.txt" "$safety_root/5th-echelon_branch.txt"
+
+  if [[ -f "$backup_root/scbl_control_plane.py" ]] && { [[ ! -f "$SCBL_ROOT/server/scbl_control_plane.py" ]] || ! cmp -s "$backup_root/scbl_control_plane.py" "$SCBL_ROOT/server/scbl_control_plane.py"; }; then
+    control_changed=1
+  fi
+
+  if ! {
+    install -m 0755 "$backup_root/install_public_server.sh" "$MANAGER_SCRIPT"
+    [[ ! -f "$backup_root/scbl_control_plane.py" ]] || install -m 0644 "$backup_root/scbl_control_plane.py" "$SCBL_ROOT/server/scbl_control_plane.py"
+    [[ ! -f "$backup_root/check_scbl_binary_release.sh" ]] || install -m 0755 "$backup_root/check_scbl_binary_release.sh" "$SCBL_ROOT/server/check_scbl_binary_release.sh"
+    [[ ! -f "$backup_root/5th-echelon_branch.txt" ]] || install -m 0644 "$backup_root/5th-echelon_branch.txt" "$SCBL_ROOT/server/5th-echelon_branch.txt"
+    if [[ "$control_changed" == "1" ]]; then
+      systemctl restart scbl-control-plane.service
+      sleep 2
+      systemctl is-active --quiet scbl-control-plane.service
+    fi
+  }; then
+    echo "回滚后健康检查失败，正在恢复回滚前状态..."
+    [[ ! -f "$safety_root/install_public_server.sh" ]] || install -m 0755 "$safety_root/install_public_server.sh" "$MANAGER_SCRIPT"
+    [[ ! -f "$safety_root/scbl_control_plane.py" ]] || install -m 0644 "$safety_root/scbl_control_plane.py" "$SCBL_ROOT/server/scbl_control_plane.py"
+    [[ ! -f "$safety_root/check_scbl_binary_release.sh" ]] || install -m 0755 "$safety_root/check_scbl_binary_release.sh" "$SCBL_ROOT/server/check_scbl_binary_release.sh"
+    [[ ! -f "$safety_root/5th-echelon_branch.txt" ]] || install -m 0644 "$safety_root/5th-echelon_branch.txt" "$SCBL_ROOT/server/5th-echelon_branch.txt"
+    systemctl restart scbl-control-plane.service 2>/dev/null || true
+    return 1
+  fi
+
+  python3 - "$SCBL_ROOT/server-tool-version.json" "${target_version:-unknown}" "$backup_root" <<'PYEOF_SERVER_TOOL_ROLLBACK_STATE'
+import json, sys
+from datetime import datetime, timezone
+path, version, backup = sys.argv[1:4]
+with open(path, 'w', encoding='utf-8') as handle:
+    json.dump({
+        'version': version,
+        'installedAt': datetime.now(timezone.utc).isoformat(),
+        'source': 'local-rollback',
+        'backupPath': backup,
+    }, handle, ensure_ascii=False, indent=2)
+PYEOF_SERVER_TOOL_ROLLBACK_STATE
+  echo "服务端工具已回滚到最近一次升级前状态。"
+  echo "回滚前安全备份：$safety_root"
+  echo "请重新执行 SCBL 进入已回滚的管理脚本。"
+}
+
 server_tool_update_menu() {
   while true; do
     cat <<SERVERTOOLMENU
@@ -2901,6 +3029,7 @@ SCBL 服务端工具在线升级：
   1. 检查并升级到 GitHub 稳定版
   2. 查看本地升级状态
   3. 查看升级备份
+  4. 回滚到最近一次升级前版本
   0. 返回
 SERVERTOOLMENU
     read -e -r -p "请选择: " c || true
@@ -2908,6 +3037,7 @@ SERVERTOOLMENU
       1) update_server_tool_online; pause ;;
       2) cat "$SCBL_ROOT/server-tool-version.json" 2>/dev/null || echo "尚无在线升级记录。"; pause ;;
       3) ls -lah "$SCBL_ROOT/backups/server-tool/" 2>/dev/null || echo "暂无服务端工具升级备份。"; pause ;;
+      4) rollback_server_tool_latest; pause ;;
       0) return 0 ;;
       *) echo "无效选择。" ;;
     esac
@@ -3149,9 +3279,6 @@ manifest = {
     'release_notes': legacy_release_notes,
     'updateAnnouncement': update_announcement or {'enabled': False},
 }
-previous_manifest_path = manifest_path.with_name('client_update_manifest.previous.json')
-if manifest_path.exists():
-    shutil.copy2(manifest_path, previous_manifest_path)
 previous_manifest_path = manifest_path.with_name('client_update_manifest.previous.json')
 if manifest_path.exists():
     shutil.copy2(manifest_path, previous_manifest_path)

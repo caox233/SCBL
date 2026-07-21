@@ -29,6 +29,7 @@ need() {
 need curl
 need tar
 need sha256sum
+need python3
 
 case "$(uname -m)" in
   x86_64|amd64) ;;
@@ -49,10 +50,38 @@ if [[ ! "$expected" =~ ^[0-9a-f]{64}$ || "$actual" != "$expected" ]]; then
 fi
 
 mkdir -p "${TMP}/extract"
-tar -xzf "${TMP}/${PACKAGE}" -C "${TMP}/extract"
-installer="$(find "${TMP}/extract" -type f -name install_public_server.sh -print -quit)"
-[[ -n "$installer" ]] || { echo "部署包中没有 install_public_server.sh。" >&2; exit 1; }
+python3 - "${TMP}/${PACKAGE}" "${TMP}/extract" <<'PYEOF_SAFE_BOOTSTRAP_EXTRACT'
+import sys, tarfile
+from pathlib import Path, PurePosixPath
+archive_path, target = sys.argv[1:3]
+target_root = Path(target).resolve()
+with tarfile.open(archive_path, 'r:gz') as archive:
+    members = archive.getmembers()
+    for member in members:
+        member_path = PurePosixPath(member.name)
+        if member_path.is_absolute() or '..' in member_path.parts:
+            raise SystemExit(f'unsafe tar member path: {member.name}')
+        if not (member.isfile() or member.isdir()):
+            raise SystemExit(f'unsafe tar member type: {member.name}')
+        destination = (target_root / Path(*member_path.parts)).resolve()
+        if destination != target_root and target_root not in destination.parents:
+            raise SystemExit(f'tar member escapes extraction root: {member.name}')
+    archive.extractall(target_root, members=members)
+PYEOF_SAFE_BOOTSTRAP_EXTRACT
+installer="$(find "${TMP}/extract" -mindepth 2 -maxdepth 2 -type f -name install_public_server.sh -print -quit)"
+[[ -n "$installer" ]] || { echo "部署包中没有预期位置的 install_public_server.sh。" >&2; exit 1; }
 bash -n "$installer"
+python3 - "$installer" <<'PYEOF_VALIDATE_BOOTSTRAP_MANAGER'
+from pathlib import Path
+import re, sys
+path = Path(sys.argv[1])
+text = path.read_text(encoding='utf-8')
+blocks = re.findall(r"<<'?(PYEOF_[A-Za-z0-9_]+)'?\n(.*?)\n\1", text, re.S)
+if not blocks:
+    raise SystemExit('manager script has no embedded Python heredocs')
+for marker, block in blocks:
+    compile(block, f'{path}:{marker}', 'exec')
+PYEOF_VALIDATE_BOOTSTRAP_MANAGER
 chmod 0755 "$installer"
 cd "$(dirname "$installer")"
 

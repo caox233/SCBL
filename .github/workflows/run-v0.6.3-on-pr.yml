@@ -1,0 +1,39 @@
+name: Run SCBL v0.6.3 migration on PR
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - '.github/workflows/run-v0.6.3-on-pr.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  migrate:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: scbl-v0.6.3-component-release
+          fetch-depth: 0
+      - name: Execute reviewed migration plan
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+          text = Path('.github/workflows/apply-v0.6.3-component-release.yml').read_text(encoding='utf-8')
+          marker = '        run: |\n'
+          if marker not in text:
+              raise SystemExit('migration run block not found')
+          block = text.split(marker, 1)[1]
+          lines = []
+          for line in block.splitlines():
+              if line.startswith('          '):
+                  line = line[10:]
+              lines.append(line)
+          Path('/tmp/apply-v0.6.3.sh').write_text('\n'.join(lines) + '\n', encoding='utf-8')
+          PY
+          bash -n /tmp/apply-v0.6.3.sh
+          bash /tmp/apply-v0.6.3.sh

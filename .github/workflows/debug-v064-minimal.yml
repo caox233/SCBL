@@ -1,4 +1,4 @@
-name: Debug v0.6.4 finalizer minimal
+name: Apply v0.6.4 finalizer to validation branch
 
 on:
   pull_request:
@@ -7,19 +7,21 @@ on:
       - '.github/SERVER_TOOL_V064_RETRY'
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
-  debug:
+  apply:
     if: github.head_ref == 'server-tool-v064-retry'
     runs-on: ubuntu-24.04
     steps:
-      - name: Run finalizer and print only its result
+      - uses: actions/checkout@v4
+        with:
+          ref: server-tool-v064-retry
+          fetch-depth: 0
+      - name: Apply finalizer and commit generated sources
         shell: bash
         run: |
-          set -u
-          git clone -q --branch server-tool-v064-retry --single-branch https://github.com/${{ github.repository }} work
-          cd work
+          set -euo pipefail
           python3 - <<'PY'
           from pathlib import Path
           workflow = Path('.github/workflows/finalize-server-tool-v0.6.4.yml').read_text(encoding='utf-8')
@@ -30,3 +32,10 @@ jobs:
           Path('/tmp/finalizer.py').write_text(source, encoding='utf-8')
           PY
           python3 /tmp/finalizer.py
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add VERSION_SERVER_TOOL COMPONENT_VERSIONS.json CHANGELOG.md \
+            scripts/install-server.sh server/install_public_server.sh server/scbl_control_plane.py \
+            docs/releases/SERVER_TOOL_v0.6.4.md
+          git commit -m 'SCBL Server Tool v0.6.4: rollback and upgrade hardening'
+          git push origin HEAD:server-tool-v064-retry

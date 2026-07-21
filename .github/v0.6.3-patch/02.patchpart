@@ -1,0 +1,98 @@
++  workflow_dispatch:
++
++permissions:
++  contents: read
++
++jobs:
++  linux-validation:
++    runs-on: ubuntu-24.04
++    steps:
++      - uses: actions/checkout@v4
++
++      - name: Set up Go
++        uses: actions/setup-go@v5
++        with:
++          go-version: '1.23.2'
++          cache: true
++          cache-dependency-path: client/scbl-process-router/go.sum
++
++      - name: Validate independent component versions and text files
++        shell: bash
++        run: |
++          set -euo pipefail
++          client_version="$(tr -d '\r\n ' < VERSION_CLIENT)"
++          server_version="$(tr -d '\r\n ' < VERSION_SERVER_TOOL)"
++          compatibility_version="$(tr -d '\r\n ' < VERSION)"
++          [[ "$client_version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]
++          [[ "$server_version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]
++          [[ "$compatibility_version" == "$client_version" ]]
++          grep -Fq "<ScblVersion>${client_version}</ScblVersion>" client/SCBL.Version.props
++          grep -Fq "routerVersion         = \"${client_version}\"" client/scbl-process-router/main.go
++          grep -Fq "SERVER_TOOL_VERSION=\"${server_version}\"" server/install_public_server.sh
++          grep -Fq "SCBLControlPlane/${server_version}" server/scbl_control_plane.py
++          python3 - "$client_version" "$server_version" <<'PY'
++          import json, sys
++          client_version, server_version = sys.argv[1:3]
++          with open('COMPONENT_VERSIONS.json', encoding='utf-8') as handle:
++              data = json.load(handle)
++          assert data['clientVersion'] == client_version
++          assert data['serverToolVersion'] == server_version
++          assert data['controlApiVersion'] == 1
++          assert data['dedicatedServer']['repository'] == 'caox233/5th-echelon'
++          assert data['dedicatedServer']['releaseTag'] == 'scbl-public-stable-latest'
++          PY
++          ! grep -RIl $'\r' server .github docs scripts --include='*.sh' --include='*.py' --include='*.yml' --include='*.yaml'
++
++      - name: Validate external Hooks ownership and embedded files
++        shell: bash
++        run: |
++          set -euo pipefail
++          test ! -e client/hooks-source
++          test ! -f client/ScblPublicLauncher/EmbeddedFiles/uplay_r1_loader.dll
++          manifest=client/ScblPublicLauncher/EmbeddedFiles/SCBL_EMBEDDED_SHA256.txt
++          test -f "$manifest"
++          grep -Eq '^[0-9a-fA-F]{64}[[:space:]]+\*?uplay_r1_loader\.dll$' "$manifest"
++          grep -Ev 'uplay_r1_loader\.dll$' "$manifest" | (cd client/ScblPublicLauncher/EmbeddedFiles && sha256sum -c -)
++
++      - name: Validate shell and embedded Python
++        shell: bash
++        run: |
++          set -euo pipefail
++          bash -n server/install_public_server.sh
++          bash -n scripts/install-server.sh
++          python3 - <<'PY'
++          from pathlib import Path
++          import re
++          for source_path in (Path('server/install_public_server.sh'), Path('scripts/install-server.sh')):
++              text = source_path.read_text(encoding='utf-8')
++              blocks = re.findall(r"<<'?(PYEOF_[A-Za-z0-9_]+)'?\n(.*?)\n\1", text, re.S)
++              if not blocks:
++                  raise SystemExit(f'{source_path}: no embedded Python heredocs found')
++              for marker, source in blocks:
++                  compile(source, f'{source_path}:{marker}', 'exec')
++              print(f'{source_path}: validated {len(blocks)} embedded Python heredocs')
++          PY
++          python3 -m py_compile server/scbl_control_plane.py server/test_control_plane.py
++          python3 server/test_control_plane.py
++
++      - name: Validate Go Route Guard
++        working-directory: client/scbl-process-router
++        shell: bash
++        run: |
++          set -euo pipefail
++          go mod download
++          test -z "$(gofmt -l .)"
++          GOOS=windows GOARCH=amd64 go vet .
++          GOOS=windows GOARCH=amd64 go test .
++          GOOS=windows GOARCH=amd64 go build -trimpath -o /tmp/scbl-process-router.exe .
++          test -s /tmp/scbl-process-router.exe
+diff -ruN '--exclude=__pycache__' '--exclude=*.pyc' scbl063orig/CHANGELOG.md scbl063full/CHANGELOG.md
+--- scbl063orig/CHANGELOG.md	2026-07-21 09:33:54.000000000 +0000
++++ scbl063full/CHANGELOG.md	2026-07-21 09:41:46.575838749 +0000
+@@ -4,9 +4,10 @@
+ 
+ - Split Windows client and Linux server-tool versions and release workflows.
+ - Added GitHub client Release import through the existing package watcher.
+-- Added verified server-tool online self-upgrade with backup and rollback.
+-- Retained the newest two locally published client packages.
+-- Changed Route Guard TCP/UDP fallback owner resolution to precomputed O(1) indexes.

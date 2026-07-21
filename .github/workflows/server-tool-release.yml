@@ -152,3 +152,5 @@ jobs:
               --notes-file "$notes" \
               --latest=false
           fi
+
+# Trigger the first independent server-tool release after the workflow split.

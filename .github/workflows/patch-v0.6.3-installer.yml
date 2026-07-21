@@ -20,15 +20,20 @@ jobs:
         with:
           name: scbl-v0.6.3-source-export
           path: |
-            server/install_public_server.sh
-            server/scbl_control_plane.py
+            CHANGELOG.md
+            COMPONENT_VERSIONS.json
+            README.md
+            VERSION
+            VERSION_CLIENT
+            VERSION_SERVER_TOOL
+            client/SCBL.Version.props
             client/scbl-process-router/main.go
-            .github/workflows/client-release.yml
-            .github/workflows/server-tool-release.yml
             docs/RELEASE_ARCHITECTURE.md
             docs/releases/CLIENT_v0.6.3.md
             docs/releases/SERVER_TOOL_v0.6.3.md
-            COMPONENT_VERSIONS.json
-            VERSION_CLIENT
-            VERSION_SERVER_TOOL
+            scripts/install-server.sh
+            server/install_public_server.sh
+            server/scbl_control_plane.py
+            .github/workflows/client-release.yml
+            .github/workflows/server-tool-release.yml
           if-no-files-found: error

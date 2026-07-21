@@ -1,0 +1,154 @@
+name: Publish SCBL server tool
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - VERSION_SERVER_TOOL
+      - server/**
+      - scripts/install-server.sh
+      - .github/workflows/server-tool-release.yml
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Server tool version; leave empty to use VERSION_SERVER_TOOL
+        required: false
+        type: string
+
+permissions:
+  contents: write
+
+concurrency:
+  group: scbl-server-tool-release
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+      tag: ${{ steps.version.outputs.tag }}
+    steps:
+      - uses: actions/checkout@v4
+      - id: version
+        shell: bash
+        run: |
+          set -euo pipefail
+          source_version="$(tr -d '\r\n ' < VERSION_SERVER_TOOL)"
+          requested='${{ inputs.version }}'
+          requested="${requested#v}"
+          [[ -n "$requested" ]] || requested="$source_version"
+          [[ "$requested" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]
+          grep -Fq "SERVER_TOOL_VERSION=\"$requested\"" server/install_public_server.sh
+          echo "version=$requested" >> "$GITHUB_OUTPUT"
+          echo "tag=server-tool-v$requested" >> "$GITHUB_OUTPUT"
+      - name: Validate and package server tool
+        shell: bash
+        run: |
+          set -euo pipefail
+          version='${{ steps.version.outputs.version }}'
+          bash -n server/install_public_server.sh
+          bash -n scripts/install-server.sh
+          python3 -m py_compile server/scbl_control_plane.py server/test_control_plane.py
+          python3 server/test_control_plane.py
+
+          root="SCBL-Server-Tool-v${version}-linux-x86_64"
+          mkdir -p "stage/$root/THIRD_PARTY_LICENSES" dist
+          cp server/install_public_server.sh \
+             server/scbl_control_plane.py \
+             server/check_scbl_binary_release.sh \
+             server/5th-echelon_branch.txt \
+             scripts/install-server.sh \
+             VERSION_SERVER_TOOL VERSION_CLIENT COMPONENT_VERSIONS.json \
+             README.md CHANGELOG.md THIRD_PARTY_NOTICES.md \
+             "stage/$root/"
+          cp THIRD_PARTY_LICENSES/EasyTier-LGPL-3.0.txt "stage/$root/THIRD_PARTY_LICENSES/"
+          chmod 0755 "stage/$root/install_public_server.sh" \
+                     "stage/$root/install-server.sh" \
+                     "stage/$root/check_scbl_binary_release.sh"
+
+          package="${root}.tar.gz"
+          tar -C stage -czf "dist/$package" "$root"
+          cp "dist/$package" dist/SCBL-Server-Tool-latest-linux-x86_64.tar.gz
+          cp scripts/install-server.sh dist/install-server.sh
+
+          for file in dist/*.tar.gz; do
+            hash="$(sha256sum "$file" | awk '{print $1}')"
+            printf '%s  %s\n' "$hash" "$(basename "$file")" > "${file}.sha256"
+          done
+          package_sha="$(sha256sum "dist/$package" | awk '{print $1}')"
+          cat > dist/server-tool-release-manifest.json <<JSON
+          {
+            "schemaVersion": 2,
+            "component": "server-tool",
+            "product": "SCBL",
+            "channel": "stable",
+            "version": "${version}",
+            "file": "${package}",
+            "sha256": "${package_sha}",
+            "latestAlias": "SCBL-Server-Tool-latest-linux-x86_64.tar.gz",
+            "controlApiVersion": 1,
+            "minimumClientVersion": "0.6.0",
+            "preserves": [
+              "scbl.env",
+              "server/5th-echelon.db",
+              "client-updates",
+              "incoming",
+              "backups",
+              "DDNS-GO configuration"
+            ]
+          }
+          JSON
+          (cd dist && sha256sum $(find . -maxdepth 1 -type f ! -name SHA256SUMS.txt -printf '%f\n' | sort) > SHA256SUMS.txt)
+      - uses: actions/upload-artifact@v4
+        with:
+          name: scbl-server-tool-release
+          path: dist/*
+          if-no-files-found: error
+
+  publish:
+    needs: build
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/download-artifact@v4
+        with:
+          name: scbl-server-tool-release
+          path: dist
+      - name: Publish immutable and rolling server-tool releases
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          version='${{ needs.build.outputs.version }}'
+          tag='${{ needs.build.outputs.tag }}'
+          notes="docs/releases/SERVER_TOOL_v${version}.md"
+          test -f "$notes"
+
+          if gh release view "$tag" >/dev/null 2>&1; then
+            gh release upload "$tag" dist/* --clobber
+            gh release edit "$tag" --title "SCBL Server Tool v${version}" --notes-file "$notes" --latest=false
+          else
+            gh release create "$tag" dist/* --title "SCBL Server Tool v${version}" --notes-file "$notes" --latest=false
+          fi
+
+          git tag -f server-tool-stable-latest "$GITHUB_SHA"
+          git push origin refs/tags/server-tool-stable-latest --force
+          if gh release view server-tool-stable-latest >/dev/null 2>&1; then
+            while read -r asset; do
+              [[ -z "$asset" ]] || gh release delete-asset server-tool-stable-latest "$asset" -y
+            done < <(gh release view server-tool-stable-latest --json assets --jq '.assets[].name')
+            gh release edit server-tool-stable-latest \
+              --title "SCBL Server Tool Stable v${version}" \
+              --notes-file "$notes" \
+              --latest=false
+            gh release upload server-tool-stable-latest dist/*
+          else
+            gh release create server-tool-stable-latest dist/* \
+              --title "SCBL Server Tool Stable v${version}" \
+              --notes-file "$notes" \
+              --latest=false
+          fi

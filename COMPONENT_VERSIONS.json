@@ -1,0 +1,11 @@
+{
+  "schemaVersion": 1,
+  "clientVersion": "0.6.3",
+  "serverToolVersion": "0.6.3",
+  "controlApiVersion": 1,
+  "dedicatedServer": {
+    "repository": "caox233/5th-echelon",
+    "releaseTag": "scbl-public-stable-latest",
+    "branch": "scbl-public-stable"
+  }
+}

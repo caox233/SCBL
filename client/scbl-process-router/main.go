@@ -26,7 +26,7 @@ import (
 )
 
 const (
-	routerVersion         = "0.6.2"
+	routerVersion         = "0.6.3"
 	windivertLayerNetwork = 0
 	divertBufSize         = 0xFFFF
 	protoTCP              = 6
@@ -1378,24 +1378,28 @@ type udpKey struct {
 }
 
 type OwnerResolver struct {
-	session        *launcherSessionGuard
-	mu             sync.RWMutex
-	refreshMu      sync.Mutex
-	targetPIDs     map[uint32]bool
-	tcpOwners      map[ownerKey]uint32
-	udpOwners      map[udpKey][]uint32
-	refreshRequest chan struct{}
-	stop           chan struct{}
+	session         *launcherSessionGuard
+	mu              sync.RWMutex
+	refreshMu       sync.Mutex
+	targetPIDs      map[uint32]bool
+	tcpOwners       map[ownerKey]uint32
+	tcpOwnersByPort map[uint16][]uint32
+	udpOwners       map[udpKey][]uint32
+	udpOwnersByPort map[uint16][]uint32
+	refreshRequest  chan struct{}
+	stop            chan struct{}
 }
 
 func newOwnerResolver(session *launcherSessionGuard) *OwnerResolver {
 	return &OwnerResolver{
-		session:        session,
-		targetPIDs:     map[uint32]bool{},
-		tcpOwners:      map[ownerKey]uint32{},
-		udpOwners:      map[udpKey][]uint32{},
-		refreshRequest: make(chan struct{}, 1),
-		stop:           make(chan struct{}),
+		session:         session,
+		targetPIDs:      map[uint32]bool{},
+		tcpOwners:       map[ownerKey]uint32{},
+		tcpOwnersByPort: map[uint16][]uint32{},
+		udpOwners:       map[udpKey][]uint32{},
+		udpOwnersByPort: map[uint16][]uint32{},
+		refreshRequest:  make(chan struct{}, 1),
+		stop:            make(chan struct{}),
 	}
 }
 
@@ -1468,11 +1472,11 @@ func (r *OwnerResolver) Owner(m *PacketMeta) (uint32, bool) {
 		if pid, ok := r.tcpOwners[k]; ok {
 			return pid, true
 		}
-		// Some stacks expose 0.0.0.0 or do not populate remote tuple immediately; fall back to local endpoint.
-		for key, pid := range r.tcpOwners {
-			if key.LocalPort == m.SrcPort && key.Proto == m.Proto {
-				return pid, true
-			}
+		// Some stacks expose 0.0.0.0 or do not populate the remote tuple immediately.
+		// The fallback index is built during the background owner-table refresh so
+		// the packet path remains O(1).
+		if pids, ok := r.tcpOwnersByPort[m.SrcPort]; ok {
+			return r.preferredPIDLocked(pids)
 		}
 	}
 	if m.Proto == protoUDP {
@@ -1495,10 +1499,8 @@ func (r *OwnerResolver) OwnerInbound(m *PacketMeta) (uint32, bool) {
 		if pid, ok := r.tcpOwners[k]; ok {
 			return pid, true
 		}
-		for key, pid := range r.tcpOwners {
-			if key.LocalPort == m.DstPort && key.Proto == m.Proto {
-				return pid, true
-			}
+		if pids, ok := r.tcpOwnersByPort[m.DstPort]; ok {
+			return r.preferredPIDLocked(pids)
 		}
 	}
 	if m.Proto == protoUDP {
@@ -1532,20 +1534,42 @@ func (r *OwnerResolver) preferredPIDLocked(pids []uint32) (uint32, bool) {
 	return 0, false
 }
 
-func (r *OwnerResolver) ownerByUDPPortLocked(port uint16) (uint32, bool) {
-	var fallback uint32
-	for key, pids := range r.udpOwners {
-		if key.LocalPort != port {
-			continue
-		}
-		if pid, ok := r.preferredTargetPIDLocked(pids); ok {
-			return pid, true
-		}
-		if fallback == 0 && len(pids) > 0 {
-			fallback = pids[0]
+func appendUniquePID(items []uint32, pid uint32) []uint32 {
+	if pid == 0 {
+		return items
+	}
+	for _, existing := range items {
+		if existing == pid {
+			return items
 		}
 	}
-	return fallback, fallback != 0
+	return append(items, pid)
+}
+
+func buildTCPPortIndex(owners map[ownerKey]uint32) map[uint16][]uint32 {
+	index := make(map[uint16][]uint32)
+	for key, pid := range owners {
+		index[key.LocalPort] = appendUniquePID(index[key.LocalPort], pid)
+	}
+	return index
+}
+
+func buildUDPPortIndex(owners map[udpKey][]uint32) map[uint16][]uint32 {
+	index := make(map[uint16][]uint32)
+	for key, pids := range owners {
+		for _, pid := range pids {
+			index[key.LocalPort] = appendUniquePID(index[key.LocalPort], pid)
+		}
+	}
+	return index
+}
+
+func (r *OwnerResolver) ownerByUDPPortLocked(port uint16) (uint32, bool) {
+	pids, ok := r.udpOwnersByPort[port]
+	if !ok {
+		return 0, false
+	}
+	return r.preferredPIDLocked(pids)
 }
 
 func (r *OwnerResolver) refresh() {
@@ -1563,6 +1587,7 @@ func (r *OwnerResolver) refreshUnlocked() {
 }
 
 func (r *OwnerResolver) refreshOwnersUnlocked() {
+	started := time.Now()
 	tcpOwners, tcpErr := getTCPOwners()
 	udpOwners, udpErr := getUDPOwners()
 	if tcpErr != nil {
@@ -1571,14 +1596,30 @@ func (r *OwnerResolver) refreshOwnersUnlocked() {
 	if udpErr != nil {
 		log.Printf("udp owner table warning: %v", udpErr)
 	}
+
+	var tcpByPort map[uint16][]uint32
+	var udpByPort map[uint16][]uint32
+	if tcpErr == nil {
+		tcpByPort = buildTCPPortIndex(tcpOwners)
+	}
+	if udpErr == nil {
+		udpByPort = buildUDPPortIndex(udpOwners)
+	}
+
 	r.mu.Lock()
 	if tcpErr == nil {
 		r.tcpOwners = tcpOwners
+		r.tcpOwnersByPort = tcpByPort
 	}
 	if udpErr == nil {
 		r.udpOwners = udpOwners
+		r.udpOwnersByPort = udpByPort
 	}
 	r.mu.Unlock()
+
+	if elapsed := time.Since(started); elapsed >= 100*time.Millisecond {
+		log.Printf("[OWNER-REFRESH] duration=%s tcp=%d udp=%d", elapsed.Round(time.Millisecond), len(tcpOwners), len(udpOwners))
+	}
 }
 
 func findTargetPIDs(targetNames []string) map[uint32]bool {

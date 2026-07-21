@@ -1,5 +1,14 @@
 # 更新记录
 
+## Client 0.6.3 / Server Tool 0.6.3
+
+- Split Windows client and Linux server-tool versions and release workflows.
+- Added GitHub client Release import through the existing package watcher.
+- Added verified server-tool online self-upgrade with backup and rollback.
+- Retained the newest two locally published client packages.
+- Changed Route Guard TCP/UDP fallback owner resolution to precomputed O(1) indexes.
+
+
 ## v0.6.1
 
 - 修复 Linux 服务端菜单选择“1. 首次安装 / 重新安装”后短时间无输出的问题；

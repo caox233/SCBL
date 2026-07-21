@@ -141,3 +141,5 @@ jobs:
               --notes-file "$notes" \
               --latest=false
           fi
+
+# Trigger the first independent client release after the workflow split.

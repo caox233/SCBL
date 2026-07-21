@@ -17,7 +17,7 @@ jobs:
           ref: scbl-v0.6.3-component-release
           fetch-depth: 1
           show-progress: false
-      - name: Execute reviewed migration plan
+      - name: Prepare reviewed migration plan
         shell: bash
         run: |
           set -euo pipefail
@@ -30,4 +30,20 @@ jobs:
           Path('/tmp/apply-v0.6.3.sh').write_text('\n'.join(lines) + '\n', encoding='utf-8')
           PY
           bash -n /tmp/apply-v0.6.3.sh
-          bash /tmp/apply-v0.6.3.sh 2>&1 | tail -n 80
+      - id: migration
+        name: Execute migration
+        continue-on-error: true
+        shell: bash
+        run: bash /tmp/apply-v0.6.3.sh > migration.log 2>&1
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: v0.6.3-migration-log
+          path: migration.log
+          if-no-files-found: error
+      - name: Report migration result
+        if: always()
+        shell: bash
+        run: |
+          tail -n 120 migration.log || true
+          test '${{ steps.migration.outcome }}' = 'success'

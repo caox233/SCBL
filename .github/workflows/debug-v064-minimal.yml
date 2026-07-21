@@ -1,0 +1,32 @@
+name: Debug v0.6.4 finalizer minimal
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - '.github/SERVER_TOOL_V064_RETRY'
+
+permissions:
+  contents: read
+
+jobs:
+  debug:
+    if: github.head_ref == 'server-tool-v064-retry'
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Run finalizer and print only its result
+        shell: bash
+        run: |
+          set -u
+          git clone -q --branch server-tool-v064-retry --single-branch https://github.com/${{ github.repository }} work
+          cd work
+          python3 - <<'PY'
+          from pathlib import Path
+          workflow = Path('.github/workflows/finalize-server-tool-v0.6.4.yml').read_text(encoding='utf-8')
+          lines = workflow.splitlines()
+          start = next(i for i, line in enumerate(lines) if line.strip() == "python3 - <<'PY'")
+          end = next(i for i in range(start + 1, len(lines)) if lines[i].strip() == 'PY')
+          source = '\n'.join(line[10:] if line.startswith('          ') else line for line in lines[start + 1:end]) + '\n'
+          Path('/tmp/finalizer.py').write_text(source, encoding='utf-8')
+          PY
+          python3 /tmp/finalizer.py

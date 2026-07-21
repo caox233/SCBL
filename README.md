@@ -2,6 +2,7 @@
 
 SCBL 是面向《细胞分裂：黑名单》社区联机环境的自建客户端、服务端部署和客户端更新管理项目。每位部署者运行自己的 Linux 服务端、EasyTier 私有网络、用户数据库和客户端更新源。
 
+> 首个公开测试版本：**v0.6.2**
 
 ## 快速开始
 
@@ -38,6 +39,7 @@ curl -fsSL https://github.com/caox233/SCBL/releases/latest/download/install-serv
 
 ```text
 client/      Windows 启动器、Updater、Hooks 源码、EasyTier 准备脚本和 Route Guard
+server/      Linux 服务端管理器和控制平面
 scripts/     GitHub Release 一键部署入口
 docs/        GitHub Pages 完整网页说明
 .github/     验证、Windows 构建、Release 和 Pages 工作流

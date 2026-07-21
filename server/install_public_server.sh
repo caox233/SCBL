@@ -2406,7 +2406,8 @@ def write_full_zip(content: Path, destination: Path):
 
 def version_key(value: str):
     try:
-        return tuple(int(part) for part in value.strip().lstrip('vV').split('.'))
+        parts = tuple(int(part) for part in value.strip().lstrip('vV').split('.'))
+        return parts if len(parts) == 3 else (0, 0, 0)
     except Exception:
         return (0, 0, 0)
 
@@ -2418,42 +2419,40 @@ def full_package_version(name: str):
     return '0.0.0'
 
 def cleanup_old_releases(current_version: str, current_full_name: str):
-    # Keep the current and immediately previous client release so the
-    # administrator can roll back without uploading the old package again.
     files_root = updates_root / 'files'
     if files_root.exists():
         entries = list(files_root.iterdir())
-        ordered = sorted(entries, key=lambda p: version_key(p.name), reverse=True)
+        ordered = sorted(entries, key=lambda item: version_key(item.name), reverse=True)
         keep = {current_version}
         for child in ordered:
-  if child.name != current_version:
-      keep.add(child.name)
-      break
+            if child.name != current_version and version_key(child.name) != (0, 0, 0):
+                keep.add(child.name)
+                break
         for child in entries:
-  if child.name in keep:
-      continue
-  if child.is_dir():
-      shutil.rmtree(child)
-  else:
-      child.unlink()
-  print(f'removed old client file release: {child}')
+            if child.name in keep:
+                continue
+            if child.is_dir():
+                shutil.rmtree(child)
+            else:
+                child.unlink()
+            print(f'removed old client file release: {child}')
 
     if full_dir.exists():
         entries = list(full_dir.iterdir())
-        ordered = sorted(entries, key=lambda p: version_key(full_package_version(p.name)), reverse=True)
+        ordered = sorted(entries, key=lambda item: version_key(full_package_version(item.name)), reverse=True)
         keep = {current_full_name}
         for child in ordered:
-  if child.name != current_full_name:
-      keep.add(child.name)
-      break
+            if child.name != current_full_name and version_key(full_package_version(child.name)) != (0, 0, 0):
+                keep.add(child.name)
+                break
         for child in entries:
-  if child.name in keep:
-      continue
-  if child.is_dir():
-      shutil.rmtree(child)
-  else:
-      child.unlink()
-  print(f'removed old client full package: {child}')
+            if child.name in keep:
+                continue
+            if child.is_dir():
+                shutil.rmtree(child)
+            else:
+                child.unlink()
+            print(f'removed old client full package: {child}')
 
 previous = load_previous_manifest()
 previous_files = {
@@ -2512,6 +2511,9 @@ manifest = {
     'release_notes': legacy_release_notes,
     'updateAnnouncement': update_announcement or {'enabled': False},
 }
+previous_manifest_path = manifest_path.with_name('client_update_manifest.previous.json')
+if manifest_path.exists():
+    shutil.copy2(manifest_path, previous_manifest_path)
 manifest_tmp = manifest_path.with_suffix(manifest_path.suffix + '.tmp')
 manifest_tmp.write_text(json.dumps(manifest, ensure_ascii=False, indent=2), encoding='utf-8')
 manifest_tmp.replace(manifest_path)
@@ -2805,14 +2807,21 @@ update_server_tool_online() {
   mkdir -p "$extract_root"
   python3 - "$tmpdir/$package" "$extract_root" <<'PYEOF_SAFE_SERVER_EXTRACT'
 import sys, tarfile
-from pathlib import PurePosixPath
+from pathlib import Path, PurePosixPath
 archive_path, target = sys.argv[1:3]
+target_root = Path(target).resolve()
 with tarfile.open(archive_path, 'r:gz') as archive:
-    for member in archive.getmembers():
-        path = PurePosixPath(member.name)
-        if path.is_absolute() or '..' in path.parts:
-  raise SystemExit(f'unsafe tar member: {member.name}')
-    archive.extractall(target)
+    members = archive.getmembers()
+    for member in members:
+        member_path = PurePosixPath(member.name)
+        if member_path.is_absolute() or '..' in member_path.parts:
+            raise SystemExit(f'unsafe tar member path: {member.name}')
+        if member.issym() or member.islnk() or member.isdev():
+            raise SystemExit(f'unsafe tar member type: {member.name}')
+        destination = (target_root / Path(*member_path.parts)).resolve()
+        if destination != target_root and target_root not in destination.parents:
+            raise SystemExit(f'tar member escapes extraction root: {member.name}')
+    archive.extractall(target_root, members=members, filter='data')
 PYEOF_SAFE_SERVER_EXTRACT
 
   manager_new="$(find "$extract_root" -type f -name install_public_server.sh -print -quit)"
@@ -3037,7 +3046,8 @@ def write_full_zip(content: Path, destination: Path):
 
 def version_key(value: str):
     try:
-        return tuple(int(part) for part in value.strip().lstrip('vV').split('.'))
+        parts = tuple(int(part) for part in value.strip().lstrip('vV').split('.'))
+        return parts if len(parts) == 3 else (0, 0, 0)
     except Exception:
         return (0, 0, 0)
 
@@ -3049,42 +3059,40 @@ def full_package_version(name: str):
     return '0.0.0'
 
 def cleanup_old_releases(current_version: str, current_full_name: str):
-    # Keep the current and immediately previous client release so the
-    # administrator can roll back without uploading the old package again.
     files_root = updates_root / 'files'
     if files_root.exists():
         entries = list(files_root.iterdir())
-        ordered = sorted(entries, key=lambda p: version_key(p.name), reverse=True)
+        ordered = sorted(entries, key=lambda item: version_key(item.name), reverse=True)
         keep = {current_version}
         for child in ordered:
-  if child.name != current_version:
-      keep.add(child.name)
-      break
+            if child.name != current_version and version_key(child.name) != (0, 0, 0):
+                keep.add(child.name)
+                break
         for child in entries:
-  if child.name in keep:
-      continue
-  if child.is_dir():
-      shutil.rmtree(child)
-  else:
-      child.unlink()
-  print(f'removed old client file release: {child}')
+            if child.name in keep:
+                continue
+            if child.is_dir():
+                shutil.rmtree(child)
+            else:
+                child.unlink()
+            print(f'removed old client file release: {child}')
 
     if full_dir.exists():
         entries = list(full_dir.iterdir())
-        ordered = sorted(entries, key=lambda p: version_key(full_package_version(p.name)), reverse=True)
+        ordered = sorted(entries, key=lambda item: version_key(full_package_version(item.name)), reverse=True)
         keep = {current_full_name}
         for child in ordered:
-  if child.name != current_full_name:
-      keep.add(child.name)
-      break
+            if child.name != current_full_name and version_key(full_package_version(child.name)) != (0, 0, 0):
+                keep.add(child.name)
+                break
         for child in entries:
-  if child.name in keep:
-      continue
-  if child.is_dir():
-      shutil.rmtree(child)
-  else:
-      child.unlink()
-  print(f'removed old client full package: {child}')
+            if child.name in keep:
+                continue
+            if child.is_dir():
+                shutil.rmtree(child)
+            else:
+                child.unlink()
+            print(f'removed old client full package: {child}')
 
 prev = previous_files()
 cur = set()
@@ -3138,6 +3146,9 @@ manifest = {
     'release_notes': legacy_release_notes,
     'updateAnnouncement': update_announcement or {'enabled': False},
 }
+previous_manifest_path = manifest_path.with_name('client_update_manifest.previous.json')
+if manifest_path.exists():
+    shutil.copy2(manifest_path, previous_manifest_path)
 manifest_tmp = manifest_path.with_suffix(manifest_path.suffix + '.tmp')
 manifest_tmp.write_text(json.dumps(manifest, ensure_ascii=False, indent=2), encoding='utf-8')
 manifest_tmp.replace(manifest_path)

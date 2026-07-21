@@ -1,5 +1,12 @@
 # 更新记录
 
+## Server Tool v0.6.4
+
+- Added explicit rollback for the retained previous Windows client package.
+- Added manual rollback to the most recent server-tool upgrade backup with a pre-rollback safety copy.
+- Hardened component manifest/file matching and safe bootstrap extraction.
+- Added embedded-Python validation before installing a downloaded manager script.
+
 ## Client 0.6.3 / Server Tool 0.6.3
 
 - Split Windows client and Linux server-tool versions and release workflows.

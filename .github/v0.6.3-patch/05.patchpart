@@ -1,0 +1,118 @@
++                child.unlink()
++            print(f'removed old client full package: {child}')
+ 
+ previous = load_previous_manifest()
+ previous_files = {
+@@ -2512,6 +2517,9 @@
+     'release_notes': legacy_release_notes,
+     'updateAnnouncement': update_announcement or {'enabled': False},
+ }
++previous_manifest_path = manifest_path.with_name('client_update_manifest.previous.json')
++if manifest_path.exists():
++    shutil.copy2(manifest_path, previous_manifest_path)
+ manifest_tmp = manifest_path.with_suffix(manifest_path.suffix + '.tmp')
+ manifest_tmp.write_text(json.dumps(manifest, ensure_ascii=False, indent=2), encoding='utf-8')
+ manifest_tmp.replace(manifest_path)
+@@ -2565,6 +2573,23 @@
+ PYEOF_COMPONENT_MANIFEST
+ }
+ 
++validate_manager_script_file() {
++  local candidate="$1"
++  bash -n "$candidate" || return 1
++  python3 - "$candidate" <<'PYEOF_VALIDATE_MANAGER_SCRIPT'
++from pathlib import Path
++import re, sys
++source_path = Path(sys.argv[1])
++text = source_path.read_text(encoding='utf-8')
++blocks = re.findall(r"<<'?(PYEOF_[A-Za-z0-9_]+)'?\n(.*?)\n\1", text, re.S)
++if not blocks:
++    raise SystemExit('manager script has no embedded Python heredocs')
++for marker, source in blocks:
++    compile(source, f'{source_path}:{marker}', 'exec')
++print(f'validated embedded Python heredocs: {len(blocks)}')
++PYEOF_VALIDATE_MANAGER_SCRIPT
++}
++
+ semver_compare() {
+   python3 - "$1" "$2" <<'PYEOF_SEMVER_COMPARE'
+ import re, sys
+@@ -2597,7 +2622,12 @@
+   local repo="${SCBL_RELEASE_REPOSITORY:-$DEFAULT_SCBL_RELEASE_REPOSITORY}"
+   local tag="${SCBL_CLIENT_RELEASE_TAG:-$DEFAULT_CLIENT_RELEASE_TAG}"
+   local base="https://github.com/${repo}/releases/download/${tag}"
+-  local tmpdir manifest version package expected actual current cmp staged target
++  local tmpdir manifest version package expected actual current cmp staged target component expected_package
++
++  if [[ ! "$repo" =~ ^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$ || ! "$tag" =~ ^[A-Za-z0-9._-]+$ ]]; then
++    echo "客户端 Release 仓库或标签格式不合法。"
++    return 1
++  fi
+ 
+   tmpdir="$(mktemp -d -t scbl-client-release.XXXXXX)"
+   manifest="$tmpdir/client-release-manifest.json"
+@@ -2609,11 +2639,18 @@
+     return 1
+   fi
+ 
+-  version="$(manifest_value "$manifest" version)"
+-  package="$(manifest_value "$manifest" file)"
+-  expected="$(manifest_value "$manifest" sha256 | tr '[:upper:]' '[:lower:]')"
+-  if [[ ! "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ||
+-        ! "$package" =~ ^SCBL-Client-v[0-9]+\.[0-9]+\.[0-9]+-win-x86\.zip$ ||
++  if ! version="$(manifest_value "$manifest" version)" ||
++     ! package="$(manifest_value "$manifest" file)" ||
++     ! expected="$(manifest_value "$manifest" sha256 | tr '[:upper:]' '[:lower:]')" ||
++     ! component="$(manifest_value "$manifest" component)"; then
++    rm -rf "$tmpdir"
++    echo "客户端 Release 清单读取失败。"
++    return 1
++  fi
++  expected_package="SCBL-Client-v${version}-win-x86.zip"
++  if [[ "$component" != "client" ||
++        ! "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ||
++        "$package" != "$expected_package" ||
+         ! "$expected" =~ ^[0-9a-f]{64}$ ]]; then
+     rm -rf "$tmpdir"
+     echo "客户端 Release 清单格式不合法，拒绝下载。"
+@@ -2702,6 +2739,41 @@
+   systemctl start scbl-package-watch.service 2>/dev/null || bash "$MANAGER_SCRIPT" --auto-publish-client "$target"
+ }
+ 
++rollback_client_release() {
++  load_env_if_exists; set_defaults
++  local current selection version package
++  current="$(current_published_client_version)"
++  selection="$(python3 - "$SCBL_ROOT/client-updates/full" "$current" <<'PYEOF_SELECT_CLIENT_ROLLBACK'
++from pathlib import Path
++import re, sys
++root = Path(sys.argv[1])
++current = sys.argv[2].strip().lstrip('vV')
++pattern = re.compile(r'^SCBL-Client-v(\d+\.\d+\.\d+)-win-x86\.zip$')
++items = []
++if root.exists():
++    for path in root.iterdir():
++        match = pattern.fullmatch(path.name)
++        if path.is_file() and match and match.group(1) != current:
++            items.append((tuple(map(int, match.group(1).split('.'))), match.group(1), path))
++if items:
++    _, version, path = sorted(items, reverse=True)[0]
++    print(f'{version}\t{path}')
++PYEOF_SELECT_CLIENT_ROLLBACK
++)"
++  if [[ -z "$selection" ]]; then
++    echo "没有可回滚的上一版客户端全量包。"
++    return 1
++  fi
++  version="${selection%%$'\t'*}"
++  package="${selection#*$'\t'}"
++  echo "当前发布版本：${current:-未知}"
++  echo "可回滚版本：$version"
++  echo "全量包：$package"
++  prompt_yes_no CONFIRM_CLIENT_ROLLBACK "确认回滚客户端更新源到 v$version" "n"
++  [[ "$CONFIRM_CLIENT_ROLLBACK" == "y" ]] || return 0
++  queue_client_package_from_file "$package"
++}
++
+ show_client_update_status() {
+   load_env_if_exists; set_defaults

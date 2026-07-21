@@ -1,0 +1,86 @@
+diff -ruN '--exclude=__pycache__' '--exclude=*.pyc' scbl063orig/.github/workflows/client-release.yml scbl063full/.github/workflows/client-release.yml
+--- scbl063orig/.github/workflows/client-release.yml	2026-07-21 09:33:54.000000000 +0000
++++ scbl063full/.github/workflows/client-release.yml	2026-07-21 09:40:53.004821995 +0000
+@@ -65,8 +65,12 @@
+           Set-ExecutionPolicy -Scope Process Bypass -Force
+           .\client\build_all_windows.ps1
+           .\client\create_client_full_package.ps1 -Version '${{ needs.metadata.outputs.version }}' -OutputDir "$env:GITHUB_WORKSPACE\dist"
+-          $zip = Get-ChildItem .\dist\SCBL-Client-v*-win-x86.zip | Select-Object -First 1
+-          if ($null -eq $zip) { throw 'Client ZIP was not generated.' }
++          $zips = @(Get-ChildItem .\dist\SCBL-Client-v*-win-x86.zip)
++          if ($zips.Count -ne 1) { throw "Expected exactly one client ZIP, found $($zips.Count)." }
++          $zip = $zips[0]
++          if ($zip.Name -ne 'SCBL-Client-v${{ needs.metadata.outputs.version }}-win-x86.zip') {
++            throw "Unexpected client ZIP name: $($zip.Name)"
++          }
+           $hash = (Get-FileHash $zip.FullName -Algorithm SHA256).Hash.ToLowerInvariant()
+           "$hash  $($zip.Name)" | Set-Content -Encoding ascii "$($zip.FullName).sha256"
+           $manifest = [ordered]@{
+@@ -118,11 +122,13 @@
+           (cd dist && sha256sum $(find . -maxdepth 1 -type f ! -name SHA256SUMS.txt -printf '%f\n' | sort) > SHA256SUMS.txt)
+ 
+           if gh release view "$tag" >/dev/null 2>&1; then
+-            gh release upload "$tag" dist/* --clobber
+-            gh release edit "$tag" --title "SCBL Windows Client v${version}" --notes-file "$notes" --latest
+-          else
+-            gh release create "$tag" dist/* --title "SCBL Windows Client v${version}" --notes-file "$notes" --latest
++            echo "Immutable client Release already exists: $tag" >&2
++            exit 1
+           fi
++          gh release create "$tag" dist/* \
++            --title "SCBL Windows Client v${version}" \
++            --notes-file "$notes" \
++            --latest
+ 
+           git tag -f client-stable-latest "$GITHUB_SHA"
+           git push origin refs/tags/client-stable-latest --force
+diff -ruN '--exclude=__pycache__' '--exclude=*.pyc' scbl063orig/.github/workflows/server-tool-release.yml scbl063full/.github/workflows/server-tool-release.yml
+--- scbl063orig/.github/workflows/server-tool-release.yml	2026-07-21 09:33:54.000000000 +0000
++++ scbl063full/.github/workflows/server-tool-release.yml	2026-07-21 09:40:53.005494598 +0000
+@@ -49,6 +49,18 @@
+           version='${{ steps.version.outputs.version }}'
+           bash -n server/install_public_server.sh
+           bash -n scripts/install-server.sh
++          python3 - <<'PY'
++          from pathlib import Path
++          import re
++          for source_path in (Path('server/install_public_server.sh'), Path('scripts/install-server.sh')):
++              text = source_path.read_text(encoding='utf-8')
++              blocks = re.findall(r"<<'?(PYEOF_[A-Za-z0-9_]+)'?\n(.*?)\n\1", text, re.S)
++              if not blocks:
++                  raise SystemExit(f'{source_path}: no embedded Python heredocs found')
++              for marker, source in blocks:
++                  compile(source, f'{source_path}:{marker}', 'exec')
++              print(f'{source_path}: validated {len(blocks)} embedded Python heredocs')
++          PY
+           python3 -m py_compile server/scbl_control_plane.py server/test_control_plane.py
+           python3 server/test_control_plane.py
+ 
+@@ -129,11 +141,13 @@
+           test -f "$notes"
+ 
+           if gh release view "$tag" >/dev/null 2>&1; then
+-            gh release upload "$tag" dist/* --clobber
+-            gh release edit "$tag" --title "SCBL Server Tool v${version}" --notes-file "$notes" --latest=false
+-          else
+-            gh release create "$tag" dist/* --title "SCBL Server Tool v${version}" --notes-file "$notes" --latest=false
++            echo "Immutable server-tool Release already exists: $tag" >&2
++            exit 1
+           fi
++          gh release create "$tag" dist/* \
++            --title "SCBL Server Tool v${version}" \
++            --notes-file "$notes" \
++            --latest=false
+ 
+           git tag -f server-tool-stable-latest "$GITHUB_SHA"
+           git push origin refs/tags/server-tool-stable-latest --force
+diff -ruN '--exclude=__pycache__' '--exclude=*.pyc' scbl063orig/.github/workflows/validate.yml scbl063full/.github/workflows/validate.yml
+--- scbl063orig/.github/workflows/validate.yml	1970-01-01 00:00:00.000000000 +0000
++++ scbl063full/.github/workflows/validate.yml	2026-07-21 09:41:21.337003226 +0000
+@@ -0,0 +1,94 @@
++name: Validate source
++
++on:
++  push:
++    branches: [main]
++  pull_request:

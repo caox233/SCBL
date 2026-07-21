@@ -1,154 +1,34 @@
-name: Patch SCBL v0.6.3 installer
+name: Export SCBL v0.6.3 source
 
 on:
   pull_request:
     branches: [main]
 
 permissions:
-  contents: write
+  contents: read
 
 jobs:
-  patch:
+  export:
     if: github.head_ref == 'agent/v0.6.2-stability'
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: scbl-v0.6.3-component-release
+          ref: agent/v0.6.2-stability
           fetch-depth: 0
-      - id: repair
-        name: Repair embedded Python and validate all heredocs
-        continue-on-error: true
-        shell: bash
-        run: |
-          set -euo pipefail
-          exec > >(tee patch.log) 2>&1
-          python3 - <<'PY'
-          from pathlib import Path
-          import re
-          import textwrap
-
-          path = Path('server/install_public_server.sh')
-          text = path.read_text(encoding='utf-8')
-          pattern = re.compile(
-              r"def version_key\(value: str\):\n.*?\n(?=previous = load_previous_manifest\(\)|prev = previous_files\(\))",
-              re.S,
-          )
-          replacement = textwrap.dedent('''\
-          def version_key(value: str):
-              try:
-                  return tuple(int(part) for part in value.strip().lstrip('vV').split('.'))
-              except Exception:
-                  return (0, 0, 0)
-
-          def full_package_version(name: str):
-              marker = 'SCBL-Client-v'
-              suffix = '-win-x86.zip'
-              if name.startswith(marker) and name.endswith(suffix):
-                  return name[len(marker):-len(suffix)]
-              return '0.0.0'
-
-          def cleanup_old_releases(current_version: str, current_full_name: str):
-              # Keep the current and immediately previous client release so the
-              # administrator can roll back without uploading the old package again.
-              files_root = updates_root / 'files'
-              if files_root.exists():
-                  entries = list(files_root.iterdir())
-                  ordered = sorted(entries, key=lambda p: version_key(p.name), reverse=True)
-                  keep = {current_version}
-                  for child in ordered:
-                      if child.name != current_version:
-                          keep.add(child.name)
-                          break
-                  for child in entries:
-                      if child.name in keep:
-                          continue
-                      if child.is_dir():
-                          shutil.rmtree(child)
-                      else:
-                          child.unlink()
-                      print(f'removed old client file release: {child}')
-
-              if full_dir.exists():
-                  entries = list(full_dir.iterdir())
-                  ordered = sorted(entries, key=lambda p: version_key(full_package_version(p.name)), reverse=True)
-                  keep = {current_full_name}
-                  for child in ordered:
-                      if child.name != current_full_name:
-                          keep.add(child.name)
-                          break
-                  for child in entries:
-                      if child.name in keep:
-                          continue
-                      if child.is_dir():
-                          shutil.rmtree(child)
-                      else:
-                          child.unlink()
-                      print(f'removed old client full package: {child}')
-
-          ''')
-          text, count = pattern.subn(replacement, text)
-          if count != 2:
-              raise SystemExit(f'expected two embedded cleanup blocks, replaced {count}')
-
-          bad_extract = textwrap.dedent('''\
-          import sys, tarfile
-          from pathlib import PurePosixPath
-          archive_path, target = sys.argv[1:3]
-          with tarfile.open(archive_path, 'r:gz') as archive:
-              for member in archive.getmembers():
-                  path = PurePosixPath(member.name)
-                  if path.is_absolute() or '..' in path.parts:
-            raise SystemExit(f'unsafe tar member: {member.name}')
-              archive.extractall(target)
-          ''')
-          good_extract = textwrap.dedent('''\
-          import sys, tarfile
-          from pathlib import PurePosixPath
-          archive_path, target = sys.argv[1:3]
-          with tarfile.open(archive_path, 'r:gz') as archive:
-              for member in archive.getmembers():
-                  path = PurePosixPath(member.name)
-                  if path.is_absolute() or '..' in path.parts:
-                      raise SystemExit(f'unsafe tar member: {member.name}')
-              archive.extractall(target)
-          ''')
-          if bad_extract not in text:
-              raise SystemExit('malformed server extraction heredoc was not found')
-          text = text.replace(bad_extract, good_extract, 1)
-          path.write_text(text, encoding='utf-8')
-          PY
-
-          bash -n server/install_public_server.sh
-          python3 - <<'PY'
-          from pathlib import Path
-          import re
-
-          text = Path('server/install_public_server.sh').read_text(encoding='utf-8')
-          blocks = re.findall(r"<<'?(PYEOF_[A-Za-z0-9_]+)'?\n(.*?)\n\1", text, re.S)
-          if not blocks:
-              raise SystemExit('no embedded Python heredocs found')
-          for marker, source in blocks:
-              compile(source, f'install_public_server.sh:{marker}', 'exec')
-          print(f'validated embedded Python heredocs: {len(blocks)}')
-          PY
-          python3 -m py_compile server/scbl_control_plane.py server/test_control_plane.py
-          python3 server/test_control_plane.py
-          gofmt -w client/scbl-process-router/main.go
-          (cd client/scbl-process-router && GOOS=windows GOARCH=amd64 go test ./...)
-
-          git config user.name 'github-actions[bot]'
-          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          git add server/install_public_server.sh client/scbl-process-router/main.go
-          git commit -m 'server: repair embedded update-package Python validation'
-          git push origin HEAD:scbl-v0.6.3-component-release
       - uses: actions/upload-artifact@v4
-        if: always()
         with:
-          name: v0.6.3-installer-patch-log
-          path: patch.log
-          if-no-files-found: warn
-      - name: Report result
-        if: always()
-        shell: bash
-        run: test '${{ steps.repair.outcome }}' = 'success'
+          name: scbl-v0.6.3-source-export
+          path: |
+            server/install_public_server.sh
+            server/scbl_control_plane.py
+            client/scbl-process-router/main.go
+            .github/workflows/client-release.yml
+            .github/workflows/server-tool-release.yml
+            docs/RELEASE_ARCHITECTURE.md
+            docs/releases/CLIENT_v0.6.3.md
+            docs/releases/SERVER_TOOL_v0.6.3.md
+            COMPONENT_VERSIONS.json
+            VERSION_CLIENT
+            VERSION_SERVER_TOOL
+          if-no-files-found: error

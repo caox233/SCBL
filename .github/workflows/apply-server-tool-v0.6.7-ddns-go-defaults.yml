@@ -1,0 +1,50 @@
+name: Apply SCBL server tool v0.6.7 DDNS-GO simplification
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/apply-server-tool-v0.6.7-ddns-go-defaults.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+
+      - name: Apply source changes
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 scripts/maintenance/apply_v067_ddns_go_defaults.py
+          bash -n server/install_public_server.sh
+          bash -n scripts/install-server.sh
+          python3 - <<'PY'
+          from pathlib import Path
+          import re
+
+          for path in (Path('server/install_public_server.sh'), Path('scripts/install-server.sh')):
+              text = path.read_text(encoding='utf-8')
+              for marker, source in re.findall(r"<<'?(PYEOF_[A-Za-z0-9_]+)'?\n(.*?)\n\1", text, re.S):
+                  compile(source, f'{path}:{marker}', 'exec')
+          PY
+          python3 -m py_compile server/scbl_control_plane.py server/test_control_plane.py
+          python3 server/test_control_plane.py
+
+      - name: Commit v0.6.7
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm -f scripts/maintenance/apply_v067_ddns_go_defaults.py
+          rm -f .github/workflows/apply-server-tool-v0.6.7-ddns-go-defaults.yml
+          git config user.name github-actions
+          git config user.email github-actions@github.com
+          git add -A
+          git commit -m 'SCBL Server Tool v0.6.7: use DDNS-GO defaults and LAN web access'
+          git push origin main

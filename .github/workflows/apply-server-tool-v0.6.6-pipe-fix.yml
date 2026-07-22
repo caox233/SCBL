@@ -1,0 +1,103 @@
+name: Apply SCBL server tool v0.6.6 pipe-mode fix
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/apply-server-tool-v0.6.6-pipe-fix.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+
+      - name: Apply v0.6.6 bootstrap fix
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+          import base64
+          import json
+
+          new_version = "0.6.6"
+          bootstrap_b64 = "IyEvdXNyL2Jpbi9lbnYgYmFzaApzZXQgLWV1byBwaXBlZmFpbAoKIyBTdGFibGUgYm9vdHN0cmFwIGluc3RhbGxlciBmb3IgdGhlIGluZGVwZW5kZW50bHkgdmVyc2lvbmVkIFNDQkwgc2VydmVyIHRvb2wuCiMgSW50ZXJhY3RpdmUgbWVudXMgYXJlIG5ldmVyIGxhdW5jaGVkIGZyb20gYSBjdXJsIHBpcGUuIEluIHBpcGUgbW9kZSB0aGlzCiMgc2NyaXB0IGluc3RhbGxzIHRoZSBwZXJzaXN0ZW50IFNDQkwgY29tbWFuZCBhbmQgZXhpdHMgd2l0aCBhIGNsZWFyIG5leHQgc3RlcC4KClJFUE89IiR7U0NCTF9HSVRIVUJfUkVQTzotY2FveDIzMy9TQ0JMfSIKVEFHPSIke1NDQkxfU0VSVkVSX1RPT0xfUkVMRUFTRV9UQUc6LXNlcnZlci10b29sLXN0YWJsZS1sYXRlc3R9IgpCQVNFPSIke1NDQkxfUkVMRUFTRV9CQVNFX1VSTDotdHRwczovL2dpdGh1Yi5jb20vJHtSRVB PfS9yZWxlYXNlcy9kb3dubG9hZC8ke1RBR319IgpQQUNLQUdFPSJTQ0JMLVNlcnZlci1Ub29sLWxhdGVzdC1saW51eC14ODZfNjQudGFyLmd6IgpDSEVDS1NVTT0iJHtQQUNLQUdFfS5zaGEyNTYiClRNUD0iJChta3RlbXAgLWQgLXQgc2NibC1zZXJ2ZXItYm9vdHN0cmFwLlhYWFhYWCkiCk1BTkFHRVJfRElSPSIvdXNyL2xvY2FsL2xpYi9zY2JsLXB1YmxpYyIKTUFOQUdFUl9UQVJHRVQ9IiR7TUFOQUdFUl9ESVJ9L2luc3RhbGxfcHVibGljX3NlcnZlci5zaCIKCmNsZWFudXAoKSB7IHJtIC1yZiAiJFRNUCI7IH0KdHJhcCBjbGVhbnVwIEVYSVQKCmlmIFtbICR7RVVJRDotJChpZCAtdSl9IC1uZSAwIF1dOyB0aGVuCiAgZWNobyAi6K+35L2/55SoIHJvb3Qg6L+Q6KGM44CCIiA+JjIKICBlY2hvICLlj5Hlu7rml7bvvJpjdXJsIC1mTCAke0JBU0V9L2luc3RhbGwtc2VydmVyLnNoIC1vIC90bXAvaW5zdGFsbC1zZXJ2ZXIuc2ggJiYgc3VkbyBiYXNoIC90bXAvaW5zdGFsbC1zZXJ2ZXIuc2giID4mMgogIGV4aXQgMQpmaQoKbmVlZCgpIHsKICBjb21tYW5kIC12ICIkMSIgPi9kZXYvbnVsbCAyPiYxIHx8IHsKICAgIGVjaG8gIue8uuWwkeW/hemhu+WRveS7pO+8miQxIiA+JjIKICAgIGV4aXQgMQogIH0KfQpuZWVkIGN1cmwKbmVlZCBzaGEyNTZzdW0KbmVlZCBweXRob24zCm5lZWQgdGltZW91dApuZWVkIGluc3RhbGwKCmNhc2UgIiQodW5hbWUgLW0pIiBpbgogIHg4Nl82NHxhbWQ2NCkgOzsKICAqKSBlY2hvICLlvZPliY3kuIDplm7DkuIDplKfljIXljIXkuK3jgIIiID4mMjsgZXhpdCAxIDs7CmVzYWMKCmRvd25sb2FkX2ZpbGUoKSB7CiAgbG9jYWwgbGFiZWw9IiQxIiB1cmw9IiQyIiB0YXJnZXQ9IiQzIiBtYXhfc2Vjb25kcz0iJDQiCiAgZWNobyAiW1NDQkxdIOato+WcqOS4i+S9vSQ7bGFiZWx96K+4Li4uIgogIHRpbWVvdXQgLS1mb3JlZ3JvdW5kICIke21heF9zZWNvbmRzfXMiIFwKICAgIGN1cmwgLWZzU0wgXAogICAgICAtLXJldHJ5IDMgXAogICAgICAtLXJldHJ5LWFsbC1lcnJvcnMgXAogICAgICAtLWNvbm5lY3QtdGltZW91dCAxMCBcCiAgICAgIC0tbWF4LXRpbWUgIiRtYXhfc2Vjb25kcyIgXAogICAgICAiJHVybCIgLW8gIiR0YXJnZXQiCiAgW1sgLXMgIiR0YXJnZXQiIF1dIHx8IHsKICAgIGVjaG8gIiR7bGFiZWx96KaB5LqG5LiL6L295LqM5Li65YaF5a6554q26Lef44CCIiA+JjIKICAgIGV4aXQgMQogIH0KICBlY2hvICJbU0NCTF0gJHtsYWJlbH3kuIvovb3lrozmiJDjgIIiCn0KCmVjaG8gIltTQ0JMXSDkuIvovb3mnI3liqDlt7Hlh7rlrprniYjvvJoke1JFUE99IC8gJHtUQUd9Igpkb3dubG9hZF9maWxlICLmnI3liqDlt7Hlh7rlrprljIXlkIUiICIke0JBU0V9LyR7UEFDS0FHRX0iICIke1RNUH0vJHtQQUNLQUdFfSIgMzYwCmRvd25sb2FkX2ZpbGUgIlNIQTI1NiDmoKHpqqzmlofku7YiICIke0JBU0V9LyR7Q0hFQ0tTVU19IiAiJHtUTVB9LyR7Q0hFQ0tTVU19IiA2MAoKZWNobyAiW1NDQkxdIOato+WcqOagoemqjOacjeWKoeerr+W3peWFtyBTSEEyNTYuLi4iCmV4cGVjdGVkPSIkKGF3ayAnTkYge3ByaW50ICQxOyBleGl0fScgIiR7VE1QfS8ke0NIRUNLU1VNfSIgfCB0ciAnWzp1cHBlcjpdJyAnWzpsb3dlcjpdJykiCmFjdHVhbD0iJChzaGEyNTZzdW0gIiR7VE1QfS8ke1BBQ0tBR0V9IiB8IGF3ayAne3ByaW50ICQxfScpIgppZiBbWyAhICIkZXhwZWN0ZWQiID1+IF5bMC05YS1mXXs2NH0kIHx8ICIkYWN0dWFsIiAhPSAiJGV4cGVjdGVkIiBdXTsgdGhlbgogIGVjaG8gIlNDQkwg5pyN5Yqh56uv5bel5YW35YyFIFNIQTI1NiDmoKHpqqzlpLHotKXjgIIiID4mMgogIGVjaG8gImV4cGVjdGVkPSRleHBlY3RlZCIgPiYyCiAgZWNobyAiYWN0dWFsPSRhY3R1YWwiID4mMgogIGV4aXQgMQpmaQplY2hvICJbU0NCTF0gU0hBMjU2IOagoemqjOmAmui/h+OAgiIKCmVjaG8gIltTQ0JMXSDmraPlnKjop6PljovlubblsYrmnI3liqDlt7Hlh7rlrprljIXLi4uIgpta2RpciAtcCAiJHtUTVB9L2V4dHJhY3QiCnRpbWVvdXQgLS1mb3JlZ3JvdW5kIDMwcyBweXRob24zIC0gIiR7VE1QfS8ke1BBQ0tBR0V9IiAiJHtUTVB9L2V4dHJhY3QiIDw8J1BZRU9GX1NBRkVfQk9PVFNUUkFQX0VYVFJBQ1QnCmltcG9ydCBzeXMsIHRhcmZpbGUKZnJvbSBwYXRobGliIGltcG9ydCBQYXRoLCBQdXJlUG9zaXhQYXRoCgphcmNoaXZlX3BhdGgsIHRhcmdldCA9IHN5cy5hcmd2WzE6M10KdGFyZ2V0X3Jvb3QgPSBQYXRoKHRhcmdldCkucmVzb2x2ZSgpCgp3aXRoIHRhcmZpbGUub3BlbihhcmNoaXZlX3BhdGgsICdyOmd6JykgYXMgYXJjaGl2ZToKICAgIG1lbWJlcnMgPSBhcmNoaXZlLmdldG1lbWJlcnMoKQogICAgZm9yIG1lbWJlciBpbiBtZW1iZXJzOgogICAgICAgIG1lbWJlcl9wYXRoID0gUHVyZVBvc2l4UGF0aChtZW1iZXIubmFtZSkKICAgICAgICBpZiBtZW1iZXJfcGF0aC5pc19hYnNvbHV0ZSgpIG9yICcuLicgaW4gbWVtYmVyX3BhdGgucGFydHM6CiAgICAgICAgICAgIHJhaXNlIFN5c3RlbUV4aXQoZid1bnNhZmUgdGFyIG1lbWJlciBwYXRoOiB7bWVtYmVyLm5hbWV9JykKICAgICAgICBpZiBub3QgKG1lbWJlci5pc2ZpbGUoKSBvciBtZW1iZXIuaXNkaXIoKSk6CiAgICAgICAgICAgIHJhaXNlIFN5c3RlbUV4aXQoZid1bnNhZmUgdGFyIG1lbWJlciB0eXBlOiB7bWVtYmVyLm5hbWV9JykKICAgICAgICBkZXN0aW5hdGlvbiA9ICh0YXJnZXRfcm9vdCAvIFBhdGgoKm1lbWJlcl9wYXRoLnBhcnRzKSkucmVzb2x2ZSgpCiAgICAgICAgaWYgZGVzdGluYXRpb24gIT0gdGFyZ2V0X3Jvb3QgYW5kIHRhcmdldF9yb290IG5vdCBpbiBkZXN0aW5hdGlvbi5wYXJlbnRzOgogICAgICAgICAgICByYWlzZSBTeXN0ZW1FeGl0KGYndGFyIG1lbWJlciBlc2NhcGVzIGV4dHJhY3Rpb24gcm9vdDoge21lbWJlci5uYW1lfScpCiAgICBhcmNoaXZlLmV4dHJhY3RhbGwodGFyZ2V0X3Jvb3QsIG1lbWJlcnM9bWVtYmVycykKUF lFT0ZfU0FGRV9CT09UU1RSQVBfRVhUUkFDVAoKcGFja2FnZV9yb290PSIkKGZpbmQgIiR7VE1QfS9leHRyYWN0IiAtbWluZGVwdGggMSAtbWF4ZGVwdGggMSAtdHlwZSBkIC1uYW1lICdTQ0JMLVNlcnZlci1Ub29sLXYqLWxpbnV4LXg4Nl82NCcgLXByaW50IC1xdWl0KSIKW1sgLW4gIiRwYWNrYWdlX3Jvb3QiIF1dIHx8IHsKICBlY2hvICLpg6jmlbDljIXnm67lvI/mrKPlkIjpooTmnaHjgIIiID4mMgogIGV4aXQgMQp9Cmluc3RhbGxlcj0iJHtwYWNrYWdlX3Jvb3R9L2luc3RhbGxfcHVibGljX3NlcnZlci5zaCIKW1sgLWYgIiRpbnN0YWxsZXIiIF1dIHx8IHsKICBlY2hvICLpg6jmlbDljIXkuK3msqHmnInFpbnN0YWxsX3B1YmxpY19zZXJ2ZXIuc2guIiA+JjIKICBleGl0IDEKfQoKZWNobyAiW1NDQkxdIOato+WcqOajgOafpeeuoeeQhuajgOacrOivreaosC4uLiIKdGltZW91dCAtLWZvcmVncm91bmQgMTVzIGJhc2ggLW4gIiRpbnN0YWxsZXIiCnRpbWVvdXQgLS1mb3JlZ3JvdW5kIDMwcyBweXRob24zIC0gIiRpbnN0YWxsZXIiIDw8J1BZRU9GX1ZBTElEQVRFX0JPT1RTVFJBUF9NQU5BR0VSJwpmcm9tIHBhdGhsaWIgaW1wb3J0IFBhdGgKaW1wb3J0IHJlLCBzeXMKCnBhdGggPSBQYXRoKHN5cy5hcmd2WzFdKQp0ZXh0ID0gcGF0aC5yZWFkX3RleHQoZW5jb2Rpbmc9J3V0Zi04JykKYmxvY2tzID0gcmUuZmluZGFsbChyIjw8Jz8oUFlFT0ZfW0EtWmEtejAtOV9dKyk nP1xuKC4qPylcblwxIiwgdGV4dCwgcmUuUykKaWYgbm90IGJsb2NrczoKICAgIHJhaXNlIFN5c3RlbUV4aXQoJ21hbmFnZXIgc2NyaXB0IGhhcyBubyBlbWJlZGRlZCBQeXRob24gaGVyZWRvY3MnKQpmb3IgbWFya2VyLCBibG9jayBpbiBibG9ja3M6CiAgICBjb21waWxlKGJsb2NrLCBmJ3twYXRofTp7bWFya2VyfScsICdleGVjJykKUF lFT0ZfVkFMSURBVEVfQk9PVFNUUkFQX01BTkFHRVIKCmVjaG8gIltTQ0JMXSDmraPlnKjlrp7ooYzmsbPljIXnmoTnuqflj5Hku6QuLi4iCmluc3RhbGwgLWQgLW0gMDc1NSAiJE1BTkFHRVJfRElSIgppbnN0YWxsIC1tIDA3NTUgIiRpbnN0YWxsZXIiICIkTUFOQUdFUl9UQVJHRVQiCgpmb3IgYXNzZXQgaW4gc2NibF9jb250cm9sX3BsYW5lLnB5IGNoZWNrX3NjYmxfYmluYXJ5X3JlbGVhc2Uuc2ggNXRoLWVjaGVsb25fYnJhbmNoLnR4dDsgZG8KICBbWyAtZiAiJHtwYWNrYWdlX3Jvb3R9LyR7YXNzZXR9IiBdXSB8fCBjb250aW51ZQogIGNhc2UgIiRhc3NldCIgaW4KICAgICouc2gpIG1vZGU9MDc1NSA7OwogICAgKikgbW9kZT0wNjQ0IDs7CiAgZXNhYwogIGluc3RhbGwgLW0gIiRtb2RlIiAiJHtwYWNrYWdlX3Jvb3R9LyR7YXNzZXR9IiAiJHtNQU5BR0VSX0RJUn0vJHthc3NldH0iCmRvbmUKCmNhdCA+IC91c3IvbG9jYWwvYmluL1NDQkwgPDwnU0NCTF9DT01NQU5EJwojIS91c3IvYmluL2VudiBiYXNoCnNldCAtZQpNQU5BRVI9Ii91c3IvbG9jYWwvbGliL3NjYmwtcHVibGljL2luc3RhbGxfcHVibGljX3NlcnZlci5zaCIKaWYgW1sgISAtZiAiJE1BTkFHRVIiIF1dOyB0aGVuCiAgZWNobyAiU0NCTCDnrqHnkIborrrmnKzkuI3lrZjlnKjvvJokTUFOQUdFUiIgPiYyCiAgZXhpdCAxCmZpCmlmIFtbICR7RVVJRDotJChpZCAtdSl9IC1lcSAwIF1dOyB0aGVuCiAgZXhlYyBiYXNoICIkTUFOQUdFUiIgIiRAIgpmaQppZiBjb21tYW5kIC12IHN1ZG8gPi9kZXYvbnVsbCAyPiYxOyB0aGVuCiAgZXhlYyBzdWRvIGJhc2ggIiRNQU5BRVIiICIkQCIKZmkKZWNobyAi6K+35L2/55SoIHJvb3Qg55m75b2V77yM5oiW5a6J6KOFIHN1ZG8g5ZCO5YaN5omn6KGMIFNDQkzjgIIiID4mMgpleGl0IDEKU0NCTF9DT01NQU5ECmNobW9kIDA3NTUgL3Vzci9sb2NhbC9iaW4vU0NCTApsbiAtc2ZuIC91c3IvbG9jYWwvYmluL1NDQkwgL3Vzci9sb2NhbC9iaW4vc2NibAoKZWNobyAiW1NDQkxdIOacjeWKoeerr+euoeeQhuW3peWFt+W3suWuieijhe+8mi91c3IvbG9jYWwvYmluL1NDQkwiCgppZiBbWyAtdCAwICYmIC10IDEgXV07IHRoZW4KICBlY2hvICJbU0NCTF0g5q2j5Zyo6L+b5YWl5LqS5Yqo5byP566h55CG6I+c5Y2VLi4uIgogIGV4ZWMgYmFzaCAiJE1BTkFHRVJfVEFSR0VUIgpmaQoKZWNobwplY2hvICJbU0NCTF0g5qOA5rWL5Yiw5b2T5YmN6ISa5pys6YCa6L+H566h6YGT5omn6KGM44CCIgoKZWNobyAiW1NDQkxdIOS4uumBv+WFjS BVYnVudHUgU2VydmVyIOS4reaVsOaNruaMh+WHhuWFpeaJgOW8leWPkeS6p+S6kuaAp+a1j+iniOmTiuaXoOaYvuekuO+8jOacrOasoeS4jeWcqOeuoemBk+WGheWQr+WKqOiPnOWNleOAgiIKZWNobyAiW1NDQkxdIOivt+WcqOW9k+WJjeaVsOaNruaMh+WPkeeahOe7iOerr+e7p+e7reaJp+ihjO+8miIKZWNobwplY2hvICIgIFNDQkwiCmVjaG8KZXhpdCAwCg=="
+
+          Path("scripts/install-server.sh").write_bytes(base64.b64decode(bootstrap_b64))
+
+          manager_path = Path("server/install_public_server.sh")
+          manager = manager_path.read_text(encoding="utf-8")
+          old = 'SERVER_TOOL_VERSION="0.6.5"'
+          new = f'SERVER_TOOL_VERSION="{new_version}"'
+          if old not in manager:
+              raise SystemExit("expected server tool version anchor not found")
+          manager_path.write_text(manager.replace(old, new, 1), encoding="utf-8")
+
+          Path("VERSION_SERVER_TOOL").write_text(new_version + "\n", encoding="utf-8")
+
+          component_path = Path("COMPONENT_VERSIONS.json")
+          component = json.loads(component_path.read_text(encoding="utf-8"))
+          component["serverToolVersion"] = new_version
+          component_path.write_text(
+              json.dumps(component, ensure_ascii=False, indent=2) + "\n",
+              encoding="utf-8",
+          )
+
+          changelog_path = Path("CHANGELOG.md")
+          changelog = changelog_path.read_text(encoding="utf-8")
+          section = '''## Server Tool v0.6.6
+
+          - 修复在 `curl | sudo bash` 管道中启动交互菜单后无显示的问题。
+          - 管道模式先安装持久化 `SCBL` 命令并退出，再提示管理员执行 `SCBL`。
+          - 直接下载脚本后运行时仍可自动进入交互菜单。
+          - 保留下载、校验、解压和脚本检查的进度提示与超时保护。
+
+          '''
+          if "## Server Tool v0.6.6" not in changelog:
+              marker = "# 更新记录\n\n"
+              if marker not in changelog:
+                  raise SystemExit("CHANGELOG marker not found")
+              changelog = changelog.replace(marker, marker + section, 1)
+              changelog_path.write_text(changelog, encoding="utf-8")
+
+          notes = '''# SCBL Server Tool v0.6.6
+
+This server-tool-only hotfix does not rebuild or change the Windows client.
+
+## Changes
+
+- Stops launching the interactive management menu inside `curl | bash` pipelines.
+- Installs the persistent `SCBL` command first, then asks pipe-mode users to run `SCBL`.
+- Keeps direct downloaded-script execution interactive.
+- Adds explicit startup progress and bounded download, extraction and validation timeouts.
+- Preserves configuration, database, client update data, incoming files and DDNS-GO settings.
+'''
+          notes_path = Path("docs/releases/SERVER_TOOL_v0.6.6.md")
+          notes_path.parent.mkdir(parents=True, exist_ok=True)
+          notes_path.write_text(notes, encoding="utf-8")
+
+          readme_path = Path("README.md")
+          readme = readme_path.read_text(encoding="utf-8")
+          old_command = "curl -fsSL https://github.com/caox233/SCBL/releases/download/server-tool-stable-latest/install-server.sh | sudo bash"
+          new_command = "curl -fL https://github.com/caox233/SCBL/releases/download/server-tool-stable-latest/install-server.sh -o /tmp/install-server.sh && sudo bash /tmp/install-server.sh"
+          if old_command in readme:
+              readme_path.write_text(readme.replace(old_command, new_command), encoding="utf-8")
+          PY
+
+          bash -n scripts/install-server.sh
+          bash -n server/install_public_server.sh
+          python3 -m py_compile server/scbl_control_plane.py server/test_control_plane.py
+          python3 server/test_control_plane.py
+
+          git config user.name github-actions
+          git config user.email github-actions@github.com
+          git add scripts/install-server.sh server/install_public_server.sh VERSION_SERVER_TOOL COMPONENT_VERSIONS.json CHANGELOG.md README.md docs/releases/SERVER_TOOL_v0.6.6.md
+          git commit -m "SCBL Server Tool v0.6.6: avoid interactive curl pipes"
+          git push origin main

@@ -2,9 +2,8 @@
 set -euo pipefail
 
 # Stable bootstrap installer for the independently versioned SCBL server tool.
-# It deliberately uses the rolling server-tool release instead of GitHub's
-# repository-wide "latest" release, because Windows client and server tool
-# versions are published independently.
+# Interactive menus are never launched from a curl pipe. In pipe mode this
+# script installs the persistent SCBL command and exits with a clear next step.
 
 REPO="${SCBL_GITHUB_REPO:-caox233/SCBL}"
 TAG="${SCBL_SERVER_TOOL_RELEASE_TAG:-server-tool-stable-latest}"
@@ -12,11 +11,15 @@ BASE="${SCBL_RELEASE_BASE_URL:-https://github.com/${REPO}/releases/download/${TA
 PACKAGE="SCBL-Server-Tool-latest-linux-x86_64.tar.gz"
 CHECKSUM="${PACKAGE}.sha256"
 TMP="$(mktemp -d -t scbl-server-bootstrap.XXXXXX)"
+MANAGER_DIR="/usr/local/lib/scbl-public"
+MANAGER_TARGET="${MANAGER_DIR}/install_public_server.sh"
+
 cleanup() { rm -rf "$TMP"; }
-trap cleanup EXIT INT TERM
+trap cleanup EXIT
 
 if [[ ${EUID:-$(id -u)} -ne 0 ]]; then
-  echo "请使用 root 运行：curl -fsSL ${BASE}/install-server.sh | sudo bash" >&2
+  echo "请使用 root 运行。" >&2
+  echo "推荐：curl -fL ${BASE}/install-server.sh -o /tmp/install-server.sh && sudo bash /tmp/install-server.sh" >&2
   exit 1
 fi
 
@@ -27,10 +30,10 @@ need() {
   }
 }
 need curl
-need tar
 need sha256sum
 need python3
 need timeout
+need install
 
 case "$(uname -m)" in
   x86_64|amd64) ;;
@@ -74,8 +77,10 @@ mkdir -p "${TMP}/extract"
 timeout --foreground 30s python3 - "${TMP}/${PACKAGE}" "${TMP}/extract" <<'PYEOF_SAFE_BOOTSTRAP_EXTRACT'
 import sys, tarfile
 from pathlib import Path, PurePosixPath
+
 archive_path, target = sys.argv[1:3]
 target_root = Path(target).resolve()
+
 with tarfile.open(archive_path, 'r:gz') as archive:
     members = archive.getmembers()
     for member in members:
@@ -90,9 +95,14 @@ with tarfile.open(archive_path, 'r:gz') as archive:
     archive.extractall(target_root, members=members)
 PYEOF_SAFE_BOOTSTRAP_EXTRACT
 
-installer="$(find "${TMP}/extract" -mindepth 2 -maxdepth 2 -type f -name install_public_server.sh -print -quit)"
-[[ -n "$installer" ]] || {
-  echo "部署包中没有预期位置的 install_public_server.sh。" >&2
+package_root="$(find "${TMP}/extract" -mindepth 1 -maxdepth 1 -type d -name 'SCBL-Server-Tool-v*-linux-x86_64' -print -quit)"
+[[ -n "$package_root" ]] || {
+  echo "部署包目录结构不符合预期。" >&2
+  exit 1
+}
+installer="${package_root}/install_public_server.sh"
+[[ -f "$installer" ]] || {
+  echo "部署包中没有 install_public_server.sh。" >&2
   exit 1
 }
 
@@ -101,6 +111,7 @@ timeout --foreground 15s bash -n "$installer"
 timeout --foreground 30s python3 - "$installer" <<'PYEOF_VALIDATE_BOOTSTRAP_MANAGER'
 from pathlib import Path
 import re, sys
+
 path = Path(sys.argv[1])
 text = path.read_text(encoding='utf-8')
 blocks = re.findall(r"<<'?(PYEOF_[A-Za-z0-9_]+)'?\n(.*?)\n\1", text, re.S)
@@ -109,27 +120,52 @@ if not blocks:
 for marker, block in blocks:
     compile(block, f'{path}:{marker}', 'exec')
 PYEOF_VALIDATE_BOOTSTRAP_MANAGER
-chmod 0755 "$installer"
-cd "$(dirname "$installer")"
-echo "[SCBL] 服务端工具包检查完成。"
 
-if [[ "${SCBL_NONINTERACTIVE:-0}" == "1" ]]; then
-  echo "[SCBL] 正在进入非交互式安装流程..."
-  bash "$installer"
-  exit $?
+echo "[SCBL] 正在安装持久化管理命令..."
+install -d -m 0755 "$MANAGER_DIR"
+install -m 0755 "$installer" "$MANAGER_TARGET"
+
+for asset in scbl_control_plane.py check_scbl_binary_release.sh 5th-echelon_branch.txt; do
+  [[ -f "${package_root}/${asset}" ]] || continue
+  case "$asset" in
+    *.sh) mode=0755 ;;
+    *) mode=0644 ;;
+  esac
+  install -m "$mode" "${package_root}/${asset}" "${MANAGER_DIR}/${asset}"
+done
+
+cat > /usr/local/bin/SCBL <<'SCBL_COMMAND'
+#!/usr/bin/env bash
+set -e
+MANAGER="/usr/local/lib/scbl-public/install_public_server.sh"
+if [[ ! -f "$MANAGER" ]]; then
+  echo "SCBL 管理脚本不存在：$MANAGER" >&2
+  exit 1
 fi
-
-# curl | sudo bash keeps stdin attached to the pipe. Open the controlling
-# terminal explicitly so the downloaded manager can display its menu and read
-# input reliably instead of appearing to stop after the checksum download.
-if { exec 3</dev/tty 4>/dev/tty; } 2>/dev/null; then
-  printf '%s\n' "[SCBL] 正在进入交互式管理菜单..." >&4
-  bash "$installer" <&3 >&4 2>&4
-  exit $?
+if [[ ${EUID:-$(id -u)} -eq 0 ]]; then
+  exec bash "$MANAGER" "$@"
 fi
-
-echo "当前环境没有可用的交互式终端。" >&2
-echo "请改用以下方式运行：" >&2
-echo "  curl -fL ${BASE}/install-server.sh -o /tmp/install-server.sh" >&2
-echo "  sudo bash /tmp/install-server.sh" >&2
+if command -v sudo >/dev/null 2>&1; then
+  exec sudo bash "$MANAGER" "$@"
+fi
+echo "请使用 root 登录，或安装 sudo 后再执行 SCBL。" >&2
 exit 1
+SCBL_COMMAND
+chmod 0755 /usr/local/bin/SCBL
+ln -sfn /usr/local/bin/SCBL /usr/local/bin/scbl
+
+echo "[SCBL] 服务端管理工具已安装：/usr/local/bin/SCBL"
+
+if [[ -t 0 && -t 1 ]]; then
+  echo "[SCBL] 正在进入交互式管理菜单..."
+  exec bash "$MANAGER_TARGET"
+fi
+
+echo
+echo "[SCBL] 检测到当前脚本通过管道执行。"
+echo "[SCBL] 为避免 Ubuntu Server 中管道标准输入导致交互菜单无显示，本次不在管道内启动菜单。"
+echo "[SCBL] 请在当前终端继续执行："
+echo
+echo "  SCBL"
+echo
+exit 0

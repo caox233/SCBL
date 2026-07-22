@@ -1,5 +1,12 @@
 # 更新记录
 
+## Server Tool v0.6.5
+
+- Fixed the piped bootstrap installer appearing to hang after downloading checksums.
+- Added bounded download and validation timeouts with visible stage messages.
+- Reattached the downloaded manager explicitly to `/dev/tty` before entering the interactive menu.
+
+
 ## Server Tool v0.6.4
 
 - Added explicit rollback for the retained previous Windows client package.

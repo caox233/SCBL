@@ -1,4 +1,4 @@
-name: Dispatch SCBL Server Tool v0.6.8 Release
+name: Verify SCBL Server Tool v0.6.8 Release
 
 on:
   pull_request:
@@ -8,24 +8,74 @@ on:
 
 permissions:
   contents: read
-  actions: write
 
 jobs:
-  dispatch:
+  verify:
     runs-on: ubuntu-24.04
     steps:
-      - name: Verify source version
-        uses: actions/checkout@v4
-        with:
-          ref: main
-      - name: Dispatch official publisher
+      - name: Verify source and both Releases
         env:
           GH_TOKEN: ${{ github.token }}
         shell: bash
         run: |
           set -euo pipefail
-          test "$(tr -d '\r\n ' < VERSION_SERVER_TOOL)" = "0.6.8"
-          grep -Fq 'SERVER_TOOL_VERSION="0.6.8"' server/install_public_server.sh
-          grep -Fq 'SCBL_SERVER_TOOL_VERSION", "0.6.8"' server/scbl_control_plane.py
-          gh workflow run server-tool-release.yml --ref main -f version=0.6.8
-          echo 'Official server-tool v0.6.8 publisher dispatched.'
+          mkdir -p immutable stable
+
+          gh release view server-tool-v0.6.8 --repo "$GITHUB_REPOSITORY" \
+            --json tagName,name,assets > immutable/release.json
+          gh release view server-tool-stable-latest --repo "$GITHUB_REPOSITORY" \
+            --json tagName,name,assets > stable/release.json
+
+          gh release download server-tool-v0.6.8 --repo "$GITHUB_REPOSITORY" --dir immutable
+          gh release download server-tool-stable-latest --repo "$GITHUB_REPOSITORY" --dir stable
+
+          python3 - <<'PY'
+          import hashlib
+          import json
+          import tarfile
+          from pathlib import Path
+
+          expected_assets = {
+              'SCBL-Server-Tool-v0.6.8-linux-x86_64.tar.gz',
+              'SCBL-Server-Tool-v0.6.8-linux-x86_64.tar.gz.sha256',
+              'SCBL-Server-Tool-latest-linux-x86_64.tar.gz',
+              'SCBL-Server-Tool-latest-linux-x86_64.tar.gz.sha256',
+              'install-server.sh',
+              'server-tool-release-manifest.json',
+              'SHA256SUMS.txt',
+          }
+
+          for directory, expected_tag in (
+              (Path('immutable'), 'server-tool-v0.6.8'),
+              (Path('stable'), 'server-tool-stable-latest'),
+          ):
+              release = json.loads((directory / 'release.json').read_text(encoding='utf-8'))
+              assert release['tagName'] == expected_tag, release
+              names = {item['name'] for item in release.get('assets', [])}
+              missing = expected_assets - names
+              assert not missing, f'{expected_tag} missing assets: {sorted(missing)}'
+
+              manifest = json.loads((directory / 'server-tool-release-manifest.json').read_text(encoding='utf-8'))
+              assert manifest['component'] == 'server-tool'
+              assert manifest['version'] == '0.6.8'
+              assert manifest['file'] == 'SCBL-Server-Tool-v0.6.8-linux-x86_64.tar.gz'
+              package = directory / manifest['file']
+              digest = hashlib.sha256(package.read_bytes()).hexdigest()
+              assert digest == manifest['sha256'], (digest, manifest['sha256'])
+
+              with tarfile.open(package, 'r:gz') as archive:
+                  names_in_tar = set(archive.getnames())
+              root = 'SCBL-Server-Tool-v0.6.8-linux-x86_64'
+              for required in (
+                  f'{root}/install_public_server.sh',
+                  f'{root}/scbl_control_plane.py',
+                  f'{root}/install-server.sh',
+                  f'{root}/VERSION_SERVER_TOOL',
+              ):
+                  assert required in names_in_tar, required
+
+          print('SCBL Server Tool v0.6.8 immutable and stable Releases verified.')
+          PY
+
+          (cd immutable && sha256sum -c SHA256SUMS.txt)
+          (cd stable && sha256sum -c SHA256SUMS.txt)

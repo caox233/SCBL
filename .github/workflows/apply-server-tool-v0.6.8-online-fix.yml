@@ -14,6 +14,7 @@ on:
       - '.github/workflows/apply-server-tool-v0.6.8-online-fix.yml'
 
 # Temporary validation workflow; removed after the source patch is committed.
+# Retrigger marker: 2026-07-23.
 permissions:
   contents: write
 

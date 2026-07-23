@@ -13,6 +13,7 @@ on:
       - 'scripts/maintenance/apply_v067_ddns_go_defaults.py'
       - '.github/workflows/apply-server-tool-v0.6.8-online-fix.yml'
 
+# Temporary validation workflow; removed after the source patch is committed.
 permissions:
   contents: write
 

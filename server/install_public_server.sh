@@ -37,7 +37,7 @@ DEFAULT_DDNS_GO_LISTEN="127.0.0.1:9876"
 DEFAULT_DDNS_GO_INTERVAL="300"
 DEFAULT_DDNS_GO_CONFIG="/opt/ddns-go/.ddns_go_config.yaml"
 DEFAULT_DDNS_GO_VERSION="latest"
-SERVER_TOOL_VERSION="0.6.5"
+SERVER_TOOL_VERSION="0.6.8"
 DEFAULT_SCBL_RELEASE_REPOSITORY="caox233/SCBL"
 DEFAULT_CLIENT_RELEASE_TAG="client-stable-latest"
 DEFAULT_SERVER_TOOL_RELEASE_TAG="server-tool-stable-latest"
@@ -1384,6 +1384,145 @@ echo "下载 SCBL 专用 dedicated_server：仓库=$SCBL_5TH_REPOSITORY，模式
   echo "SCBL 专用 dedicated_server 下载并校验完成：$actual"
 }
 
+generate_dedicated_service_config() {
+  local config="$SCBL_ROOT/server/service.toml"
+  [[ -f "$config" ]] && return 0
+
+  python3 - "$config" "$SCBL_SERVER_IP" <<'PYEOF_GENERATE_DEDICATED_CONFIG'
+import os
+import secrets
+import sys
+from pathlib import Path
+
+path = Path(sys.argv[1])
+server_ip = sys.argv[2].strip()
+key = list(secrets.token_bytes(32))
+key_lines = ",\n    ".join(str(value) for value in key)
+text = f'''services = [
+    "sc_bl_auth",
+    "onlineconfig",
+    "content",
+    "sc_bl_secure",
+]
+api_server = "0.0.0.0:50051"
+
+[service.content]
+type = "content"
+listen = "0.0.0.0:8000"
+
+[service.content.files]
+"/mp_balancing.ini" = "./data/mp_balancing.ini"
+
+[service.onlineconfig]
+type = "config"
+listen = "0.0.0.0:80"
+
+[[service.onlineconfig.content]]
+Name = "SandboxUrl"
+Values = ["prudp:/address={server_ip};port=21126"]
+
+[[service.onlineconfig.content]]
+Name = "SandboxUrlWS"
+Values = ["{server_ip}:21126"]
+
+[service.sc_bl_auth]
+type = "authentication"
+access_key = "yl4NG7qZ"
+crypto_key = "CD&ML"
+listen = "0.0.0.0:21126"
+vport = 1
+secure_server_addr = "{server_ip}:21127"
+ticket_key = [
+    {key_lines},
+]
+
+[service.sc_bl_auth.settings]
+
+[service.sc_bl_secure]
+type = "secure"
+access_key = "yl4NG7qZ"
+crypto_key = "CD&ML"
+listen = "0.0.0.0:21127"
+vport = 1
+ticket_key = [
+    {key_lines},
+]
+
+[service.sc_bl_secure.settings]
+storage_host = "{server_ip}:8000"
+storage_path = "/mp_balancing.ini"
+
+[debug]
+mark_all_as_online = false
+force_joins = false
+'''
+path.parent.mkdir(parents=True, exist_ok=True)
+temporary = path.with_suffix(path.suffix + ".tmp")
+temporary.write_text(text, encoding="utf-8")
+os.chmod(temporary, 0o600)
+os.replace(temporary, path)
+print(f"已生成 dedicated_server 配置：{path}")
+PYEOF_GENERATE_DEDICATED_CONFIG
+}
+
+repair_dedicated_service_config() {
+  local config="$SCBL_ROOT/server/service.toml"
+  [[ -f "$config" ]] || {
+    echo "游戏服务配置生成失败：$config"
+    return 1
+  }
+
+  python3 - "$config" "$SCBL_SERVER_IP" <<'PYEOF_REPAIR_DEDICATED_CONFIG'
+import datetime
+import os
+import shutil
+import sys
+from pathlib import Path
+
+path = Path(sys.argv[1])
+server_ip = sys.argv[2].strip()
+text = path.read_text(encoding="utf-8")
+original = text
+
+replacements = {
+    "prudp:/address=127.0.0.1;port=21126": f"prudp:/address={server_ip};port=21126",
+    'Values = ["127.0.0.1:21126"]': f'Values = ["{server_ip}:21126"]',
+    'secure_server_addr = "127.0.0.1:21127"': f'secure_server_addr = "{server_ip}:21127"',
+    'storage_host = "127.0.0.1:8000"': f'storage_host = "{server_ip}:8000"',
+}
+for old, new in replacements.items():
+    text = text.replace(old, new)
+
+required = (
+    f"prudp:/address={server_ip};port=21126",
+    f'Values = ["{server_ip}:21126"]',
+    f'secure_server_addr = "{server_ip}:21127"',
+    f'storage_host = "{server_ip}:8000"',
+    'listen = "0.0.0.0:80"',
+    'listen = "0.0.0.0:8000"',
+    'listen = "0.0.0.0:21126"',
+    'listen = "0.0.0.0:21127"',
+    'api_server = "0.0.0.0:50051"',
+)
+missing = [item for item in required if item not in text]
+if missing:
+    print("游戏服务配置校验失败，缺少：", ", ".join(missing), file=sys.stderr)
+    raise SystemExit(1)
+
+if text != original:
+    stamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+    backup = path.with_name(path.name + f".{stamp}.online-endpoint-fix.bak")
+    shutil.copy2(path, backup)
+    temporary = path.with_suffix(path.suffix + ".tmp")
+    temporary.write_text(text, encoding="utf-8")
+    os.chmod(temporary, 0o600)
+    os.replace(temporary, path)
+    print(f"已修复线上模式服务地址并备份原配置：{backup}")
+else:
+    print("线上模式服务地址已正确，无需修改。")
+PYEOF_REPAIR_DEDICATED_CONFIG
+}
+
 install_dedicated_server() {
   mkdir -p "$SCBL_ROOT/server/data" "$SCBL_ROOT/logs" "$SCBL_ROOT/cache" "$BACKUP_DIR"
   if [[ -f "$SCRIPT_DIR/check_scbl_udp_11010.sh" ]]; then
@@ -1439,9 +1578,8 @@ install_dedicated_server() {
     echo "已安装 SCBL 专用 dedicated_server：$live"
   fi
 
-  if [[ -f "$SCRIPT_DIR/service.toml.template" ]]; then
-    sed "s/{{SERVER_IP}}/${SCBL_SERVER_IP}/g" "$SCRIPT_DIR/service.toml.template" > "$SCBL_ROOT/server/service.toml"
-  fi
+  generate_dedicated_service_config
+  repair_dedicated_service_config
   [[ -f "$SCBL_ROOT/server/data/mp_balancing.ini" ]] || echo '; TODO: replace with official mp_balancing.ini' > "$SCBL_ROOT/server/data/mp_balancing.ini"
   [[ -f "$SCBL_ROOT/server/data/news.json" ]] || echo '[]' > "$SCBL_ROOT/server/data/news.json"
   [[ -f "$SCBL_ROOT/server/data/challenges.json" ]] || echo '[]' > "$SCBL_ROOT/server/data/challenges.json"
@@ -1475,6 +1613,9 @@ listen_tcp() {
 listen_any_tcp() {
   ss -lntH 2>/dev/null | awk -v suffix=":\$1" 'index(\$4, suffix) == length(\$4) - length(suffix) + 1 { found=1 } END { exit(found ? 0 : 1) }'
 }
+listen_any_udp() {
+  ss -lunH 2>/dev/null | awk -v suffix=":\$1" 'index(\$4, suffix) == length(\$4) - length(suffix) + 1 { found=1 } END { exit(found ? 0 : 1) }'
+}
 printf 'SCBL服务端状态\n'
 printf '  EasyTier：%s\n' "\$(ok scbl-tunnel.service)"
 printf '  游戏服务：%s\n' "\$(ok scbl-dedicated.service)"
@@ -1483,7 +1624,11 @@ printf '  更新服务：%s\n' "\$(ok scbl-update.service)"
 printf '  DDNS-GO：%s\n' "\$(systemctl is-active --quiet ddns-go.service 2>/dev/null && echo 正常 || echo 未启用/异常)"
 printf '  虚拟网卡：%s\n' "\$(ip -4 -br addr show scbl0 2>/dev/null | awk '{print \$2" "\$3}' || true)"
 printf '  控制平面：%s:%s（%s）\n' "\$SCBL_SERVER_IP" "\$SCBL_CONTROL_PORT" "\$(listen_tcp "\$SCBL_SERVER_IP" "\$SCBL_CONTROL_PORT" && echo 正常 || echo 未监听)"
-printf '  账号服务：%s:50051（%s）\n' "\$SCBL_SERVER_IP" "\$(listen_tcp "\$SCBL_SERVER_IP" 50051 && echo 正常 || echo 未监听)"
+printf '  账号服务：%s:50051/TCP（%s）\n' "\$SCBL_SERVER_IP" "\$(listen_tcp "\$SCBL_SERVER_IP" 50051 && echo 正常 || echo 未监听)"
+printf '  在线配置：%s:80/TCP（%s）\n' "\$SCBL_SERVER_IP" "\$(listen_any_tcp 80 && echo 正常 || echo 未监听)"
+printf '  内容服务：%s:8000/TCP（%s）\n' "\$SCBL_SERVER_IP" "\$(listen_any_tcp 8000 && echo 正常 || echo 未监听)"
+printf '  PRUDP认证：%s:21126/UDP（%s）\n' "\$SCBL_SERVER_IP" "\$(listen_any_udp 21126 && echo 正常 || echo 未监听)"
+printf '  PRUDP安全：%s:21127/UDP（%s）\n' "\$SCBL_SERVER_IP" "\$(listen_any_udp 21127 && echo 正常 || echo 未监听)"
 printf '  公网更新：http://0.0.0.0:%s（%s）\n' "\$SCBL_UPDATE_PORT" "\$(listen_any_tcp "\$SCBL_UPDATE_PORT" && echo 正常 || echo 未监听)"
 printf '  最低客户端：v%s\n' "\$SCBL_MIN_CLIENT_VERSION"
 printf '  数据库：%s\n' "\$([[ -f \$SCBL_ROOT/server/5th-echelon.db ]] && echo 存在 || echo 缺失)"

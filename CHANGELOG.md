@@ -1,5 +1,13 @@
 # 更新记录
 
+## Server Tool v0.6.8
+
+- 修复全新服务器缺少 `service.toml.template` 时，dedicated_server 自动配置把 `SandboxUrl`、`SandboxUrlWS`、`secure_server_addr` 和 `storage_host` 保留为 `127.0.0.1`，导致客户端账号登录成功但游戏无法进入线上模式的问题。
+- 首次安装生成与 dedicated_server 默认结构一致且带独立随机票据密钥的配置；升级已有服务器时自动备份，并只修复四个错误的客户端服务地址。
+- 服务端状态新增在线配置、内容服务、PRUDP 认证与安全端口检查。
+- 控制平面按 UDP 协议检查 21126/21127，不再用 TCP 检测 PRUDP 服务而误报 degraded。
+- 不修改、不重编译 Hooks 源码；Windows 客户端版本保持不变。
+
 ## Server Tool v0.6.5
 
 - Fixed the piped bootstrap installer appearing to hang after downloading checksums.

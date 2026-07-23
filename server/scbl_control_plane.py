@@ -30,7 +30,7 @@ CONTROL_PORT = int(os.environ.get("SCBL_CONTROL_PORT", "19080"))
 SECRET = os.environ.get("SCBL_SECRET", "").encode("utf-8")
 SCBL_ROOT = Path(os.environ.get("SCBL_ROOT", "/opt/scbl-public"))
 DB_PATH = Path(os.environ.get("SCBL_DB_PATH", str(SCBL_ROOT / "server" / "5th-echelon.db")))
-SERVER_TOOL_VERSION = os.environ.get("SCBL_SERVER_TOOL_VERSION", "0.6.4").strip()
+SERVER_TOOL_VERSION = os.environ.get("SCBL_SERVER_TOOL_VERSION", "0.6.8").strip()
 MIN_CLIENT_VERSION = os.environ.get("SCBL_MIN_CLIENT_VERSION", "0.6.0").strip()
 MAINTENANCE = os.environ.get("SCBL_MAINTENANCE", "n").strip().lower() in {"1", "y", "yes", "true", "on"}
 HEARTBEAT_TTL_SECONDS = max(10, int(os.environ.get("SCBL_HEARTBEAT_TTL", "20")))
@@ -350,6 +350,28 @@ def tcp_open(host: str, port: int, timeout: float = 0.18) -> bool:
         return False
 
 
+def udp_bound(port: int) -> bool:
+    """Return whether a local UDP listener is bound to the requested port."""
+    try:
+        result = subprocess.run(
+            ["ss", "-lunH"],
+            capture_output=True,
+            text=True,
+            timeout=1.0,
+            check=False,
+        )
+        if result.returncode != 0:
+            return False
+        suffix = f":{port}"
+        for line in result.stdout.splitlines():
+            fields = line.split()
+            if any(field.endswith(suffix) for field in fields):
+                return True
+        return False
+    except Exception:
+        return False
+
+
 def service_active(name: str) -> bool:
     try:
         result = subprocess.run(
@@ -413,8 +435,8 @@ def _compute_health() -> dict[str, Any]:
         "grpc": tcp_open(SERVER_IP, 50051),
         "config": tcp_open(SERVER_IP, 80),
         "content": tcp_open(SERVER_IP, 8000),
-        "auth": tcp_open(SERVER_IP, 21126),
-        "secure": tcp_open(SERVER_IP, 21127),
+        "auth": udp_bound(21126),
+        "secure": udp_bound(21127),
         "database": db_ok,
     }
     critical = services["tunnel"] and services["grpc"] and services["database"]

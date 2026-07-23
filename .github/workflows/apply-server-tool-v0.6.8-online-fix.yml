@@ -1,20 +1,13 @@
 name: Apply SCBL server tool v0.6.8 online-mode repair
 
 on:
-  push:
-    branches: [main]
-    paths:
-      - 'scripts/maintenance/apply_v068_online_service_fix.py'
-      - '.github/workflows/apply-server-tool-v0.6.8-online-fix.yml'
   pull_request:
     branches: [main]
     paths:
-      - 'scripts/maintenance/apply_v068_online_service_fix.py'
       - '.github/workflows/apply-server-tool-v0.6.8-online-fix.yml'
 
 permissions:
   contents: write
-  actions: write
 
 concurrency:
   group: scbl-server-tool-v068-source
@@ -32,27 +25,13 @@ jobs:
       - name: Apply online-mode repair
         run: python3 scripts/maintenance/apply_v068_online_service_fix.py
 
-      - name: Remove obsolete release hotfix and unsupported DDNS claims
+      - name: Remove unsupported DDNS claims from release notes
         shell: bash
         run: |
           set -euo pipefail
           python3 - <<'PY'
           from pathlib import Path
           import re
-
-          workflow_path = Path('.github/workflows/server-tool-release.yml')
-          workflow = workflow_path.read_text(encoding='utf-8')
-          workflow, count = re.subn(
-              r'\n      - name: Apply v0\.6\.6 stable IPv6 selector source hotfix.*?\n      - id: version',
-              '\n      - id: version',
-              workflow,
-              count=1,
-              flags=re.S,
-          )
-          if count != 1:
-              raise SystemExit(f'expected one obsolete v0.6.6 release hotfix block, got {count}')
-          workflow_path.write_text(workflow, encoding='utf-8')
-
           notes_path = Path('docs/releases/SERVER_TOOL_v0.6.8.md')
           notes = notes_path.read_text(encoding='utf-8')
           notes = re.sub(r'\n## DDNS-GO\n.*\Z', '\n', notes, count=1, flags=re.S)
@@ -74,11 +53,9 @@ jobs:
                   compile(source, f'{path}:{marker}', 'exec')
           PY
           python3 -m py_compile server/scbl_control_plane.py server/test_control_plane.py
+          python3 server/test_control_plane.py
 
-      - name: Run server tests
-        run: python3 server/test_control_plane.py
-
-      - name: Validate generated source markers
+      - name: Validate generated source and Hooks boundary
         shell: bash
         run: |
           set -euo pipefail
@@ -90,31 +67,19 @@ jobs:
           grep -Fq '"secure": udp_bound(21127)' server/scbl_control_plane.py
           ! grep -Fq 'Apply v0.6.6 stable IPv6 selector source hotfix' .github/workflows/server-tool-release.yml
           ! grep -Fq '## DDNS-GO' docs/releases/SERVER_TOOL_v0.6.8.md
-
-      - name: Verify Hooks remain untouched
-        shell: bash
-        run: |
-          set -euo pipefail
           if git diff --name-only | grep -Eq '(^|/)(hooks|uplay_r1_loader)(/|\.|$)'; then
             echo 'Hooks files must remain unchanged.' >&2
             exit 1
           fi
 
-      - name: Commit source release and dispatch publisher
-        if: github.event_name == 'push'
-        env:
-          GH_TOKEN: ${{ github.token }}
+      - name: Push generated source branch
         shell: bash
         run: |
           set -euo pipefail
           rm -f scripts/maintenance/apply_v067_ddns_go_defaults.py
           rm -f scripts/maintenance/apply_v068_online_service_fix.py
-          rm -f .github/workflows/apply-server-tool-v0.6.7-ddns-go-defaults.yml
-          rm -f .github/workflows/apply-server-tool-v0.6.8-online-fix.yml
-          rm -f .github/workflows/apply-server-tool-v0.6.6-ipv6-fix.yml
           git config user.name github-actions
           git config user.email github-actions@github.com
           git add -A
           git commit -m 'SCBL Server Tool v0.6.8: repair online service endpoints'
-          git push origin main
-          gh workflow run server-tool-release.yml --ref main -f version=0.6.8
+          git push --force origin HEAD:refs/heads/generated/server-tool-v0.6.8

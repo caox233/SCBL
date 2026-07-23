@@ -6,7 +6,6 @@ on:
     paths:
       - '.github/workflows/apply-server-tool-v0.6.8-online-fix.yml'
 
-# Source generation retrigger: 2026-07-23.
 permissions:
   contents: write
 
@@ -26,13 +25,26 @@ jobs:
       - name: Apply online-mode repair
         run: python3 scripts/maintenance/apply_v068_online_service_fix.py
 
-      - name: Remove unsupported DDNS claims from release notes
+      - name: Finalize v0.6.8 metadata and release notes
         shell: bash
         run: |
           set -euo pipefail
           python3 - <<'PY'
           from pathlib import Path
           import re
+
+          control_path = Path('server/scbl_control_plane.py')
+          control = control_path.read_text(encoding='utf-8')
+          control, count = re.subn(
+              r'SERVER_TOOL_VERSION = os\.environ\.get\("SCBL_SERVER_TOOL_VERSION", "[0-9]+\.[0-9]+\.[0-9]+"\)\.strip\(\)',
+              'SERVER_TOOL_VERSION = os.environ.get("SCBL_SERVER_TOOL_VERSION", "0.6.8").strip()',
+              control,
+              count=1,
+          )
+          if count != 1:
+              raise SystemExit(f'expected one control-plane version fallback, got {count}')
+          control_path.write_text(control, encoding='utf-8')
+
           notes_path = Path('docs/releases/SERVER_TOOL_v0.6.8.md')
           notes = notes_path.read_text(encoding='utf-8')
           notes = re.sub(r'\n## DDNS-GO\n.*\Z', '\n', notes, count=1, flags=re.S)
@@ -62,6 +74,7 @@ jobs:
           set -euo pipefail
           test "$(tr -d '\r\n ' < VERSION_SERVER_TOOL)" = "0.6.8"
           grep -Fq 'SERVER_TOOL_VERSION="0.6.8"' server/install_public_server.sh
+          grep -Fq 'SCBL_SERVER_TOOL_VERSION", "0.6.8"' server/scbl_control_plane.py
           grep -Fq 'generate_dedicated_service_config()' server/install_public_server.sh
           grep -Fq 'repair_dedicated_service_config()' server/install_public_server.sh
           grep -Fq '"auth": udp_bound(21126)' server/scbl_control_plane.py

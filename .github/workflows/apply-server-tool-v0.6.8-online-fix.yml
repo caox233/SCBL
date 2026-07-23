@@ -101,7 +101,6 @@ jobs:
           fi
 
       - name: Commit source release and dispatch publisher
-        if: github.event_name == 'push'
         env:
           GH_TOKEN: ${{ github.token }}
         shell: bash

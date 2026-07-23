@@ -13,8 +13,6 @@ on:
       - 'scripts/maintenance/apply_v067_ddns_go_defaults.py'
       - '.github/workflows/apply-server-tool-v0.6.8-online-fix.yml'
 
-# Temporary validation workflow; removed after the source patch is committed.
-# Retrigger marker: 2026-07-23.
 permissions:
   contents: write
 
@@ -31,27 +29,35 @@ jobs:
           ref: main
           fetch-depth: 0
 
-      - name: Apply pending DDNS-GO cleanup and online-mode repair
+      - name: Apply DDNS-GO simplification
+        run: python3 scripts/maintenance/apply_v067_ddns_go_defaults.py
+
+      - name: Apply online-mode repair
+        run: python3 scripts/maintenance/apply_v068_online_service_fix.py
+
+      - name: Validate shell and embedded Python
         shell: bash
         run: |
           set -euo pipefail
-          python3 scripts/maintenance/apply_v067_ddns_go_defaults.py
-          python3 scripts/maintenance/apply_v068_online_service_fix.py
-
           bash -n server/install_public_server.sh
           bash -n scripts/install-server.sh
           python3 - <<'PY'
           from pathlib import Path
           import re
-
           for path in (Path('server/install_public_server.sh'), Path('scripts/install-server.sh')):
               text = path.read_text(encoding='utf-8')
               for marker, source in re.findall(r"<<'?(PYEOF_[A-Za-z0-9_]+)'?\n(.*?)\n\1", text, re.S):
                   compile(source, f'{path}:{marker}', 'exec')
           PY
           python3 -m py_compile server/scbl_control_plane.py server/test_control_plane.py
-          python3 server/test_control_plane.py
 
+      - name: Run server tests
+        run: python3 server/test_control_plane.py
+
+      - name: Validate generated source markers
+        shell: bash
+        run: |
+          set -euo pipefail
           test "$(tr -d '\r\n ' < VERSION_SERVER_TOOL)" = "0.6.8"
           grep -Fq 'SERVER_TOOL_VERSION="0.6.8"' server/install_public_server.sh
           grep -Fq 'generate_dedicated_service_config()' server/install_public_server.sh
@@ -59,6 +65,10 @@ jobs:
           grep -Fq '"auth": udp_bound(21126)' server/scbl_control_plane.py
           grep -Fq '"secure": udp_bound(21127)' server/scbl_control_plane.py
 
+      - name: Verify Hooks remain untouched
+        shell: bash
+        run: |
+          set -euo pipefail
           if git diff --name-only | grep -Eq '(^|/)(hooks|uplay_r1_loader)(/|\.|$)'; then
             echo 'Hooks files must remain unchanged.' >&2
             exit 1
@@ -74,7 +84,6 @@ jobs:
           rm -f .github/workflows/apply-server-tool-v0.6.7-ddns-go-defaults.yml
           rm -f .github/workflows/apply-server-tool-v0.6.8-online-fix.yml
           rm -f .github/workflows/apply-server-tool-v0.6.6-ipv6-fix.yml
-
           git config user.name github-actions
           git config user.email github-actions@github.com
           git add -A

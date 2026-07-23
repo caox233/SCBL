@@ -5,6 +5,7 @@ on:
     branches: [main]
     paths:
       - 'scripts/maintenance/apply_v068_online_service_fix.py'
+      - '.github/workflows/apply-server-tool-v0.6.8-online-fix.yml'
 
 permissions:
   contents: write

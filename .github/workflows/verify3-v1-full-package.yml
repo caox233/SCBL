@@ -1,5 +1,6 @@
 name: Final complete v1 client package verification
 
+# Re-run on the latest v1.0.0 source after version-source cleanup.
 on:
   push:
     branches: [agent/release-v1.0.0]

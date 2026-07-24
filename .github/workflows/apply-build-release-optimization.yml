@@ -5,6 +5,8 @@ on:
     branches: [main]
     paths:
       - 'scripts/maintenance/build_opt_parts/**'
+      - 'scripts/maintenance/build_opt_chunks/**'
+      - 'scripts/maintenance/build_opt_fixed/**'
       - '.github/workflows/apply-build-release-optimization.yml'
 
 permissions:
@@ -27,7 +29,18 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          cat scripts/maintenance/build_opt_parts/*.b64 | base64 -d > /tmp/scbl-build-opt.tar.gz
+          {
+            cat scripts/maintenance/build_opt_fixed/chunk00_*.b64
+            cat scripts/maintenance/build_opt_fixed/chunk01_*.b64
+            cat scripts/maintenance/build_opt_chunks/chunk02.b64
+            cat scripts/maintenance/build_opt_fixed/chunk03_*.b64
+            cat scripts/maintenance/build_opt_chunks/chunk04.b64
+            cat scripts/maintenance/build_opt_chunks/chunk05.b64
+            cat scripts/maintenance/build_opt_chunks/chunk06.b64
+          } > /tmp/scbl-build-opt.b64
+          echo '6acc04dba824a5200b7aa840e774db6254d6ad68f21d6710a8b9a6cf6c1ab8b8  /tmp/scbl-build-opt.b64' | sha256sum -c -
+          base64 -d /tmp/scbl-build-opt.b64 > /tmp/scbl-build-opt.tar.gz
+          echo '40203f66f7fef7cb0a950d27c0534feb8a053d4944f5e4649862e2887efeb3a9  /tmp/scbl-build-opt.tar.gz' | sha256sum -c -
           tar -xzf /tmp/scbl-build-opt.tar.gz -C .
           python3 apply_server_patch.py
           rm -f apply_server_patch.py
@@ -56,7 +69,9 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          rm -rf scripts/maintenance/build_opt_parts
+          rm -rf scripts/maintenance/build_opt_parts \
+                 scripts/maintenance/build_opt_chunks \
+                 scripts/maintenance/build_opt_fixed
           git config user.name github-actions
           git config user.email github-actions@github.com
           git add client/build_all_windows.ps1 \
@@ -65,6 +80,8 @@ jobs:
                   scripts/install-server.sh \
                   server/install_public_server.sh \
                   server/test_release_manifest_routing.py \
-                  scripts/maintenance/build_opt_parts
+                  scripts/maintenance/build_opt_parts \
+                  scripts/maintenance/build_opt_chunks \
+                  scripts/maintenance/build_opt_fixed
           git commit -m 'Optimize incremental builds and manifest release routing'
           git push origin "HEAD:${HEAD_REF}"

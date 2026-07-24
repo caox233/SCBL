@@ -36,6 +36,24 @@ jobs:
           python3 -m py_compile /tmp/apply_v069_ddns_go_native.py
           python3 /tmp/apply_v069_ddns_go_native.py
 
+          python3 - <<'PY'
+          from pathlib import Path
+
+          path = Path('server/scbl_control_plane.py')
+          text = path.read_text(encoding='utf-8')
+          replacements = {
+              'SERVER_TOOL_VERSION = os.environ.get("SCBL_SERVER_TOOL_VERSION", "0.6.8").strip()':
+                  'SERVER_TOOL_VERSION = os.environ.get("SCBL_SERVER_TOOL_VERSION", "0.6.9").strip()',
+              'server_version = "SCBLControlPlane/0.6.4"':
+                  'server_version = "SCBLControlPlane/0.6.9"',
+          }
+          for old, new in replacements.items():
+              if text.count(old) != 1:
+                  raise SystemExit(f'control-plane version replacement mismatch: {old}')
+              text = text.replace(old, new, 1)
+          path.write_text(text, encoding='utf-8')
+          PY
+
       - name: Validate shell and embedded Python
         shell: bash
         run: |
@@ -70,6 +88,8 @@ jobs:
           test "$(tr -d '\r\n ' < VERSION_SERVER_TOOL)" = "0.6.9"
           test "$(tr -d '\r\n ' < VERSION_CLIENT)" = "0.6.3"
           grep -Fq 'SERVER_TOOL_VERSION="0.6.9"' server/install_public_server.sh
+          grep -Fq 'SCBL_SERVER_TOOL_VERSION", "0.6.9"' server/scbl_control_plane.py
+          grep -Fq 'server_version = "SCBLControlPlane/0.6.9"' server/scbl_control_plane.py
           grep -Fq 'migrate_ddns_go_config_to_native_interface()' server/install_public_server.sh
           grep -Fq 'reset_ddns_go_password()' server/install_public_server.sh
           grep -Fq 'DEFAULT_DDNS_GO_LISTEN=""' server/install_public_server.sh

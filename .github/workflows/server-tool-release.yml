@@ -127,6 +127,7 @@ jobs:
           notes="docs/releases/SERVER_TOOL_v${version}.md"
           git fetch origin main; git checkout origin/main -- "$notes"; test -f "$notes"
           if gh release view "$tag" >/dev/null 2>&1; then
+            # Remove large rolling aliases left by the pre-manifest publisher.
             for obsolete in \
               SCBL-Server-Tool-latest-linux-x86_64.tar.gz \
               SCBL-Server-Tool-latest-linux-x86_64.tar.gz.sha256; do

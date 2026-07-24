@@ -127,6 +127,11 @@ jobs:
           notes="docs/releases/SERVER_TOOL_v${version}.md"
           git fetch origin main; git checkout origin/main -- "$notes"; test -f "$notes"
           if gh release view "$tag" >/dev/null 2>&1; then
+            for obsolete in \
+              SCBL-Server-Tool-latest-linux-x86_64.tar.gz \
+              SCBL-Server-Tool-latest-linux-x86_64.tar.gz.sha256; do
+              gh release delete-asset "$tag" "$obsolete" -y >/dev/null 2>&1 || true
+            done
             gh release upload "$tag" dist/* --clobber
             gh release edit "$tag" --title "SCBL Server Tool v${version}" --notes-file "$notes" --latest=false
           else

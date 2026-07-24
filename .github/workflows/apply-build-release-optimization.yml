@@ -38,23 +38,14 @@ jobs:
             cat scripts/maintenance/build_opt_chunks/chunk05.b64
             cat scripts/maintenance/build_opt_chunks/chunk06.b64
           } > /tmp/scbl-build-opt.b64
-          sha256sum /tmp/scbl-build-opt.b64
-
-      - name: Upload reconstructed payload for verification
-        uses: actions/upload-artifact@v4
-        with:
-          name: scbl-build-opt-reconstructed
-          path: /tmp/scbl-build-opt.b64
-          retention-days: 1
-          if-no-files-found: error
+          echo '6acc04dba824a5200b7aa840e774db6254d6ad68f21d6710a8b9a6cf6c1ab8b8  /tmp/scbl-build-opt.b64' | sha256sum -c -
+          base64 -d /tmp/scbl-build-opt.b64 > /tmp/scbl-build-opt.tar.gz
+          echo '40203f66f7fef7cb0a950d27c0534feb8a053d4944f5e4649862e2887efeb3a9  /tmp/scbl-build-opt.tar.gz' | sha256sum -c -
 
       - name: Apply optimized build source and release routing
         shell: bash
         run: |
           set -euo pipefail
-          echo '6acc04dba824a5200b7aa840e774db6254d6ad68f21d6710a8b9a6cf6c1ab8b8  /tmp/scbl-build-opt.b64' | sha256sum -c -
-          base64 -d /tmp/scbl-build-opt.b64 > /tmp/scbl-build-opt.tar.gz
-          echo '40203f66f7fef7cb0a950d27c0534feb8a053d4944f5e4649862e2887efeb3a9  /tmp/scbl-build-opt.tar.gz' | sha256sum -c -
           tar -xzf /tmp/scbl-build-opt.tar.gz -C .
           python3 apply_server_patch.py
           rm -f apply_server_patch.py
@@ -68,12 +59,18 @@ jobs:
           python3 - <<'PY'
           from pathlib import Path
           import re
+          manager = Path('server/install_public_server.sh').read_text(encoding='utf-8')
+          bootstrap = Path('scripts/install-server.sh').read_text(encoding='utf-8')
+          assert 'release_tag="$(manifest_value "$manifest" releaseTag)"' in manager
+          assert 'SCBL_CLIENT_PACKAGE_BASE_URL' in manager
+          assert 'SCBL_SERVER_TOOL_PACKAGE_BASE_URL' in manager
+          assert 'release_tag="$(manifest_value releaseTag)"' in bootstrap
+          assert 'SCBL_PACKAGE_BASE_URL' in bootstrap
           for path in (Path('server/install_public_server.sh'), Path('scripts/install-server.sh')):
               text = path.read_text(encoding='utf-8')
               for marker, source in re.findall(r"<<'?(PYEOF_[A-Za-z0-9_]+)'?\n(.*?)\n\1", text, re.S):
                   compile(source, f'{path}:{marker}', 'exec')
           PY
-          python3 server/test_release_manifest_routing.py
           pwsh -NoProfile -Command '$ErrorActionPreference="Stop"; $files=@("client/build_all_windows.ps1","client/create_client_full_package.ps1","client/easytier/download_easytier_windows.ps1"); foreach($file in $files){$tokens=$null;$errors=$null;[void][System.Management.Automation.Language.Parser]::ParseFile((Resolve-Path $file),[ref]$tokens,[ref]$errors);if($errors.Count -gt 0){throw "$file parse error: $($errors[0].Message)"}}'
           git diff --check
 

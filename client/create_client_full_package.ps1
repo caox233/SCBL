@@ -7,12 +7,11 @@ param(
 $ErrorActionPreference = "Stop"
 
 function Get-ScblSourceVersion {
-    $VersionProps = Join-Path -Path $PSScriptRoot -ChildPath "SCBL.Version.props"
-    if (!(Test-Path -LiteralPath $VersionProps)) { throw "Version source was not found: $VersionProps" }
-    $Text = Get-Content -LiteralPath $VersionProps -Raw -Encoding UTF8
-    $Match = [regex]::Match($Text, '<ScblVersion>\s*([0-9]+\.[0-9]+\.[0-9]+)\s*</ScblVersion>')
-    if (!$Match.Success) { throw "SCBL.Version.props must contain a three-part numeric ScblVersion, for example 0.6.3." }
-    return $Match.Groups[1].Value
+    $VersionFile = Join-Path -Path $PSScriptRoot -ChildPath "..\VERSION_CLIENT"
+    if (!(Test-Path -LiteralPath $VersionFile)) { throw "Client version file was not found: $VersionFile" }
+    $Value = (Get-Content -LiteralPath $VersionFile -Raw -Encoding UTF8).Trim()
+    if ($Value -notmatch '^[0-9]+\.[0-9]+\.[0-9]+$') { throw "VERSION_CLIENT must contain a three-part numeric version." }
+    return $Value
 }
 
 function Write-Step([string]$Message) { Write-Host "[SCBL] $Message" }

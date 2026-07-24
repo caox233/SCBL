@@ -34,16 +34,6 @@ jobs:
           cache: true
           cache-dependency-path: client/scbl-process-router/go.sum
 
-      - name: Resolve Hooks checksum
-        id: hooks
-        shell: pwsh
-        run: |
-          $uri = 'https://github.com/caox233/5th-echelon/releases/download/scbl-public-stable-latest/uplay_r1_loader.dll.sha256'
-          $text = (Invoke-WebRequest -UseBasicParsing -Uri $uri).Content
-          $match = [regex]::Match($text, '(?i)\b[0-9a-f]{64}\b')
-          if (!$match.Success) { throw 'Hooks checksum is invalid.' }
-          "sha=$($match.Value.ToLowerInvariant())" >> $env:GITHUB_OUTPUT
-
       - name: Cache NuGet packages
         uses: actions/cache@v4
         with:
@@ -64,7 +54,7 @@ jobs:
         uses: actions/cache@v4
         with:
           path: client/ScblPublicLauncher/EmbeddedFiles/uplay_r1_loader.dll
-          key: hooks-win-x86-${{ steps.hooks.outputs.sha }}
+          key: hooks-win-x86-${{ hashFiles('client/ScblPublicLauncher/EmbeddedFiles/SCBL_EMBEDDED_SHA256.txt') }}
 
       - name: Verify source version
         shell: pwsh

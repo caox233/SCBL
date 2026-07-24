@@ -7,13 +7,18 @@ on:
       - '.github/workflows/post-merge-release-audit.yml'
 
 permissions:
-  contents: read
+  contents: write
   actions: read
 
 jobs:
   audit:
     runs-on: ubuntu-24.04
     steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+
       - name: Wait for release workflows and verify assets
         env:
           GH_TOKEN: ${{ github.token }}
@@ -84,6 +89,14 @@ jobs:
           {
             echo '# Optimized Release Audit'
             echo
+            echo "- Audited merge: \`$RELEASE_SHA\`"
+            echo '- Result: **passed**'
+            echo
+            echo '## Workflow results'
+            echo '```text'
+            cat audit/workflow-results.txt
+            echo '```'
+            echo
             echo '## Client stable assets'
             sed 's/^/- /' audit/client-stable-assets.txt
             echo
@@ -95,11 +108,14 @@ jobs:
             echo
             echo '## Server immutable assets'
             sed 's/^/- /' audit/server-immutable-assets.txt
-          } > audit/report.md
+          } > docs/POST_MERGE_RELEASE_AUDIT.md
 
-      - uses: actions/upload-artifact@v4
-        with:
-          name: optimized-release-audit
-          path: audit
-          retention-days: 3
-          if-no-files-found: error
+      - name: Commit audit report
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name github-actions
+          git config user.email github-actions@github.com
+          git add docs/POST_MERGE_RELEASE_AUDIT.md
+          git commit -m 'ci: record optimized Release audit [skip ci]' || exit 0
+          git push origin HEAD:main

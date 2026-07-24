@@ -22,7 +22,6 @@ DEFAULT_EASYTIER_INSTANCE_NAME="scbl-public-server"
 DEFAULT_EASYTIER_INSTANCE_ID="00000000-0000-0000-0000-000000000001"
 DEFAULT_EASYTIER_RPC_PORT="15966"
 DEFAULT_SCBL_CONTROL_PORT="19080"
-DEFAULT_SCBL_MIN_CLIENT_VERSION="0.6.0"
 DEFAULT_SCBL_HEARTBEAT_TTL="20"
 DEFAULT_DEDICATED_RELEASE_TAG="scbl-public-stable-latest"
 DEFAULT_5TH_REPOSITORY="caox233/5th-echelon"
@@ -36,10 +35,7 @@ DEFAULT_DDNS_GO_LISTEN=""
 DEFAULT_DDNS_GO_INTERVAL="300"
 DEFAULT_DDNS_GO_CONFIG="/opt/ddns-go/.ddns_go_config.yaml"
 DEFAULT_DDNS_GO_VERSION="latest"
-SERVER_TOOL_VERSION="0.6.10"
 DEFAULT_SCBL_RELEASE_REPOSITORY="caox233/SCBL"
-DEFAULT_CLIENT_RELEASE_TAG="client-stable-latest"
-DEFAULT_SERVER_TOOL_RELEASE_TAG="server-tool-stable-latest"
 
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
@@ -50,6 +46,23 @@ INCOMING_DIR="$SCBL_ROOT/incoming"
 MANAGER_DIR="/usr/local/lib/scbl-public"
 MANAGER_SCRIPT="$MANAGER_DIR/install_public_server.sh"
 MANUAL_CLIENT_UPLOAD_DIR="$INCOMING_DIR/client-manual"
+
+read_server_tool_version() {
+  local candidate value=""
+  for candidate in \
+    "$SCRIPT_DIR/VERSION_SERVER_TOOL" \
+    "$SCRIPT_DIR/../VERSION_SERVER_TOOL" \
+    "$MANAGER_DIR/VERSION_SERVER_TOOL"; do
+    [[ -f "$candidate" ]] || continue
+    value="$(tr -d '[:space:]' < "$candidate")"
+    if [[ "$value" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+      printf '%s' "$value"
+      return 0
+    fi
+  done
+  printf '%s' "0.0.0"
+}
+SERVER_TOOL_VERSION="$(read_server_tool_version)"
 
 if [[ $EUID -ne 0 ]]; then
   echo "请用 root 运行：sudo bash install_public_server.sh"
@@ -836,7 +849,6 @@ SCBL_5TH_REPOSITORY="${SCBL_5TH_REPOSITORY:-$DEFAULT_5TH_REPOSITORY}"
     DEDICATED_URL="https://github.com/${SCBL_5TH_REPOSITORY}/releases/download/${SCBL_5TH_RELEASE_TAG}/dedicated_server-linux-x86_64"
     DEDICATED_SHA256_URL="https://github.com/${SCBL_5TH_REPOSITORY}/releases/download/${SCBL_5TH_RELEASE_TAG}/dedicated_server-linux-x86_64.sha256"
   SCBL_CONTROL_PORT="${SCBL_CONTROL_PORT:-$DEFAULT_SCBL_CONTROL_PORT}"
-  SCBL_MIN_CLIENT_VERSION="${SCBL_MIN_CLIENT_VERSION:-$DEFAULT_SCBL_MIN_CLIENT_VERSION}"
   SCBL_HEARTBEAT_TTL="${SCBL_HEARTBEAT_TTL:-$DEFAULT_SCBL_HEARTBEAT_TTL}"
   DDNS_GO_INSTALL="${DDNS_GO_INSTALL:-$DEFAULT_DDNS_GO_INSTALL}"
   DDNS_GO_LISTEN="$(normalize_ddns_go_listen "${DDNS_GO_LISTEN:-$DEFAULT_DDNS_GO_LISTEN}")"
@@ -878,7 +890,6 @@ EASYTIER_INSTANCE_NAME=$(quote "$EASYTIER_INSTANCE_NAME")
 EASYTIER_INSTANCE_ID=$(quote "$EASYTIER_INSTANCE_ID")
 EASYTIER_RPC_PORT=$(quote "$EASYTIER_RPC_PORT")
 SCBL_CONTROL_PORT=$(quote "$SCBL_CONTROL_PORT")
-SCBL_MIN_CLIENT_VERSION=$(quote "$SCBL_MIN_CLIENT_VERSION")
 SCBL_HEARTBEAT_TTL=$(quote "$SCBL_HEARTBEAT_TTL")
 SCBL_SERVER_TOOL_VERSION=$(quote "$SERVER_TOOL_VERSION")
 SCBL_5TH_REPOSITORY=$(quote "$SCBL_5TH_REPOSITORY")
@@ -1453,7 +1464,6 @@ SCBL_ROOT="\${SCBL_ROOT:-/opt/scbl-public}"
 SCBL_SERVER_IP="\${SCBL_SERVER_IP:-10.66.0.1}"
 SCBL_CONTROL_PORT="\${SCBL_CONTROL_PORT:-19080}"
 SCBL_UPDATE_PORT="\${SCBL_UPDATE_PORT:-18080}"
-SCBL_MIN_CLIENT_VERSION="\${SCBL_MIN_CLIENT_VERSION:-0.6.0}"
 ok() { systemctl is-active --quiet "\$1" 2>/dev/null && echo 正常 || echo 异常; }
 listen_tcp() {
   ss -lntH 2>/dev/null | awk -v endpoint="\$1:\$2" '\$4 == endpoint { found=1 } END { exit(found ? 0 : 1) }'
@@ -1478,7 +1488,6 @@ printf '  内容服务：%s:8000/TCP（%s）\n' "\$SCBL_SERVER_IP" "\$(listen_an
 printf '  PRUDP认证：%s:21126/UDP（%s）\n' "\$SCBL_SERVER_IP" "\$(listen_any_udp 21126 && echo 正常 || echo 未监听)"
 printf '  PRUDP安全：%s:21127/UDP（%s）\n' "\$SCBL_SERVER_IP" "\$(listen_any_udp 21127 && echo 正常 || echo 未监听)"
 printf '  公网更新：http://0.0.0.0:%s（%s）\n' "\$SCBL_UPDATE_PORT" "\$(listen_any_tcp "\$SCBL_UPDATE_PORT" && echo 正常 || echo 未监听)"
-printf '  最低客户端：v%s\n' "\$SCBL_MIN_CLIENT_VERSION"
 printf '  数据库：%s\n' "\$([[ -f \$SCBL_ROOT/server/5th-echelon.db ]] && echo 存在 || echo 缺失)"
 STATUS_EOF
   chmod 0755 /usr/local/bin/scbl-server-status
@@ -1771,12 +1780,9 @@ write_update_server_files() {
     cat > "$SCBL_ROOT/client-updates/client_update_manifest.json" <<JSONEOF
 {
   "version": "0.0.0",
-  "updateMode": "file-delta",
-  "filesBaseUrl": "",
+  "updateMode": "full-package",
   "fullPackage": "",
-  "files": [],
-  "delete": [],
-  "keepLocal": ["logs/", "backup/", "updates/", "launcher_settings.json"],
+  "fullPackageSha256": "",
   "release_notes": [],
   "updateAnnouncement": {"enabled": false}
 }
@@ -2272,277 +2278,16 @@ choose_manual_client_package() {
 
 publish_client_update_package() {
   load_env_if_exists; set_defaults
-  local package="${1:-}" version notes updates_root
+  local package="${1:-}" notes=""
   if [[ -z "$package" ]]; then
-    read -e -r -p "请输入客户端全量包路径 [/root/SCBL-Client-v0.6.0-win-x86.zip]: " package || true
-    package="${package:-/root/SCBL-Client-v0.6.0-win-x86.zip}"
+    read -e -r -p "请输入客户端完整 ZIP 路径: " package || true
   fi
-  if [[ ! -f "$package" ]]; then echo "客户端全量包不存在：$package"; return 1; fi
-
-  read -e -r -p "请输入客户端版本号，例如 0.5.3: " version || true
-  version="${version#v}"; version="${version#V}"
-  if [[ ! "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
-    echo "版本号必须是三段纯数字语义版本，例如 0.5.3；不允许字母后缀或四段版本。"
-    return 1
+  [[ -f "$package" ]] || { echo "客户端安装包不存在：$package"; return 1; }
+  if is_interactive; then
+    read -e -r -p "请输入更新内容摘要（可直接回车）: " notes || true
   fi
-
-  echo "自定义更新公告请先在菜单 13 中设置；它只会在下载该版本前显示。"
-  read -e -r -p "请输入更新内容摘要（无自定义公告时作为回退内容）: " notes || true
-  notes="${notes:-客户端文件级增量更新}"
-
-  updates_root="$SCBL_ROOT/client-updates"
-  mkdir -p "$updates_root/full" "$updates_root/files"
-
-  python3 - "$package" "$version" "$updates_root" "$notes" <<'PYEOF'
-import hashlib, json, os, re, shutil, sys, tempfile, zipfile
-from pathlib import Path
-
-package = Path(sys.argv[1]).resolve()
-version = sys.argv[2].strip().lstrip('vV')
-updates_root = Path(sys.argv[3]).resolve()
-notes = sys.argv[4].strip()
-if not re.fullmatch(r'[0-9]+\.[0-9]+\.[0-9]+', version):
-    raise SystemExit('version must be a three-part numeric semantic version')
-
-release_dir = updates_root / 'files' / version
-full_dir = updates_root / 'full'
-manifest_path = updates_root / 'client_update_manifest.json'
-announcement_path = updates_root / 'update_announcement.json'
-
-KEEP = ['logs/', 'backup/', 'updates/', 'launcher_settings.json']
-SKIP_DIRS = {'logs', 'updates', 'backup'}
-SKIP_FILES = {'client_update_manifest.json', 'update_manifest.json', 'client_package_info.json'}
-
-def sha256_file(path: Path) -> str:
-    h = hashlib.sha256()
-    with path.open('rb') as f:
-        for chunk in iter(lambda: f.read(1024 * 1024), b''):
-            h.update(chunk)
-    return h.hexdigest()
-
-def norm_rel(path) -> str:
-    return str(path).replace('\\', '/').strip().lstrip('/')
-
-def is_safe_rel(path: str) -> bool:
-    path = norm_rel(path)
-    return bool(path) and not path.startswith('/') and ':' not in path and all(part and part != '..' for part in path.split('/'))
-
-def should_skip(rel: str) -> bool:
-    parts = norm_rel(rel).split('/')
-    return parts[0] in SKIP_DIRS or parts[-1] in SKIP_FILES
-
-def safe_extract(zf: zipfile.ZipFile, root: Path):
-    root_resolved = root.resolve()
-    for member in zf.infolist():
-        dest = (root / member.filename).resolve()
-        if dest != root_resolved and root_resolved not in dest.parents:
-            raise SystemExit(f'unsafe zip path: {member.filename}')
-    zf.extractall(root)
-
-def find_content_root(root: Path) -> Path:
-    if (root / 'SplinterCellCNLauncher.exe').exists():
-        return root
-    for p in root.rglob('SplinterCellCNLauncher.exe'):
-        return p.parent
-    return root
-
-def load_previous_manifest() -> dict:
-    try:
-        return json.loads(manifest_path.read_text(encoding='utf-8'))
-    except Exception:
-        return {}
-
-def load_update_announcement():
-    try:
-        data = json.loads(announcement_path.read_text(encoding='utf-8'))
-    except Exception:
-        return None, False
-    if not data.get('enabled', False):
-        return None, False
-    configured_version = str(data.get('version', '')).strip().lstrip('vV')
-    if configured_version and configured_version != version:
-        print(f'已保存的更新公告适用于 {configured_version}，当前发布 {version}，本次不嵌入该公告。')
-        return None, False
-    title = str(data.get('title', '')).strip()
-    body = str(data.get('body', '')).strip()
-    if not title or not body:
-        return None, False
-    result = {
-        'enabled': True,
-        'id': str(data.get('id', '')).strip() or f'update-{version}',
-        'title': title,
-        'body': body,
-        'title_en': str(data.get('title_en', '')).strip(),
-        'body_en': str(data.get('body_en', '')).strip(),
-    }
-    return result, not bool(configured_version)
-
-def ensure_updater_payload(content: Path):
-    root_updater = content / 'SCBL.Updater.exe'
-    payload = content / 'tools' / 'SCBL.Updater.payload.exe'
-    if not root_updater.exists():
-        raise SystemExit('全量包缺少 SCBL.Updater.exe，不能发布。')
-    payload.parent.mkdir(parents=True, exist_ok=True)
-    if not payload.exists() or sha256_file(payload) != sha256_file(root_updater):
-        shutil.copy2(root_updater, payload)
-        print('已从 SCBL.Updater.exe 自动补齐 tools/SCBL.Updater.payload.exe。')
-
-def write_full_zip(content: Path, destination: Path):
-    destination.parent.mkdir(parents=True, exist_ok=True)
-    if destination.exists():
-        destination.unlink()
-    with zipfile.ZipFile(destination, 'w', compression=zipfile.ZIP_DEFLATED, compresslevel=9) as out:
-        for src in sorted(p for p in content.rglob('*') if p.is_file()):
-            rel = norm_rel(src.relative_to(content))
-            if is_safe_rel(rel) and not should_skip(rel):
-                out.write(src, rel)
-
-def version_key(value: str):
-    try:
-        parts = tuple(int(part) for part in value.strip().lstrip('vV').split('.'))
-        return parts if len(parts) == 3 else (0, 0, 0)
-    except Exception:
-        return (0, 0, 0)
-
-def full_package_version(name: str):
-    marker = 'SCBL-Client-v'
-    suffix = '-win-x86.zip'
-    if name.startswith(marker) and name.endswith(suffix):
-        return name[len(marker):-len(suffix)]
-    return '0.0.0'
-
-def cleanup_old_releases(current_version: str, current_full_name: str):
-    files_root = updates_root / 'files'
-    if files_root.exists():
-        entries = list(files_root.iterdir())
-        ordered = sorted(entries, key=lambda item: version_key(item.name), reverse=True)
-        keep = {current_version}
-        for child in ordered:
-            if child.name != current_version and version_key(child.name) != (0, 0, 0):
-                keep.add(child.name)
-                break
-        for child in entries:
-            if child.name in keep:
-                continue
-            if child.is_dir():
-                shutil.rmtree(child)
-            else:
-                child.unlink()
-            print(f'removed old client file release: {child}')
-
-    if full_dir.exists():
-        entries = list(full_dir.iterdir())
-        ordered = sorted(entries, key=lambda item: version_key(full_package_version(item.name)), reverse=True)
-        keep = {current_full_name}
-        for child in ordered:
-            if child.name != current_full_name and version_key(full_package_version(child.name)) != (0, 0, 0):
-                keep.add(child.name)
-                break
-        for child in entries:
-            if child.name in keep:
-                continue
-            if child.is_dir():
-                shutil.rmtree(child)
-            else:
-                child.unlink()
-            print(f'removed old client full package: {child}')
-
-previous = load_previous_manifest()
-previous_files = {
-    norm_rel(x.get('path', ''))
-    for x in previous.get('files', [])
-    if isinstance(x, dict) and x.get('path')
+  publish_client_update_package_auto "$package" "" "${notes:-正式客户端更新}"
 }
-update_announcement, bind_announcement_version = load_update_announcement()
-
-with tempfile.TemporaryDirectory(prefix='scbl_client_full_') as td:
-    tmp = Path(td)
-    with zipfile.ZipFile(package, 'r') as z:
-        safe_extract(z, tmp)
-    content = find_content_root(tmp)
-    if not (content / 'SplinterCellCNLauncher.exe').exists():
-        raise SystemExit('全量包内未找到 SplinterCellCNLauncher.exe，请确认上传的是 publish-single 全量包。')
-
-    ensure_updater_payload(content)
-
-    if release_dir.exists():
-        shutil.rmtree(release_dir)
-    release_dir.mkdir(parents=True, exist_ok=True)
-
-    files = []
-    current_files = set()
-    for src in sorted(p for p in content.rglob('*') if p.is_file()):
-        rel = norm_rel(src.relative_to(content))
-        if not is_safe_rel(rel) or should_skip(rel):
-            continue
-        dst = release_dir / rel
-        dst.parent.mkdir(parents=True, exist_ok=True)
-        shutil.copy2(src, dst)
-        current_files.add(rel)
-        files.append({'path': rel, 'size': dst.stat().st_size, 'sha256': sha256_file(dst)})
-
-    obsolete_set = {x for x in previous_files - current_files if is_safe_rel(x) and not should_skip(x)}
-    obsolete_set.add('tools/scbl-tunnel-client.exe')
-    obsolete = sorted(obsolete_set)
-    full_name = f'SCBL-Client-v{version}-win-x86.zip'
-    full_dst = full_dir / full_name
-    write_full_zip(content, full_dst)
-
-legacy_release_notes = (
-    [update_announcement['title']] +
-    [line.strip() for line in update_announcement['body'].splitlines() if line.strip()]
-) if update_announcement else ([notes] if notes else [])
-
-manifest = {
-    'version': version,
-    'updateMode': 'file-delta',
-    'filesBaseUrl': f'files/{version}/',
-    'fullPackage': f'full/{full_name}',
-    'files': files,
-    'delete': obsolete,
-    'keepLocal': KEEP,
-    'release_notes': legacy_release_notes,
-    'updateAnnouncement': update_announcement or {'enabled': False},
-}
-previous_manifest_path = manifest_path.with_name('client_update_manifest.previous.json')
-if manifest_path.exists():
-    shutil.copy2(manifest_path, previous_manifest_path)
-manifest_tmp = manifest_path.with_suffix(manifest_path.suffix + '.tmp')
-manifest_tmp.write_text(json.dumps(manifest, ensure_ascii=False, indent=2), encoding='utf-8')
-manifest_tmp.replace(manifest_path)
-cleanup_old_releases(version, full_name)
-
-if update_announcement and bind_announcement_version:
-    try:
-        saved = json.loads(announcement_path.read_text(encoding='utf-8'))
-        saved['version'] = version
-        announcement_path.write_text(json.dumps(saved, ensure_ascii=False, indent=2), encoding='utf-8')
-        print(f'更新公告已绑定到版本 {version}，不会自动复用于后续版本。')
-    except Exception as exc:
-        print(f'更新公告版本绑定失败：{exc}')
-
-print(f'客户端全量包已发布：{full_dst}')
-print(f'文件发布目录：{release_dir}')
-print(f'文件数量：{len(files)}')
-print(f'删除清单数量：{len(obsolete)}')
-print(f'自定义更新公告：{"已嵌入" if update_announcement else "未设置，客户端使用更新内容摘要"}')
-print(f'清单文件：{manifest_path}')
-PYEOF
-
-  chmod -R a+rX "$updates_root" || true
-  write_update_server_files
-  systemctl daemon-reload
-  systemctl enable scbl-update.service >/dev/null 2>&1 || true
-  systemctl restart scbl-update.service || true
-  systemctl restart scbl-package-watch.timer || true
-  echo
-  echo "客户端全量包已发布。客户端将按 manifest 对比 SHA256，只下载缺失或变化的文件。"
-  echo "完整包保留在：$SCBL_ROOT/client-updates/full/"
-  echo "文件级更新目录：$SCBL_ROOT/client-updates/files/$version/"
-  echo "公告请在主菜单的“客户端公告管理”中按公告类型单独设置。"
-}
-
-
 
 manifest_value() {
   local manifest="$1" dotted_key="$2"
@@ -2608,104 +2353,87 @@ PYEOF_CURRENT_CLIENT_VERSION
 download_latest_client_release() {
   load_env_if_exists; set_defaults
   local repo="${SCBL_RELEASE_REPOSITORY:-$DEFAULT_SCBL_RELEASE_REPOSITORY}"
-  local tag="${SCBL_CLIENT_RELEASE_TAG:-$DEFAULT_CLIENT_RELEASE_TAG}"
-  local base="https://github.com/${repo}/releases/download/${tag}"
-  local tmpdir manifest version package expected actual current cmp staged target component expected_package release_tag package_base
+  local version_url="${SCBL_CLIENT_VERSION_URL:-https://raw.githubusercontent.com/${repo}/main/VERSION_CLIENT}"
+  local version tag package base expected actual current cmp tmpdir staged
 
-  tmpdir="$(mktemp -d -t scbl-client-release.XXXXXX)"
-  manifest="$tmpdir/client-release-manifest.json"
-  echo "正在读取 GitHub 客户端稳定版：${repo} / ${tag}"
-  if ! curl -fL --connect-timeout 10 --max-time 120 --retry 3 --retry-all-errors \
-      "$base/client-release-manifest.json" -o "$manifest"; then
-    rm -rf "$tmpdir"
-    echo "客户端 Release 清单下载失败。"
+  echo "正在检查 GitHub 正式客户端版本..."
+  version="$(curl -fsSL --connect-timeout 10 --max-time 60 --retry 3 --retry-all-errors "$version_url" 2>/dev/null | tr -d '[:space:]' || true)"
+  if [[ ! "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+    echo "无法读取正式客户端版本。"
     return 1
   fi
 
-  version="$(manifest_value "$manifest" version)"
-  package="$(manifest_value "$manifest" file)"
-  expected="$(manifest_value "$manifest" sha256 | tr '[:upper:]' '[:lower:]')"
-  component="$(manifest_value "$manifest" component)"
-  release_tag="$(manifest_value "$manifest" releaseTag)"
-  expected_package="SCBL-Client-v${version}-win-x86.zip"
-  if [[ "$component" != "client" ||
-        ! "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ||
-        "$package" != "$expected_package" ||
-        ! "$expected" =~ ^[0-9a-f]{64}$ ]]; then
-    rm -rf "$tmpdir"
-    echo "客户端 Release 清单格式不合法，拒绝下载。"
+  tag="client-v${version}"
+  package="SCBL-Client-v${version}-win-x86.zip"
+  base="${SCBL_CLIENT_PACKAGE_BASE_URL:-https://github.com/${repo}/releases/download/${tag}}"
+  expected="$(curl -fsSL --connect-timeout 10 --max-time 60 --retry 3 --retry-all-errors \
+    "$base/${package}.sha256" 2>/dev/null | awk 'NF {print tolower($1); exit}' || true)"
+  if [[ ! "$expected" =~ ^[0-9a-f]{64}$ ]]; then
+    echo "客户端安装包校验信息读取失败。"
     return 1
-  fi
-
-  package_base="$base"
-  if [[ -n "$release_tag" ]]; then
-    if [[ "$release_tag" != "client-v${version}" ]]; then
-      rm -rf "$tmpdir"
-      echo "客户端 Release 清单 releaseTag 不合法。"
-      return 1
-    fi
-    package_base="${SCBL_CLIENT_PACKAGE_BASE_URL:-https://github.com/${repo}/releases/download/${release_tag}}"
   fi
 
   current="$(current_published_client_version)"
-  if [[ -n "$current" ]]; then
+  if [[ -n "$current" && "$current" != "0.0.0" ]]; then
     cmp="$(semver_compare "$current" "$version")"
     if [[ "$cmp" == "1" ]]; then
-      echo "当前已发布客户端 v$current，高于 GitHub 稳定版 v$version。"
-      prompt_yes_no CONFIRM_CLIENT_DOWNGRADE "确认降级客户端更新源" "n"
-      [[ "$CONFIRM_CLIENT_DOWNGRADE" == "y" ]] || { rm -rf "$tmpdir"; return 0; }
-    elif [[ "$cmp" == "0" && -f "$SCBL_ROOT/client-updates/full/$package" ]]; then
-      actual="$(sha256sum "$SCBL_ROOT/client-updates/full/$package" | awk '{print $1}')"
+      echo "服务器当前客户端 v$current 高于 GitHub 正式版 v$version，本次保留现有版本。"
+      return 0
+    fi
+    if [[ "$cmp" == "0" && -f "$SCBL_ROOT/client-updates/full/$package" ]]; then
+      actual="$(sha256sum "$SCBL_ROOT/client-updates/full/$package" | awk '{print tolower($1)}')"
       if [[ "$actual" == "$expected" ]]; then
-        echo "当前客户端更新源已是 v$version，SHA256 一致，无需重复发布。"
-        rm -rf "$tmpdir"
+        echo "服务器客户端已经是正式版 v$version。"
         return 0
       fi
     fi
   fi
 
-  mkdir -p "$SCBL_ROOT/incoming/client/.download" "$SCBL_ROOT/incoming/client"
-  staged="$SCBL_ROOT/incoming/client/.download/${package}.part"
-  target="$SCBL_ROOT/incoming/client/$package"
-  rm -f "$staged"
-  echo "正在下载客户端全量包：$package"
+  tmpdir="$(mktemp -d -t scbl-client-release.XXXXXX)"
+  staged="$tmpdir/$package"
+  echo "正在下载客户端 v$version 完整包..."
   if ! curl -fL --connect-timeout 10 --max-time 900 --retry 3 --retry-all-errors \
-      "$package_base/$package" -o "$staged"; then
-    rm -f "$staged"; rm -rf "$tmpdir"
-    echo "客户端全量包下载失败，当前发布版本未受影响。"
+      "$base/$package" -o "$staged"; then
+    rm -rf "$tmpdir"
+    echo "客户端安装包下载失败，服务器现有版本没有改变。"
     return 1
   fi
-  actual="$(sha256sum "$staged" | awk '{print $1}')"
+  actual="$(sha256sum "$staged" | awk '{print tolower($1)}')"
   if [[ "$actual" != "$expected" ]]; then
-    rm -f "$staged"; rm -rf "$tmpdir"
-    echo "客户端全量包 SHA256 校验失败。"
-    echo "expected=$expected"
-    echo "actual=$actual"
+    rm -rf "$tmpdir"
+    echo "客户端安装包校验失败，请重新下载。"
     return 1
   fi
   if ! python3 - "$staged" <<'PYEOF_VALIDATE_CLIENT_ZIP'
 import sys, zipfile
+from pathlib import PurePosixPath
 path = sys.argv[1]
 with zipfile.ZipFile(path) as archive:
-    names = [name.replace('\\', '/').rstrip('/') for name in archive.namelist()]
-    if not any(name.endswith('/SplinterCellCNLauncher.exe') or name == 'SplinterCellCNLauncher.exe' for name in names):
-        raise SystemExit('全量包内没有 SplinterCellCNLauncher.exe')
+    names = []
+    for item in archive.infolist():
+        p = PurePosixPath(item.filename.replace('\\', '/'))
+        if p.is_absolute() or '..' in p.parts:
+            raise SystemExit(f'unsafe client zip path: {item.filename}')
+        names.append(str(p).rstrip('/'))
+    required = {'SplinterCellCNLauncher.exe', 'SCBL.Updater.exe'}
+    found = {name.rsplit('/', 1)[-1] for name in names}
+    missing = sorted(required - found)
+    if missing:
+        raise SystemExit('client package missing: ' + ', '.join(missing))
 PYEOF_VALIDATE_CLIENT_ZIP
   then
-    rm -f "$staged"; rm -rf "$tmpdir"
-    echo "客户端 ZIP 结构校验失败。"
+    rm -rf "$tmpdir"
+    echo "客户端安装包内容检查失败。"
     return 1
   fi
 
-  mv -f "$staged" "$target"
-  rm -rf "$tmpdir"
-  echo "客户端包已校验并原子投递：$target"
-  if systemctl list-unit-files 2>/dev/null | grep -q '^scbl-package-watch\.service'; then
-    systemctl start scbl-package-watch.service
-  else
-    bash "$MANAGER_SCRIPT" --auto-publish-client "$target"
+  if publish_client_update_package_auto "$staged" "$version" "正式客户端 v$version"; then
+    rm -rf "$tmpdir"
+    echo "服务器客户端已更新到 v$version。"
+    return 0
   fi
-  echo "后续继续沿用原有文件级差量发布、更新公告和更新服务流程。"
+  rm -rf "$tmpdir"
+  return 1
 }
 
 queue_client_package_from_file() {
@@ -2725,7 +2453,7 @@ queue_client_package_from_file() {
   target="$SCBL_ROOT/incoming/client/$base"
   cp -f "$source" "$staged"
   mv -f "$staged" "$target"
-  echo "已投递：$target"
+  echo "客户端安装包已加入发布队列：$target"
   systemctl start scbl-package-watch.service 2>/dev/null || bash "$MANAGER_SCRIPT" --auto-publish-client "$target"
 }
 
@@ -2777,10 +2505,10 @@ import json, sys
 with open(sys.argv[1], encoding='utf-8-sig') as handle:
     data = json.load(handle)
 print(f"  当前发布版本：{data.get('version', '未知')}")
-print(f"  更新模式：{data.get('updateMode', '未知')}")
-print(f"  文件数量：{len(data.get('files', []))}")
-print(f"  删除清单：{len(data.get('delete', []))}")
+print(f"  更新方式：完整包")
 print(f"  完整包：{data.get('fullPackage', '未知')}")
+digest = str(data.get('fullPackageSha256', '')).strip()
+print(f"  文件校验：{digest or '未知'}")
 PYEOF_CLIENT_UPDATE_STATUS
   else
     echo "  尚未发布客户端全量包。"
@@ -2820,66 +2548,41 @@ CLIENTMENU
 update_server_tool_online() {
   load_env_if_exists; set_defaults
   local repo="${SCBL_RELEASE_REPOSITORY:-$DEFAULT_SCBL_RELEASE_REPOSITORY}"
-  local tag="${SCBL_SERVER_TOOL_RELEASE_TAG:-$DEFAULT_SERVER_TOOL_RELEASE_TAG}"
-  local base="https://github.com/${repo}/releases/download/${tag}"
-  local tmpdir manifest version package expected actual cmp extract_root manager_new control_new release_tag package_base
-  local backup_root control_changed=0 binary_check_new branch_new component expected_package package_root
+  local version_url="${SCBL_SERVER_TOOL_VERSION_URL:-https://raw.githubusercontent.com/${repo}/main/VERSION_SERVER_TOOL}"
+  local version tag package base expected actual cmp tmpdir extract_root manager_new control_new version_new
+  local backup_root control_changed=0 binary_check_new branch_new package_root
 
-  tmpdir="$(mktemp -d -t scbl-server-tool.XXXXXX)"
-  manifest="$tmpdir/server-tool-release-manifest.json"
-  echo "正在读取 GitHub 服务端工具稳定版：${repo} / ${tag}"
-  if ! curl -fL --connect-timeout 10 --max-time 120 --retry 3 --retry-all-errors \
-      "$base/server-tool-release-manifest.json" -o "$manifest"; then
-    rm -rf "$tmpdir"
-    echo "服务端工具 Release 清单下载失败。"
+  echo "正在检查 GitHub 正式服务端工具版本..."
+  version="$(curl -fsSL --connect-timeout 10 --max-time 60 --retry 3 --retry-all-errors "$version_url" 2>/dev/null | tr -d '[:space:]' || true)"
+  if [[ ! "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+    echo "无法读取正式服务端工具版本。"
     return 1
   fi
-
-  version="$(manifest_value "$manifest" version)"
-  package="$(manifest_value "$manifest" file)"
-  expected="$(manifest_value "$manifest" sha256 | tr '[:upper:]' '[:lower:]')"
-  component="$(manifest_value "$manifest" component)"
-  release_tag="$(manifest_value "$manifest" releaseTag)"
-  expected_package="SCBL-Server-Tool-v${version}-linux-x86_64.tar.gz"
-  if [[ "$component" != "server-tool" ||
-        ! "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ||
-        "$package" != "$expected_package" ||
-        ! "$expected" =~ ^[0-9a-f]{64}$ ]]; then
-    rm -rf "$tmpdir"
-    echo "服务端工具 Release 清单格式不合法。"
-    return 1
-  fi
-
-  package_base="$base"
-  if [[ -n "$release_tag" ]]; then
-    if [[ "$release_tag" != "server-tool-v${version}" ]]; then
-      rm -rf "$tmpdir"
-      echo "服务端工具 Release 清单 releaseTag 不合法。"
-      return 1
-    fi
-    package_base="${SCBL_SERVER_TOOL_PACKAGE_BASE_URL:-https://github.com/${repo}/releases/download/${release_tag}}"
-  fi
-
   cmp="$(semver_compare "$SERVER_TOOL_VERSION" "$version")"
   if [[ "$cmp" == "0" ]]; then
-    echo "当前服务端工具已是 v$version，无需升级。"
-    rm -rf "$tmpdir"
+    echo "当前服务端工具已经是 v$version。"
+    download_latest_client_release || echo "警告：客户端正式版检查失败，服务器现有客户端继续使用。"
     return 0
   elif [[ "$cmp" == "1" ]]; then
-    echo "当前服务端工具 v$SERVER_TOOL_VERSION 高于 GitHub 稳定版 v$version。"
-    prompt_yes_no CONFIRM_SERVER_DOWNGRADE "确认降级服务端工具" "n"
-    [[ "$CONFIRM_SERVER_DOWNGRADE" == "y" ]] || { rm -rf "$tmpdir"; return 0; }
+    echo "当前服务端工具 v$SERVER_TOOL_VERSION 高于 GitHub 正式版 v$version，本次不降级。"
+    return 0
   fi
 
-  echo "正在下载服务端工具包：$package"
-  curl -fL --connect-timeout 10 --max-time 600 --retry 3 --retry-all-errors \
-    "$package_base/$package" -o "$tmpdir/$package"
-  actual="$(sha256sum "$tmpdir/$package" | awk '{print $1}')"
-  if [[ "$actual" != "$expected" ]]; then
-    rm -rf "$tmpdir"
-    echo "服务端工具包 SHA256 校验失败。"
-    return 1
+  tag="server-tool-v${version}"
+  package="SCBL-Server-Tool-v${version}-linux-x86_64.tar.gz"
+  base="${SCBL_SERVER_TOOL_PACKAGE_BASE_URL:-https://github.com/${repo}/releases/download/${tag}}"
+  expected="$(curl -fsSL --connect-timeout 10 --max-time 60 --retry 3 --retry-all-errors \
+    "$base/${package}.sha256" 2>/dev/null | awk 'NF {print tolower($1); exit}' || true)"
+  [[ "$expected" =~ ^[0-9a-f]{64}$ ]] || { echo "服务端工具校验信息读取失败。"; return 1; }
+
+  tmpdir="$(mktemp -d -t scbl-server-tool.XXXXXX)"
+  echo "正在下载服务端工具 v$version 完整包..."
+  if ! curl -fL --connect-timeout 10 --max-time 600 --retry 3 --retry-all-errors \
+      "$base/$package" -o "$tmpdir/$package"; then
+    rm -rf "$tmpdir"; echo "服务端工具下载失败。"; return 1
   fi
+  actual="$(sha256sum "$tmpdir/$package" | awk '{print tolower($1)}')"
+  [[ "$actual" == "$expected" ]] || { rm -rf "$tmpdir"; echo "服务端工具文件校验失败。"; return 1; }
 
   extract_root="$tmpdir/extract"
   mkdir -p "$extract_root"
@@ -2902,10 +2605,15 @@ with tarfile.open(archive_path, 'r:gz') as archive:
     archive.extractall(target_root, members=members)
 PYEOF_SAFE_SERVER_EXTRACT
 
-  manager_new="$(find "$extract_root" -type f -name install_public_server.sh -print -quit)"
-  control_new="$(find "$extract_root" -type f -name scbl_control_plane.py -print -quit)"
-  [[ -n "$manager_new" && -n "$control_new" ]] || {
+  package_root="$(find "$extract_root" -mindepth 1 -maxdepth 1 -type d -name 'SCBL-Server-Tool-v*-linux-x86_64' -print -quit)"
+  manager_new="${package_root}/install_public_server.sh"
+  control_new="${package_root}/scbl_control_plane.py"
+  version_new="${package_root}/VERSION_SERVER_TOOL"
+  [[ -f "$manager_new" && -f "$control_new" && -f "$version_new" ]] || {
     rm -rf "$tmpdir"; echo "服务端工具包缺少必要文件。"; return 1;
+  }
+  [[ "$(tr -d '[:space:]' < "$version_new")" == "$version" ]] || {
+    rm -rf "$tmpdir"; echo "服务端工具包版本信息不一致。"; return 1;
   }
   validate_manager_script_file "$manager_new"
   python3 -m py_compile "$control_new"
@@ -2913,21 +2621,22 @@ PYEOF_SAFE_SERVER_EXTRACT
   backup_root="$SCBL_ROOT/backups/server-tool/$(date +%Y%m%d_%H%M%S)"
   mkdir -p "$backup_root"
   [[ -f "$MANAGER_SCRIPT" ]] && cp -a "$MANAGER_SCRIPT" "$backup_root/install_public_server.sh"
+  [[ -f "$MANAGER_DIR/VERSION_SERVER_TOOL" ]] && cp -a "$MANAGER_DIR/VERSION_SERVER_TOOL" "$backup_root/VERSION_SERVER_TOOL"
   [[ -f "$SCBL_ROOT/server/scbl_control_plane.py" ]] && cp -a "$SCBL_ROOT/server/scbl_control_plane.py" "$backup_root/scbl_control_plane.py"
   [[ -f "$SCBL_ROOT/server/check_scbl_binary_release.sh" ]] && cp -a "$SCBL_ROOT/server/check_scbl_binary_release.sh" "$backup_root/check_scbl_binary_release.sh"
   [[ -f "$SCBL_ROOT/server/5th-echelon_branch.txt" ]] && cp -a "$SCBL_ROOT/server/5th-echelon_branch.txt" "$backup_root/5th-echelon_branch.txt"
 
-  if [[ ! -f "$SCBL_ROOT/server/scbl_control_plane.py" ]] ||
-     ! cmp -s "$control_new" "$SCBL_ROOT/server/scbl_control_plane.py"; then
+  if [[ ! -f "$SCBL_ROOT/server/scbl_control_plane.py" ]] || ! cmp -s "$control_new" "$SCBL_ROOT/server/scbl_control_plane.py"; then
     control_changed=1
   fi
 
   if ! {
     install -m 0755 "$manager_new" "$MANAGER_SCRIPT"
+    install -m 0644 "$version_new" "$MANAGER_DIR/VERSION_SERVER_TOOL"
     install -d -m 0755 "$SCBL_ROOT/server"
     install -m 0644 "$control_new" "$SCBL_ROOT/server/scbl_control_plane.py"
-    binary_check_new="$(find "$extract_root" -type f -name check_scbl_binary_release.sh -print -quit)"
-    branch_new="$(find "$extract_root" -type f -name 5th-echelon_branch.txt -print -quit)"
+    binary_check_new="$(find "$package_root" -type f -name check_scbl_binary_release.sh -print -quit)"
+    branch_new="$(find "$package_root" -type f -name 5th-echelon_branch.txt -print -quit)"
     [[ -z "$binary_check_new" ]] || install -m 0755 "$binary_check_new" "$SCBL_ROOT/server/check_scbl_binary_release.sh"
     [[ -z "$branch_new" ]] || install -m 0644 "$branch_new" "$SCBL_ROOT/server/5th-echelon_branch.txt"
     python3 - "$SCBL_ROOT/server-tool-version.json" "$version" "$tag" "$actual" <<'PYEOF_SERVER_TOOL_STATE'
@@ -2935,13 +2644,7 @@ import json, sys
 from datetime import datetime, timezone
 path, version, tag, digest = sys.argv[1:5]
 with open(path, 'w', encoding='utf-8') as handle:
-    json.dump({
-        'version': version,
-        'releaseTag': tag,
-        'installedAt': datetime.now(timezone.utc).isoformat(),
-        'source': 'github-release',
-        'packageSha256': digest,
-    }, handle, ensure_ascii=False, indent=2)
+    json.dump({'version': version, 'releaseTag': tag, 'installedAt': datetime.now(timezone.utc).isoformat(), 'source': 'github-release', 'packageSha256': digest}, handle, ensure_ascii=False, indent=2)
 PYEOF_SERVER_TOOL_STATE
     if [[ "$control_changed" == "1" ]]; then
       systemctl restart scbl-control-plane.service
@@ -2949,11 +2652,10 @@ PYEOF_SERVER_TOOL_STATE
       systemctl is-active --quiet scbl-control-plane.service
     fi
   }; then
-    echo "升级失败，正在回滚服务端工具..."
+    echo "升级失败，正在恢复服务端工具..."
     [[ -f "$backup_root/install_public_server.sh" ]] && install -m 0755 "$backup_root/install_public_server.sh" "$MANAGER_SCRIPT"
+    [[ -f "$backup_root/VERSION_SERVER_TOOL" ]] && install -m 0644 "$backup_root/VERSION_SERVER_TOOL" "$MANAGER_DIR/VERSION_SERVER_TOOL"
     [[ -f "$backup_root/scbl_control_plane.py" ]] && install -m 0644 "$backup_root/scbl_control_plane.py" "$SCBL_ROOT/server/scbl_control_plane.py"
-    [[ -f "$backup_root/check_scbl_binary_release.sh" ]] && install -m 0755 "$backup_root/check_scbl_binary_release.sh" "$SCBL_ROOT/server/check_scbl_binary_release.sh"
-    [[ -f "$backup_root/5th-echelon_branch.txt" ]] && install -m 0644 "$backup_root/5th-echelon_branch.txt" "$SCBL_ROOT/server/5th-echelon_branch.txt"
     systemctl restart scbl-control-plane.service 2>/dev/null || true
     rm -rf "$tmpdir"
     return 1
@@ -2963,10 +2665,9 @@ PYEOF_SERVER_TOOL_STATE
     sort -nr | awk 'NR>5 {sub(/^[^ ]+ /, ""); print}' | xargs -r rm -rf
   rm -rf "$tmpdir"
   echo "SCBL 服务端工具已升级到 v$version。"
-  echo "配置、数据库、客户端更新数据和 DDNS-GO 配置均未覆盖。"
-  echo "升级备份：$backup_root"
+  echo "现有配置、数据库、客户端更新数据和 DDNS-GO 配置均已保留。"
+  download_latest_client_release || echo "警告：客户端正式版检查失败，服务器现有客户端继续使用。"
 }
-
 
 rollback_server_tool_latest() {
   load_env_if_exists; set_defaults
@@ -3073,245 +2774,106 @@ publish_client_update_package_auto() {
   load_env_if_exists; set_defaults
   local package="$1" version notes updates_root
   version="${2:-$(infer_version_from_name "$package")}"; version="${version#v}"; version="${version#V}"
-  notes="${3:-自动发布客户端全量包}"
-  if [[ ! -f "$package" ]]; then echo "客户端全量包不存在：$package"; return 1; fi
+  notes="${3:-正式客户端更新}"
+  [[ -f "$package" ]] || { echo "客户端安装包不存在：$package"; return 1; }
   if [[ ! "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
-    echo "无法从文件名识别三段纯数字版本号，或版本号不合规：$(basename "$package")"
-    echo "请使用类似 SCBL-Client-v0.6.0-win-x86.zip 的文件名。"
+    echo "无法从文件名识别客户端版本，请使用 SCBL-Client-vX.Y.Z-win-x86.zip。"
     return 1
   fi
 
   updates_root="$SCBL_ROOT/client-updates"
-  mkdir -p "$updates_root/full" "$updates_root/files"
-
+  mkdir -p "$updates_root/full"
   python3 - "$package" "$version" "$updates_root" "$notes" <<'PYEOF_AUTO_CLIENT'
-import hashlib, json, re, shutil, sys, tempfile, zipfile
-from pathlib import Path
+import hashlib, json, re, shutil, sys, zipfile
+from pathlib import Path, PurePosixPath
 
 package = Path(sys.argv[1]).resolve()
 version = sys.argv[2].strip().lstrip('vV')
 updates_root = Path(sys.argv[3]).resolve()
 notes = sys.argv[4].strip()
 if not re.fullmatch(r'[0-9]+\.[0-9]+\.[0-9]+', version):
-    raise SystemExit('version must be a three-part numeric semantic version')
-
-release_dir = updates_root / 'files' / version
-full_dir = updates_root / 'full'
-manifest_path = updates_root / 'client_update_manifest.json'
-announcement_path = updates_root / 'update_announcement.json'
-
-KEEP = ['logs/', 'backup/', 'updates/', 'launcher_settings.json']
-SKIP_DIRS = {'logs', 'updates', 'backup'}
-SKIP_FILES = {'client_update_manifest.json', 'update_manifest.json', 'client_package_info.json'}
+    raise SystemExit('invalid client version')
+expected_name = f'SCBL-Client-v{version}-win-x86.zip'
+if package.name != expected_name:
+    raise SystemExit(f'client package filename must be {expected_name}')
 
 def sha256_file(path: Path) -> str:
     h = hashlib.sha256()
-    with path.open('rb') as f:
-        for chunk in iter(lambda: f.read(1024 * 1024), b''):
+    with path.open('rb') as handle:
+        for chunk in iter(lambda: handle.read(1024 * 1024), b''):
             h.update(chunk)
     return h.hexdigest()
 
-def norm_rel(path) -> str:
-    return str(path).replace('\\', '/').strip().lstrip('/')
+with zipfile.ZipFile(package) as archive:
+    names = []
+    for item in archive.infolist():
+        path = PurePosixPath(item.filename.replace('\\', '/'))
+        if path.is_absolute() or '..' in path.parts:
+            raise SystemExit(f'unsafe client zip path: {item.filename}')
+        names.append(str(path).rstrip('/'))
+    found = {name.rsplit('/', 1)[-1] for name in names}
+    required = {'SplinterCellCNLauncher.exe', 'SCBL.Updater.exe'}
+    missing = sorted(required - found)
+    if missing:
+        raise SystemExit('client package missing: ' + ', '.join(missing))
 
-def is_safe_rel(path: str) -> bool:
-    path = norm_rel(path)
-    return bool(path) and not path.startswith('/') and ':' not in path and all(part and part != '..' for part in path.split('/'))
+full_dir = updates_root / 'full'
+full_dir.mkdir(parents=True, exist_ok=True)
+destination = full_dir / expected_name
+temp = destination.with_suffix(destination.suffix + '.tmp')
+shutil.copy2(package, temp)
+temp.replace(destination)
+digest = sha256_file(destination)
 
-def should_skip(rel: str) -> bool:
-    parts = norm_rel(rel).split('/')
-    return parts[0] in SKIP_DIRS or parts[-1] in SKIP_FILES
+announcement_path = updates_root / 'update_announcement.json'
+try:
+    announcement = json.loads(announcement_path.read_text(encoding='utf-8'))
+except Exception:
+    announcement = {'enabled': False}
+configured = str(announcement.get('version', '')).strip().lstrip('vV')
+if not announcement.get('enabled', False) or (configured and configured != version):
+    announcement = {'enabled': False}
+elif not configured:
+    announcement['version'] = version
+    announcement_path.write_text(json.dumps(announcement, ensure_ascii=False, indent=2), encoding='utf-8')
 
-def safe_extract(zf: zipfile.ZipFile, root: Path):
-    root_resolved = root.resolve()
-    for member in zf.infolist():
-        dest = (root / member.filename).resolve()
-        if dest != root_resolved and root_resolved not in dest.parents:
-            raise SystemExit(f'unsafe zip path: {member.filename}')
-    zf.extractall(root)
+release_notes = [notes] if notes else []
+if announcement.get('enabled', False):
+    title = str(announcement.get('title', '')).strip()
+    body = str(announcement.get('body', '')).strip()
+    release_notes = ([title] if title else []) + [line.strip() for line in body.splitlines() if line.strip()]
 
-def find_root(root: Path) -> Path:
-    if (root / 'SplinterCellCNLauncher.exe').exists():
-        return root
-    for p in root.rglob('SplinterCellCNLauncher.exe'):
-        return p.parent
-    return root
-
-def previous_files():
-    try:
-        data = json.loads(manifest_path.read_text(encoding='utf-8'))
-        return {
-            norm_rel(x.get('path', ''))
-            for x in data.get('files', [])
-            if isinstance(x, dict) and x.get('path')
-        }
-    except Exception:
-        return set()
-
-def load_update_announcement():
-    try:
-        data = json.loads(announcement_path.read_text(encoding='utf-8'))
-    except Exception:
-        return None, False
-    if not data.get('enabled', False):
-        return None, False
-    configured_version = str(data.get('version', '')).strip().lstrip('vV')
-    if configured_version and configured_version != version:
-        print(f'saved update announcement targets {configured_version}; current package is {version}, skip custom announcement')
-        return None, False
-    title = str(data.get('title', '')).strip()
-    body = str(data.get('body', '')).strip()
-    if not title or not body:
-        return None, False
-    return {
-        'enabled': True,
-        'id': str(data.get('id', '')).strip() or f'update-{version}',
-        'title': title,
-        'body': body,
-        'title_en': str(data.get('title_en', '')).strip(),
-        'body_en': str(data.get('body_en', '')).strip(),
-    }, not bool(configured_version)
-
-def ensure_updater_payload(content: Path):
-    root_updater = content / 'SCBL.Updater.exe'
-    payload = content / 'tools' / 'SCBL.Updater.payload.exe'
-    if not root_updater.exists():
-        raise SystemExit('package has no SCBL.Updater.exe')
-    payload.parent.mkdir(parents=True, exist_ok=True)
-    if not payload.exists() or sha256_file(payload) != sha256_file(root_updater):
-        shutil.copy2(root_updater, payload)
-        print('synthesized tools/SCBL.Updater.payload.exe from SCBL.Updater.exe')
-
-def write_full_zip(content: Path, destination: Path):
-    destination.parent.mkdir(parents=True, exist_ok=True)
-    if destination.exists():
-        destination.unlink()
-    with zipfile.ZipFile(destination, 'w', compression=zipfile.ZIP_DEFLATED, compresslevel=9) as out:
-        for src in sorted(p for p in content.rglob('*') if p.is_file()):
-            rel = norm_rel(src.relative_to(content))
-            if is_safe_rel(rel) and not should_skip(rel):
-                out.write(src, rel)
-
-def version_key(value: str):
-    try:
-        parts = tuple(int(part) for part in value.strip().lstrip('vV').split('.'))
-        return parts if len(parts) == 3 else (0, 0, 0)
-    except Exception:
-        return (0, 0, 0)
-
-def full_package_version(name: str):
-    marker = 'SCBL-Client-v'
-    suffix = '-win-x86.zip'
-    if name.startswith(marker) and name.endswith(suffix):
-        return name[len(marker):-len(suffix)]
-    return '0.0.0'
-
-def cleanup_old_releases(current_version: str, current_full_name: str):
-    files_root = updates_root / 'files'
-    if files_root.exists():
-        entries = list(files_root.iterdir())
-        ordered = sorted(entries, key=lambda item: version_key(item.name), reverse=True)
-        keep = {current_version}
-        for child in ordered:
-            if child.name != current_version and version_key(child.name) != (0, 0, 0):
-                keep.add(child.name)
-                break
-        for child in entries:
-            if child.name in keep:
-                continue
-            if child.is_dir():
-                shutil.rmtree(child)
-            else:
-                child.unlink()
-            print(f'removed old client file release: {child}')
-
-    if full_dir.exists():
-        entries = list(full_dir.iterdir())
-        ordered = sorted(entries, key=lambda item: version_key(full_package_version(item.name)), reverse=True)
-        keep = {current_full_name}
-        for child in ordered:
-            if child.name != current_full_name and version_key(full_package_version(child.name)) != (0, 0, 0):
-                keep.add(child.name)
-                break
-        for child in entries:
-            if child.name in keep:
-                continue
-            if child.is_dir():
-                shutil.rmtree(child)
-            else:
-                child.unlink()
-            print(f'removed old client full package: {child}')
-
-prev = previous_files()
-cur = set()
-files = []
-update_announcement, bind_announcement_version = load_update_announcement()
-
-with tempfile.TemporaryDirectory(prefix='scbl_client_full_') as td:
-    tmp = Path(td)
-    with zipfile.ZipFile(package, 'r') as z:
-        safe_extract(z, tmp)
-    content = find_root(tmp)
-    if not (content / 'SplinterCellCNLauncher.exe').exists():
-        raise SystemExit('package has no SplinterCellCNLauncher.exe')
-
-    ensure_updater_payload(content)
-
-    if release_dir.exists():
-        shutil.rmtree(release_dir)
-    release_dir.mkdir(parents=True, exist_ok=True)
-
-    for src in sorted(p for p in content.rglob('*') if p.is_file()):
-        rel = norm_rel(src.relative_to(content))
-        if not is_safe_rel(rel) or should_skip(rel):
-            continue
-        dst = release_dir / rel
-        dst.parent.mkdir(parents=True, exist_ok=True)
-        shutil.copy2(src, dst)
-        cur.add(rel)
-        files.append({'path': rel, 'size': dst.stat().st_size, 'sha256': sha256_file(dst)})
-
-    obsolete_set = {x for x in prev - cur if is_safe_rel(x) and not should_skip(x)}
-    obsolete_set.add('tools/scbl-tunnel-client.exe')
-    obsolete = sorted(obsolete_set)
-    full_name = f'SCBL-Client-v{version}-win-x86.zip'
-    full_dst = full_dir / full_name
-    write_full_zip(content, full_dst)
-
-legacy_release_notes = (
-    [update_announcement['title']] +
-    [line.strip() for line in update_announcement['body'].splitlines() if line.strip()]
-) if update_announcement else ([notes] if notes else [])
-
+manifest_path = updates_root / 'client_update_manifest.json'
+previous = updates_root / 'client_update_manifest.previous.json'
+if manifest_path.exists():
+    shutil.copy2(manifest_path, previous)
 manifest = {
     'version': version,
-    'updateMode': 'file-delta',
-    'filesBaseUrl': f'files/{version}/',
-    'fullPackage': f'full/{full_name}',
-    'files': files,
-    'delete': obsolete,
-    'keepLocal': KEEP,
-    'release_notes': legacy_release_notes,
-    'updateAnnouncement': update_announcement or {'enabled': False},
+    'updateMode': 'full-package',
+    'fullPackage': f'full/{expected_name}',
+    'fullPackageSha256': digest,
+    'release_notes': release_notes,
+    'updateAnnouncement': announcement,
 }
-previous_manifest_path = manifest_path.with_name('client_update_manifest.previous.json')
-if manifest_path.exists():
-    shutil.copy2(manifest_path, previous_manifest_path)
-manifest_tmp = manifest_path.with_suffix(manifest_path.suffix + '.tmp')
+manifest_tmp = manifest_path.with_suffix('.json.tmp')
 manifest_tmp.write_text(json.dumps(manifest, ensure_ascii=False, indent=2), encoding='utf-8')
 manifest_tmp.replace(manifest_path)
-cleanup_old_releases(version, full_name)
 
-if update_announcement and bind_announcement_version:
-    try:
-        saved = json.loads(announcement_path.read_text(encoding='utf-8'))
-        saved['version'] = version
-        announcement_path.write_text(json.dumps(saved, ensure_ascii=False, indent=2), encoding='utf-8')
-        print(f'bound pending update announcement to {version}')
-    except Exception as exc:
-        print(f'failed to bind update announcement version: {exc}')
+packages = []
+pattern = re.compile(r'^SCBL-Client-v(\d+\.\d+\.\d+)-win-x86\.zip$')
+for item in full_dir.iterdir():
+    match = pattern.fullmatch(item.name)
+    if item.is_file() and match:
+        packages.append((tuple(map(int, match.group(1).split('.'))), item))
+for _, old in sorted(packages, reverse=True)[2:]:
+    old.unlink()
+files_dir = updates_root / 'files'
+if files_dir.exists():
+    shutil.rmtree(files_dir)
 
-print(f'published client {version}: files={len(files)}, delete={len(obsolete)}, customAnnouncement={bool(update_announcement)}')
+print(f'客户端更新包已发布：v{version}')
+print(f'完整包：{destination}')
+print(f'SHA256：{digest}')
 PYEOF_AUTO_CLIENT
 
   chmod -R a+rX "$updates_root" || true
@@ -3321,7 +2883,6 @@ PYEOF_AUTO_CLIENT
   systemctl restart scbl-update.service || true
   systemctl restart scbl-package-watch.timer || true
 }
-
 
 write_package_watcher_files() {
   mkdir -p "$SCBL_ROOT/bin" "$SCBL_ROOT/incoming/client" "$SCBL_ROOT/incoming/failed"
@@ -3385,7 +2946,6 @@ print_summary() {
   EasyTier 本地 RPC：127.0.0.1:$EASYTIER_RPC_PORT
   EasyTier 网络密钥：已设置
   SCBL 控制平面：http://$SCBL_SERVER_IP:$SCBL_CONTROL_PORT（仅虚拟网访问）
-  最低客户端版本：v$SCBL_MIN_CLIENT_VERSION
   客户端心跳有效期：${SCBL_HEARTBEAT_TTL}秒
   DDNS-GO：$(ddns_go_installed && echo "已安装，Web http://${DDNS_GO_LISTEN%:9876}:9876" || echo "未安装")
 
@@ -3435,7 +2995,6 @@ install_or_reinstall() {
   prompt_value EASYTIER_NETWORK_NAME "EasyTier 网络名称" "$EASYTIER_NETWORK_NAME"
   prompt_value SCBL_MTU "EasyTier MTU" "$SCBL_MTU"
   prompt_value EASYTIER_VERSION "EasyTier 官方版本标签" "$EASYTIER_VERSION"
-prompt_value SCBL_MIN_CLIENT_VERSION "控制平面允许的最低客户端版本" "$SCBL_MIN_CLIENT_VERSION"
     prompt_value SCBL_5TH_REPOSITORY "5th Echelon 二进制仓库（owner/repo）" "$SCBL_5TH_REPOSITORY"
     prompt_value SCBL_5TH_BRANCH "5th 构建分支，留空则下载 Release" "$SCBL_5TH_BRANCH"
     if [[ -n "$SCBL_5TH_BRANCH" ]]; then
@@ -3484,6 +3043,16 @@ prompt_value SCBL_MIN_CLIENT_VERSION "控制平面允许的最低客户端版本
   fi
   backup_env
   write_env
+
+  stage "检查客户端正式版本"
+  if ! download_latest_client_release; then
+    current_client="$(current_published_client_version)"
+    if [[ -z "$current_client" || "$current_client" == "0.0.0" ]]; then
+      echo "部署未完成：没有可用的客户端安装包，请检查服务器到 GitHub 的网络连接后重试。"
+      return 1
+    fi
+    echo "警告：正式客户端检查失败，继续使用服务器现有客户端 v$current_client。"
+  fi
   echo
   echo "部署完成。"
   print_summary
@@ -3502,7 +3071,6 @@ show_modify_config_summary() {
   7. EasyTier MTU：$SCBL_MTU
   8. 网络密钥：已设置（默认与客户端保持一致）
   9. EasyTier 官方版本：$EASYTIER_VERSION
-  10. 最低客户端版本：$SCBL_MIN_CLIENT_VERSION
 
   s. 保存配置并重启服务
   r. 放弃修改并返回上级菜单
@@ -3556,7 +3124,6 @@ modify_config() {
         prompt_keep EASYTIER_VERSION "新的 EasyTier 官方版本标签" "$EASYTIER_VERSION"
         ;;
       10)
-        prompt_keep SCBL_MIN_CLIENT_VERSION "新的最低客户端版本" "$SCBL_MIN_CLIENT_VERSION"
         ;;
       s|save|保存)
         SCBL_LISTEN="udp://0.0.0.0:${SCBL_PORT}"

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Focused v0.6.2 tests for authoritative SCBL game-session snapshots."""
+"""Focused tests for SCBL control-plane snapshots and automatic client versions."""
 
 from __future__ import annotations
 
@@ -62,6 +62,12 @@ def main() -> None:
                            (1008, 'prudps:/address=10.66.0.8;port=13000');
                 """
             )
+
+        control_plane.SCBL_ROOT = Path(tmp)
+        updates = control_plane.SCBL_ROOT / "client-updates"
+        updates.mkdir(parents=True)
+        (updates / "client_update_manifest.json").write_text('{"version":"1.0.0"}', encoding="utf-8")
+        assert control_plane.required_client_version() == "1.0.0"
 
         control_plane.DB_PATH = db_path
         with control_plane._SESSION_LOCK:

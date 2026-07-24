@@ -191,18 +191,6 @@ public sealed class ControlPlaneService : IDisposable
         return Convert.ToHexString(hmac.ComputeHash(Encoding.UTF8.GetBytes(canonical))).ToLowerInvariant();
     }
 
-    public static bool IsVersionOlderThan(string current, string minimum)
-    {
-        Version currentVersion = ParseThreePartVersion(current);
-        Version minimumVersion = ParseThreePartVersion(minimum);
-        return currentVersion.CompareTo(minimumVersion) < 0;
-    }
-
-    private static Version ParseThreePartVersion(string value)
-    {
-        string normalized = (value ?? string.Empty).Trim().TrimStart('v', 'V');
-        return Version.TryParse(normalized, out Version? version) ? version : new Version(0, 0, 0);
-    }
 
     public void Dispose()
     {

@@ -1,48 +1,32 @@
-# SCBL component release architecture
+# SCBL 发布结构
 
-SCBL uses independent component versions so a client-only change does not rebuild or
-renumber the Linux server tool, and a server-script-only change does not start a
-Windows build.
+## 版本来源
 
-## Components
-
-| Component | Version source | Immutable release | Rolling stable release |
+| 组件 | 唯一版本文件 | Release 标签 | Release 标题 |
 |---|---|---|---|
-| Windows client | `VERSION_CLIENT` and `client/SCBL.Version.props` | `client-vX.Y.Z` | `client-stable-latest` |
-| Linux server tool | `VERSION_SERVER_TOOL` and `SERVER_TOOL_VERSION` | `server-tool-vX.Y.Z` | `server-tool-stable-latest` |
-| 5th dedicated server and Hooks | `caox233/5th-echelon` | project release | `scbl-public-stable-latest` |
+| Windows 客户端 | `VERSION_CLIENT` | `client-vX.Y.Z` | `[CLIENT] Windows Client vX.Y.Z` |
+| Linux 服务端工具 | `VERSION_SERVER_TOOL` | `server-tool-vX.Y.Z` | `[SERVER] Server Tool vX.Y.Z` |
+| 5th dedicated server 与 Hooks | 5th 项目维护 | 5th 项目标签 | 5th 项目维护 |
 
-The root `VERSION` remains a compatibility alias for the public Windows client.
-`COMPONENT_VERSIONS.json` records the current compatible component set.
+客户端和服务端不再创建 `stable-latest` Release。安装器和管理工具读取主分支版本文件，再下载对应的正式完整包和 SHA256。
 
-## Client delivery
+## 客户端启动顺序
 
-The server manager can download `client-release-manifest.json` and the client ZIP
-from `client-stable-latest`. It verifies SHA256 and the ZIP structure, then moves the
-validated package into `/opt/scbl-public/incoming/client/`. The existing package
-watcher continues to generate file-level delta manifests, update announcements and
-the locally hosted full package.
+1. 启动 Updater 自检。
+2. 通过公网更新端口读取服务器客户端更新信息。
+3. 版本一致：继续启动。
+4. 版本不一致：立即更新或退出。
+5. 无法检查：重新检查或退出。
+6. 版本确认完成后，才扫描游戏目录、播放音乐、清理旧进程和启动 EasyTier。
 
-The server keeps the current and immediately previous client release for rollback.
-The update manifest is written through a temporary file and atomically replaced.
+## 服务端客户端包同步
 
-## Server-tool upgrade
+首次部署和 Server Tool 升级完成后，服务端读取 `VERSION_CLIENT`，下载 `client-vX.Y.Z` 的完整 ZIP 和 SHA256。服务器更新信息只包含当前版本、完整包路径、完整包 SHA256、更新摘要和公告。
 
-The installed `SCBL` manager downloads only from `server-tool-stable-latest`.
-It validates the release manifest, SHA256, tar paths, Bash syntax and Python syntax.
-Before replacement it backs up the manager and control plane. Configuration, the
-5th database, client update data, incoming files, backups and DDNS-GO settings are
-not overwritten. Only the control plane is restarted when its source changed.
+## 保留策略
 
-## Route Guard
+每个组件保留最新两个正式 Release。版本包不会被同名覆盖；同版本重新运行发布流程只在发布工作流本身发生变化或手动执行时更新资产。
 
-Route Guard still authorizes the exact launcher-owned game PID set. Game IPv4
-TCP/UDP packets addressed to the SCBL virtual subnet are pinned to the EasyTier
-interface and source address; other destinations from those PIDs are blocked.
-Other applications are reinjected unchanged.
+## 数据边界
 
-Version 0.6.3 precomputes TCP and UDP local-port owner indexes during the background
-IP Helper refresh. Packet-path fallback lookups are O(1), removing the previous
-full owner-table scans. `owner-unknown` remains fail-open for unrelated-system
-safety and is recorded for diagnostics; IPv6, loopback-proxy transfer and fragment
-hardening remain separate compatibility-sensitive work.
+Server Tool 更新不得覆盖 `scbl.env`、`server/5th-echelon.db`、客户端更新目录、备份目录或 DDNS-GO 配置。Hooks 源码和 DLL 不在 SCBL 仓库内修改或重新构建。

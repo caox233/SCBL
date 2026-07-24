@@ -169,13 +169,11 @@ function Test-EmbeddedFilesIntegrity {
 }
 
 
-$VersionProps = Join-Path -Path $PSScriptRoot -ChildPath "SCBL.Version.props"
-if (!(Test-Path -LiteralPath $VersionProps)) { throw "Version source was not found: $VersionProps" }
-$VersionText = Get-Content -LiteralPath $VersionProps -Raw -Encoding UTF8
-$VersionMatch = [regex]::Match($VersionText, '<ScblVersion>\s*([0-9]+\.[0-9]+\.[0-9]+)\s*</ScblVersion>')
-if (!$VersionMatch.Success) { throw "SCBL.Version.props must contain a three-part numeric ScblVersion." }
-$ScblVersion = $VersionMatch.Groups[1].Value
-Write-Host "SCBL Public source version: $ScblVersion"
+$VersionFile = Join-Path -Path $PSScriptRoot -ChildPath "..\VERSION_CLIENT"
+if (!(Test-Path -LiteralPath $VersionFile)) { throw "Client version file was not found: $VersionFile" }
+$ScblVersion = (Get-Content -LiteralPath $VersionFile -Raw -Encoding UTF8).Trim()
+if ($ScblVersion -notmatch '^[0-9]+\.[0-9]+\.[0-9]+$') { throw "VERSION_CLIENT must contain a three-part numeric version." }
+Write-Host "SCBL Windows client version: $ScblVersion"
 
 function Invoke-Step {
     param(

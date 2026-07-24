@@ -44,14 +44,12 @@ jobs:
           set -euo pipefail
           client_version="$(tr -d '\r\n ' < VERSION_CLIENT)"
           server_version="$(tr -d '\r\n ' < VERSION_SERVER_TOOL)"
-          compatibility_version="$(tr -d '\r\n ' < VERSION)"
           [[ "$client_version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]
           [[ "$server_version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]
-          [[ "$compatibility_version" == "$client_version" ]]
-          grep -Fq "<ScblVersion>${client_version}</ScblVersion>" client/SCBL.Version.props
+          grep -Fq 'VERSION_CLIENT' client/SCBL.Version.props
           grep -Fq "routerVersion         = \"${client_version}\"" client/scbl-process-router/main.go
-          grep -Fq "SERVER_TOOL_VERSION=\"${server_version}\"" server/install_public_server.sh
-          grep -Fq "SCBLControlPlane/${server_version}" server/scbl_control_plane.py
+          grep -Fq 'read_server_tool_version' server/install_public_server.sh
+          grep -Fq 'SCBLControlPlane/{SERVER_TOOL_VERSION}' server/scbl_control_plane.py
           python3 - "$client_version" "$server_version" <<'PY'
           import json, sys
           client_version, server_version = sys.argv[1:3]

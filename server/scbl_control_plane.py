@@ -30,8 +30,7 @@ CONTROL_PORT = int(os.environ.get("SCBL_CONTROL_PORT", "19080"))
 SECRET = os.environ.get("SCBL_SECRET", "").encode("utf-8")
 SCBL_ROOT = Path(os.environ.get("SCBL_ROOT", "/opt/scbl-public"))
 DB_PATH = Path(os.environ.get("SCBL_DB_PATH", str(SCBL_ROOT / "server" / "5th-echelon.db")))
-SERVER_TOOL_VERSION = os.environ.get("SCBL_SERVER_TOOL_VERSION", "0.6.10").strip()
-MIN_CLIENT_VERSION = os.environ.get("SCBL_MIN_CLIENT_VERSION", "0.6.0").strip()
+SERVER_TOOL_VERSION = os.environ.get("SCBL_SERVER_TOOL_VERSION", "0.0.0").strip()
 MAINTENANCE = os.environ.get("SCBL_MAINTENANCE", "n").strip().lower() in {"1", "y", "yes", "true", "on"}
 HEARTBEAT_TTL_SECONDS = max(10, int(os.environ.get("SCBL_HEARTBEAT_TTL", "20")))
 MAX_BODY_BYTES = 32 * 1024
@@ -76,6 +75,17 @@ def is_client_overlay_ip(value: str) -> bool:
         return ip in OVERLAY and str(ip) not in {"10.66.0.0", "10.66.0.1", "10.66.0.255"}
     except ValueError:
         return False
+
+
+
+def required_client_version() -> str:
+    manifest = SCBL_ROOT / "client-updates" / "client_update_manifest.json"
+    try:
+        data = json.loads(manifest.read_text(encoding="utf-8-sig"))
+        value = clean_text(data.get("version"), 32).lstrip("vV")
+    except Exception:
+        return ""
+    return value if re.fullmatch(r"\d+\.\d+\.\d+", value) and value != "0.0.0" else ""
 
 
 def version_tuple(value: str) -> tuple[int, int, int]:
@@ -591,7 +601,7 @@ def _metrics_loop() -> None:
 
 
 class Handler(BaseHTTPRequestHandler):
-    server_version = "SCBLControlPlane/0.6.10"
+    server_version = f"SCBLControlPlane/{SERVER_TOOL_VERSION}"
     protocol_version = "HTTP/1.1"
 
     def log_message(self, fmt: str, *args: Any) -> None:
@@ -682,12 +692,15 @@ class Handler(BaseHTTPRequestHandler):
             username = clean_text((query.get("username") or [""])[0], 64)
             client_version = clean_text((query.get("clientVersion") or [""])[0], 32)
             peers = decorated_clients(STATE.active_clients())
+            required_version = required_client_version()
+            accepted = bool(required_version) and version_tuple(client_version) == version_tuple(required_version)
             self.send_json(
                 HTTPStatus.OK,
                 {
                     "serverToolVersion": SERVER_TOOL_VERSION,
-                    "minimumClientVersion": MIN_CLIENT_VERSION,
-                    "clientVersionAccepted": version_tuple(client_version) >= version_tuple(MIN_CLIENT_VERSION),
+                    "requiredClientVersion": required_version,
+                    "clientVersionAccepted": accepted,
+                    "updateRequired": not accepted,
                     "maintenance": MAINTENANCE,
                     "accountExists": account_exists(username),
                     "onlineCount": len(peers),

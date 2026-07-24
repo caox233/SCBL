@@ -36,7 +36,7 @@ DEFAULT_DDNS_GO_LISTEN=""
 DEFAULT_DDNS_GO_INTERVAL="300"
 DEFAULT_DDNS_GO_CONFIG="/opt/ddns-go/.ddns_go_config.yaml"
 DEFAULT_DDNS_GO_VERSION="latest"
-SERVER_TOOL_VERSION="0.6.9"
+SERVER_TOOL_VERSION="0.6.10"
 DEFAULT_SCBL_RELEASE_REPOSITORY="caox233/SCBL"
 DEFAULT_CLIENT_RELEASE_TAG="client-stable-latest"
 DEFAULT_SERVER_TOOL_RELEASE_TAG="server-tool-stable-latest"
@@ -595,7 +595,29 @@ PYEOF_MIGRATE_DDNS_NATIVE
 
 write_ddns_go_service() {
   DDNS_GO_LISTEN="$(normalize_ddns_go_listen "${DDNS_GO_LISTEN:-$DEFAULT_DDNS_GO_LISTEN}")"
-  write_ddns_go_service
+  DDNS_GO_INTERVAL="${DDNS_GO_INTERVAL:-$DEFAULT_DDNS_GO_INTERVAL}"
+  DDNS_GO_CONFIG="${DDNS_GO_CONFIG:-$DEFAULT_DDNS_GO_CONFIG}"
+  install -d -m 0700 /opt/ddns-go
+  cat > /etc/systemd/system/ddns-go.service <<UNITEOF
+[Unit]
+Description=DDNS-GO for SCBL Public Server
+Documentation=https://github.com/jeessy2/ddns-go
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=/opt/ddns-go
+ExecStart=/opt/ddns-go/ddns-go -l ${DDNS_GO_LISTEN} -f ${DDNS_GO_INTERVAL} -c ${DDNS_GO_CONFIG}
+Restart=on-failure
+RestartSec=5
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectHome=true
+
+[Install]
+WantedBy=multi-user.target
+UNITEOF
   systemctl daemon-reload
 }
 
@@ -604,7 +626,7 @@ run_server_tool_migrations() {
   ddns_go_installed || return 0
   [[ -f "$marker" ]] && return 0
 
-  echo "正在执行 Server Tool v0.6.9 DDNS-GO 原生化迁移..."
+  echo "正在执行 DDNS-GO 原生化迁移..."
   cleanup_legacy_ddns_go_management
   migrate_ddns_go_config_to_native_interface
   write_ddns_go_service

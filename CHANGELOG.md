@@ -1,3 +1,8 @@
+## Server Tool v0.6.10
+
+- 修复 v0.6.9 DDNS-GO 原生化迁移中 `write_ddns_go_service` 无限递归导致 `SCBL` 卡住的问题。
+- 增加 DDNS-GO 服务生成函数的递归回归检查。
+
 # 更新记录
 
 ## Server Tool v0.6.9

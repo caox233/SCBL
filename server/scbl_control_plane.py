@@ -30,7 +30,7 @@ CONTROL_PORT = int(os.environ.get("SCBL_CONTROL_PORT", "19080"))
 SECRET = os.environ.get("SCBL_SECRET", "").encode("utf-8")
 SCBL_ROOT = Path(os.environ.get("SCBL_ROOT", "/opt/scbl-public"))
 DB_PATH = Path(os.environ.get("SCBL_DB_PATH", str(SCBL_ROOT / "server" / "5th-echelon.db")))
-SERVER_TOOL_VERSION = os.environ.get("SCBL_SERVER_TOOL_VERSION", "0.6.9").strip()
+SERVER_TOOL_VERSION = os.environ.get("SCBL_SERVER_TOOL_VERSION", "0.6.10").strip()
 MIN_CLIENT_VERSION = os.environ.get("SCBL_MIN_CLIENT_VERSION", "0.6.0").strip()
 MAINTENANCE = os.environ.get("SCBL_MAINTENANCE", "n").strip().lower() in {"1", "y", "yes", "true", "on"}
 HEARTBEAT_TTL_SECONDS = max(10, int(os.environ.get("SCBL_HEARTBEAT_TTL", "20")))
@@ -591,7 +591,7 @@ def _metrics_loop() -> None:
 
 
 class Handler(BaseHTTPRequestHandler):
-    server_version = "SCBLControlPlane/0.6.9"
+    server_version = "SCBLControlPlane/0.6.10"
     protocol_version = "HTTP/1.1"
 
     def log_message(self, fmt: str, *args: Any) -> None:

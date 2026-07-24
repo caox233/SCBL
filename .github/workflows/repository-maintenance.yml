@@ -68,12 +68,48 @@ jobs:
             git push origin ":refs/tags/$tag" || true
           done < <(git ls-remote --tags --refs origin | sed 's#.*refs/tags/##' | sort)
 
+          branches="$(git ls-remote --heads origin | sed 's#.*refs/heads/##' | sort)"
+          tags="$(git ls-remote --tags --refs origin | sed 's#.*refs/tags/##' | sort)"
+          releases="$(gh release list --limit 200 --json tagName,name,publishedAt --jq '.[] | [.tagName,.name,.publishedAt] | @tsv')"
+
           echo
           echo 'Final branches:'
-          git ls-remote --heads origin | sed 's#.*refs/heads/##' | sort
+          printf '%s\n' "$branches"
           echo
           echo 'Final tags:'
-          git ls-remote --tags --refs origin | sed 's#.*refs/tags/##' | sort
+          printf '%s\n' "$tags"
           echo
           echo 'Final releases:'
-          gh release list --limit 200 --json tagName,name,publishedAt --jq '.[] | [.tagName,.name,.publishedAt] | @tsv'
+          printf '%s\n' "$releases"
+
+          report=docs/REPOSITORY_MAINTENANCE_STATUS.md
+          {
+            echo '# SCBL Repository Maintenance Status'
+            echo
+            echo "- Completed UTC: \`$(date -u +'%Y-%m-%dT%H:%M:%SZ')\`"
+            echo '- Retention: only `main`, two immutable releases per component, and rolling stable tags.'
+            echo
+            echo '## Branches'
+            echo
+            echo '```text'
+            printf '%s\n' "$branches"
+            echo '```'
+            echo
+            echo '## Tags'
+            echo
+            echo '```text'
+            printf '%s\n' "$tags"
+            echo '```'
+            echo
+            echo '## Releases'
+            echo
+            echo '```text'
+            printf '%s\n' "$releases"
+            echo '```'
+          } > "$report"
+
+          git config user.name github-actions
+          git config user.email github-actions@github.com
+          git add "$report"
+          git commit -m 'docs: record repository maintenance result [skip ci]' || exit 0
+          git push origin HEAD:main

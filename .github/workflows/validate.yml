@@ -92,10 +92,11 @@ jobs:
               for marker, source in blocks:
                   compile(source, f'{path}:{marker}', 'exec')
           PY
-          python3 -m py_compile server/scbl_control_plane.py server/test_control_plane.py server/test_ddns_go_native.py server/test_release_manifest_routing.py
+          python3 -m py_compile server/scbl_control_plane.py server/test_control_plane.py server/test_ddns_go_native.py server/test_release_manifest_routing.py server/test_network_topology.py
           python3 server/test_control_plane.py
           python3 server/test_ddns_go_native.py
           python3 server/test_release_manifest_routing.py
+          python3 server/test_network_topology.py
 
       - name: Set up Go
         if: steps.changes.outputs.router == 'true'

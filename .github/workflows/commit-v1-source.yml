@@ -1,0 +1,47 @@
+name: Commit v1 source and export workflow updates
+
+on:
+  push:
+    branches: [agent/release-v1.0.0]
+    paths:
+      - '.github/workflows/commit-v1-source.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: agent/release-v1.0.0
+          fetch-depth: 0
+      - name: Apply validated source and export workflows
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+          text = Path('.github/workflows/apply-v1-release.yml').read_text(encoding='utf-8')
+          marker = '      - name: Apply formal v1 release changes\n        shell: bash\n        run: |\n'
+          start = text.index(marker) + len(marker)
+          lines = text[start:].splitlines()
+          script = '\n'.join(line[10:] if line.startswith('          ') else line for line in lines) + '\n'
+          script = script.replace("write('server/test_ddns_go_native.py', '''", "write('server/test_ddns_go_native.py', r'''", 1)
+          before_commit = '''git config user.name github-actions
+          git config user.email github-actions@github.com
+          '''
+          export_block = '''mkdir -p docs/_tmp_v1_workflows
+          for workflow in client-release server-tool-release validate build-client repository-maintenance; do
+            cp ".github/workflows/${workflow}.yml" "docs/_tmp_v1_workflows/${workflow}.yml.txt"
+            git checkout -- ".github/workflows/${workflow}.yml"
+          done
+          git config user.name github-actions
+          git config user.email github-actions@github.com
+          '''
+          if script.count(before_commit) != 1:
+              raise SystemExit('final commit block not found exactly once')
+          script = script.replace(before_commit, export_block, 1)
+          Path('/tmp/commit-v1-source.sh').write_text(script, encoding='utf-8')
+          PY
+          bash /tmp/commit-v1-source.sh

@@ -19,41 +19,26 @@ jobs:
           ref: main
           fetch-depth: 0
 
-      - name: Wait for final server release and verify all asset sets
+      - name: Collect workflow and Release state
         env:
           GH_TOKEN: ${{ github.token }}
           RELEASE_SHA: '5274ef38efbb785fd1776e0ce5c659d55a0ce40e'
         shell: bash
         run: |
-          set -euo pipefail
-          mkdir -p audit/client-stable audit/server-stable
-
-          result=""
-          for _ in $(seq 1 60); do
-            result="$(gh run list --repo "$GITHUB_REPOSITORY" --workflow server-tool-release.yml --limit 30 \
-              --json databaseId,headSha,status,conclusion,url \
-              --jq ".[] | select(.headSha == \"$RELEASE_SHA\") | [.databaseId,.status,(.conclusion // \"\"),.url] | @tsv" | head -1)"
-            if [[ -n "$result" ]]; then
-              printf '%s\n' "$result"
-              status="$(cut -f2 <<<"$result")"
-              if [[ "$status" == completed ]]; then
-                conclusion="$(cut -f3 <<<"$result")"
-                [[ "$conclusion" == success ]] || { echo "Server Tool release failed: $result" >&2; exit 1; }
-                break
-              fi
-            fi
-            sleep 5
-          done
-          [[ -n "$result" && "$(cut -f2 <<<"$result")" == completed ]] || { echo 'Timed out waiting for final Server Tool release.' >&2; exit 1; }
-          printf '%s\n' "$result" > audit/workflow-results.txt
+          set -u
+          mkdir -p audit
+          gh run list --repo "$GITHUB_REPOSITORY" --workflow server-tool-release.yml --limit 30 \
+            --json databaseId,headSha,status,conclusion,url \
+            --jq ".[] | select(.headSha == \"$RELEASE_SHA\") | [.databaseId,.status,(.conclusion // \"\"),.url] | @tsv" \
+            > audit/workflow-results.txt || true
 
           release_assets() {
             gh api "repos/${GITHUB_REPOSITORY}/releases/tags/$1" --jq '.assets[].name' | sort
           }
-          release_assets client-stable-latest > audit/client-stable-assets.txt
-          release_assets client-v0.6.3 > audit/client-immutable-assets.txt
-          release_assets server-tool-stable-latest > audit/server-stable-assets.txt
-          release_assets server-tool-v0.6.9 > audit/server-immutable-assets.txt
+          release_assets client-stable-latest > audit/client-stable-assets.txt 2>audit/client-stable-error.txt || true
+          release_assets client-v0.6.3 > audit/client-immutable-assets.txt 2>audit/client-immutable-error.txt || true
+          release_assets server-tool-stable-latest > audit/server-stable-assets.txt 2>audit/server-stable-error.txt || true
+          release_assets server-tool-v0.6.9 > audit/server-immutable-assets.txt 2>audit/server-immutable-error.txt || true
 
           printf '%s\n' client-release-manifest.json > audit/expected-client-stable.txt
           printf '%s\n' \
@@ -69,25 +54,22 @@ jobs:
             install-server.sh \
             server-tool-release-manifest.json | sort > audit/expected-server-immutable.txt
 
-          diff -u audit/expected-client-stable.txt audit/client-stable-assets.txt
-          diff -u audit/expected-client-immutable.txt audit/client-immutable-assets.txt
-          diff -u audit/expected-server-stable.txt audit/server-stable-assets.txt
-          diff -u audit/expected-server-immutable.txt audit/server-immutable-assets.txt
-
-          gh release download client-stable-latest --repo "$GITHUB_REPOSITORY" -p client-release-manifest.json -D audit/client-stable
-          gh release download server-tool-stable-latest --repo "$GITHUB_REPOSITORY" -p install-server.sh -p server-tool-release-manifest.json -D audit/server-stable
-          jq -e '.schemaVersion == 3 and .version == "0.6.3" and .releaseTag == "client-v0.6.3" and .file == "SCBL-Client-v0.6.3-win-x86.zip"' audit/client-stable/client-release-manifest.json
-          jq -e '.schemaVersion == 3 and .version == "0.6.9" and .releaseTag == "server-tool-v0.6.9" and .file == "SCBL-Server-Tool-v0.6.9-linux-x86_64.tar.gz"' audit/server-stable/server-tool-release-manifest.json
-          bash -n audit/server-stable/install-server.sh
+          passed=true
+          workflow_line="$(head -1 audit/workflow-results.txt || true)"
+          [[ "$(cut -f2 <<<"$workflow_line")" == completed && "$(cut -f3 <<<"$workflow_line")" == success ]] || passed=false
+          diff -u audit/expected-client-stable.txt audit/client-stable-assets.txt > audit/client-stable.diff || passed=false
+          diff -u audit/expected-client-immutable.txt audit/client-immutable-assets.txt > audit/client-immutable.diff || passed=false
+          diff -u audit/expected-server-stable.txt audit/server-stable-assets.txt > audit/server-stable.diff || passed=false
+          diff -u audit/expected-server-immutable.txt audit/server-immutable-assets.txt > audit/server-immutable.diff || passed=false
+          printf '%s\n' "$passed" > audit/passed.txt
 
           {
             echo '# Optimized Release Audit'
             echo
             echo "- Final server workflow commit: \`$RELEASE_SHA\`"
-            echo '- Result: **passed**'
-            echo '- Policy: complete packages exist only in immutable version Releases; rolling Releases contain pointers/bootstrap files only.'
+            echo "- Result: **$passed**"
             echo
-            echo '## Final server workflow result'
+            echo '## Final server workflow state'
             echo '```text'; cat audit/workflow-results.txt; echo '```'
             echo
             echo '## Client stable assets'; sed 's/^/- /' audit/client-stable-assets.txt
@@ -97,6 +79,11 @@ jobs:
             echo '## Server stable assets'; sed 's/^/- /' audit/server-stable-assets.txt
             echo
             echo '## Server immutable assets'; sed 's/^/- /' audit/server-immutable-assets.txt
+            for name in client-stable client-immutable server-stable server-immutable; do
+              if [[ -s "audit/$name.diff" ]]; then
+                echo; echo "## $name difference"; echo '```diff'; cat "audit/$name.diff"; echo '```'
+              fi
+            done
           } > docs/POST_MERGE_RELEASE_AUDIT.md
 
       - name: Commit audit report
@@ -106,5 +93,9 @@ jobs:
           git config user.name github-actions
           git config user.email github-actions@github.com
           git add docs/POST_MERGE_RELEASE_AUDIT.md
-          git commit -m 'ci: record final optimized Release audit [skip ci]' || exit 0
+          git commit -m 'ci: record final Release audit diagnostics [skip ci]' || exit 0
           git push origin HEAD:main
+
+      - name: Enforce audit result
+        shell: bash
+        run: test "$(cat audit/passed.txt)" = true

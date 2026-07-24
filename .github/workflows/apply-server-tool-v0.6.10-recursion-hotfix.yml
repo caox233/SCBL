@@ -1,0 +1,116 @@
+name: Apply Server Tool v0.6.10 recursion hotfix
+
+on:
+  push:
+    branches: [agent/fix-ddns-go-migration-recursion]
+    paths:
+      - '.github/workflows/apply-server-tool-v0.6.10-recursion-hotfix.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: agent/fix-ddns-go-migration-recursion
+          fetch-depth: 0
+      - name: Apply and validate hotfix
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+          import json
+
+          manager_path = Path('server/install_public_server.sh')
+          manager = manager_path.read_text(encoding='utf-8')
+          old = '''write_ddns_go_service() {
+            DDNS_GO_LISTEN="$(normalize_ddns_go_listen "${DDNS_GO_LISTEN:-$DEFAULT_DDNS_GO_LISTEN}")"
+            write_ddns_go_service
+            systemctl daemon-reload
+          }
+          '''
+          new = '''write_ddns_go_service() {
+            DDNS_GO_LISTEN="$(normalize_ddns_go_listen "${DDNS_GO_LISTEN:-$DEFAULT_DDNS_GO_LISTEN}")"
+            DDNS_GO_INTERVAL="${DDNS_GO_INTERVAL:-$DEFAULT_DDNS_GO_INTERVAL}"
+            DDNS_GO_CONFIG="${DDNS_GO_CONFIG:-$DEFAULT_DDNS_GO_CONFIG}"
+            install -d -m 0700 /opt/ddns-go
+            cat > /etc/systemd/system/ddns-go.service <<UNITEOF
+          [Unit]
+          Description=DDNS-GO for SCBL Public Server
+          Documentation=https://github.com/jeessy2/ddns-go
+          Wants=network-online.target
+          After=network-online.target
+
+          [Service]
+          Type=simple
+          WorkingDirectory=/opt/ddns-go
+          ExecStart=/opt/ddns-go/ddns-go -l ${DDNS_GO_LISTEN} -f ${DDNS_GO_INTERVAL} -c ${DDNS_GO_CONFIG}
+          Restart=on-failure
+          RestartSec=5
+          NoNewPrivileges=true
+          PrivateTmp=true
+          ProtectHome=true
+
+          [Install]
+          WantedBy=multi-user.target
+          UNITEOF
+            systemctl daemon-reload
+          }
+          '''
+          if manager.count(old) != 1:
+              raise SystemExit(f'Expected exactly one buggy write_ddns_go_service block, found {manager.count(old)}')
+          manager = manager.replace(old, new, 1)
+          if manager.count('SERVER_TOOL_VERSION="0.6.9"') != 1:
+              raise SystemExit('Unexpected Server Tool version declaration')
+          manager = manager.replace('SERVER_TOOL_VERSION="0.6.9"', 'SERVER_TOOL_VERSION="0.6.10"', 1)
+          manager = manager.replace('正在执行 Server Tool v0.6.9 DDNS-GO 原生化迁移...', '正在执行 DDNS-GO 原生化迁移...', 1)
+          manager_path.write_text(manager, encoding='utf-8')
+
+          control_path = Path('server/scbl_control_plane.py')
+          control = control_path.read_text(encoding='utf-8')
+          control = control.replace('SCBL_SERVER_TOOL_VERSION", "0.6.9"', 'SCBL_SERVER_TOOL_VERSION", "0.6.10"')
+          control = control.replace('SCBLControlPlane/0.6.9', 'SCBLControlPlane/0.6.10')
+          control_path.write_text(control, encoding='utf-8')
+
+          Path('VERSION_SERVER_TOOL').write_text('0.6.10\n', encoding='utf-8')
+          versions_path = Path('COMPONENT_VERSIONS.json')
+          versions = json.loads(versions_path.read_text(encoding='utf-8'))
+          versions['serverToolVersion'] = '0.6.10'
+          versions_path.write_text(json.dumps(versions, ensure_ascii=False, indent=2) + '\n', encoding='utf-8')
+
+          test_path = Path('server/test_ddns_go_native.py')
+          test = test_path.read_text(encoding='utf-8')
+          test = test.replace('SERVER_TOOL_VERSION="0.6.9"', 'SERVER_TOOL_VERSION="0.6.10"')
+          insertion = '''\nstart = manager.index("write_ddns_go_service() {")\nend = manager.index("\\n}\\n\\nrun_server_tool_migrations()", start) + 2\nservice_function = manager[start:end]\nassert service_function.count("write_ddns_go_service") == 1\nassert "cat > /etc/systemd/system/ddns-go.service <<UNITEOF" in service_function\nassert "ExecStart=/opt/ddns-go/ddns-go -l ${DDNS_GO_LISTEN}" in service_function\n'''
+          marker = 'assert \'ExecStart=/opt/ddns-go/ddns-go -l ${DDNS_GO_LISTEN}\' in manager\n'
+          if marker not in test:
+              raise SystemExit('DDNS-GO test insertion marker was not found')
+          test = test.replace(marker, marker + insertion, 1)
+          test = test.replace('Path("docs/releases/SERVER_TOOL_v0.6.9.md")', 'Path("docs/releases/SERVER_TOOL_v0.6.10.md")')
+          test_path.write_text(test, encoding='utf-8')
+
+          release = '''# SCBL Server Tool v0.6.10\n\n## 修复内容\n\n- 修复 v0.6.9 首次执行 DDNS-GO 原生化迁移时，`write_ddns_go_service` 错误调用自身导致管理工具卡住的问题。\n- 恢复正确的 `ddns-go.service` 生成逻辑，并继续把 Web 管理端口限制在自动检测到的局域网私有 IPv4 或 `127.0.0.1:9876`。\n- 增加回归测试，明确禁止服务生成函数递归调用自身。\n\n## 版本边界\n\n- Windows client remains v0.6.3。\n- Hooks 源码及 `uplay_r1_loader.dll` 未修改。\n- 不修改、不覆盖 `server/5th-echelon.db`。\n- 保留已有 DDNS-GO 服务商、域名和配置备份。\n\n## 受影响版本\n\n- Server Tool v0.6.9。\n\n已升级到 v0.6.9 且运行 `SCBL` 卡在 DDNS-GO 迁移提示的服务器，应直接使用 `server-tool-stable-latest/install-server.sh` 升级到本版本。\n'''
+          Path('docs/releases/SERVER_TOOL_v0.6.10.md').write_text(release, encoding='utf-8')
+
+          changelog_path = Path('CHANGELOG.md')
+          changelog = changelog_path.read_text(encoding='utf-8')
+          entry = '''## Server Tool v0.6.10\n\n- 修复 v0.6.9 DDNS-GO 原生化迁移中 `write_ddns_go_service` 无限递归导致 `SCBL` 卡住的问题。\n- 增加 DDNS-GO 服务生成函数的递归回归检查。\n\n'''
+          if '## Server Tool v0.6.10' not in changelog:
+              changelog_path.write_text(entry + changelog, encoding='utf-8')
+          PY
+
+          bash -n server/install_public_server.sh
+          bash -n scripts/install-server.sh
+          python3 -m py_compile server/scbl_control_plane.py server/test_ddns_go_native.py
+          python3 server/test_ddns_go_native.py
+          python3 server/test_release_manifest_routing.py
+
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add VERSION_SERVER_TOOL COMPONENT_VERSIONS.json CHANGELOG.md docs/releases/SERVER_TOOL_v0.6.10.md server/install_public_server.sh server/scbl_control_plane.py server/test_ddns_go_native.py
+          git commit -m 'fix: release Server Tool v0.6.10 migration hotfix'
+          git push origin HEAD:agent/fix-ddns-go-migration-recursion

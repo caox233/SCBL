@@ -25,7 +25,7 @@ jobs:
           fetch-depth: 0
           ref: ${{ github.event.pull_request.head.ref }}
 
-      - name: Apply optimized build source and release routing
+      - name: Reconstruct optimized build payload
         shell: bash
         run: |
           set -euo pipefail
@@ -38,6 +38,20 @@ jobs:
             cat scripts/maintenance/build_opt_chunks/chunk05.b64
             cat scripts/maintenance/build_opt_chunks/chunk06.b64
           } > /tmp/scbl-build-opt.b64
+          sha256sum /tmp/scbl-build-opt.b64
+
+      - name: Upload reconstructed payload for verification
+        uses: actions/upload-artifact@v4
+        with:
+          name: scbl-build-opt-reconstructed
+          path: /tmp/scbl-build-opt.b64
+          retention-days: 1
+          if-no-files-found: error
+
+      - name: Apply optimized build source and release routing
+        shell: bash
+        run: |
+          set -euo pipefail
           echo '6acc04dba824a5200b7aa840e774db6254d6ad68f21d6710a8b9a6cf6c1ab8b8  /tmp/scbl-build-opt.b64' | sha256sum -c -
           base64 -d /tmp/scbl-build-opt.b64 > /tmp/scbl-build-opt.tar.gz
           echo '40203f66f7fef7cb0a950d27c0534feb8a053d4944f5e4649862e2887efeb3a9  /tmp/scbl-build-opt.tar.gz' | sha256sum -c -

@@ -1,0 +1,30 @@
+name: Locate v1 server functions
+
+on:
+  push:
+    branches: [agent/release-v1.0.0]
+    paths:
+      - '.github/workflows/find-v1-server-functions.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  locate:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: agent/release-v1.0.0
+      - run: |
+          set -euo pipefail
+          {
+            grep -nE '^(publish_client_update_package|publish_client_update_package_auto|download_latest_client_release|update_server_tool_online|write_update_server_files|show_client_update_status|set_defaults|write_env|show_modify_config_summary|modify_config)\(\)' server/install_public_server.sh || true
+            echo '--- references ---'
+            grep -nE 'publish_client_update_package_auto|publish_client_update_package ' server/install_public_server.sh || true
+          } > docs/_tmp_v1_server_functions.txt
+          git config user.name github-actions
+          git config user.email github-actions@github.com
+          git add docs/_tmp_v1_server_functions.txt
+          git commit -m 'record server function locations'
+          git push

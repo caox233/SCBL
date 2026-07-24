@@ -8,15 +8,15 @@ on:
       - '.github/workflows/apply-server-tool-v0.6.9-ddns-go-native.yml'
 
 permissions:
-  contents: write
-  actions: write
+  contents: read
+  actions: read
 
 concurrency:
   group: scbl-server-tool-v069-generated-source
   cancel-in-progress: false
 
 jobs:
-  generate-validate-and-commit:
+  generate-validate-and-package:
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
@@ -98,21 +98,19 @@ jobs:
             exit 1
           fi
 
-      - name: Commit generated source to PR branch
-        env:
-          HEAD_REF: ${{ github.event.pull_request.head.ref }}
-        shell: bash
-        run: |
-          set -euo pipefail
-          git config user.name github-actions
-          git config user.email github-actions@github.com
-          git add VERSION_SERVER_TOOL COMPONENT_VERSIONS.json README.md CHANGELOG.md \
-            server/install_public_server.sh server/scbl_control_plane.py \
-            server/test_ddns_go_native.py .github/workflows/server-tool-release.yml \
+      - name: Package generated source
+        uses: actions/upload-artifact@v4
+        with:
+          name: scbl-server-tool-v0.6.9-generated-source
+          if-no-files-found: error
+          retention-days: 7
+          path: |
+            VERSION_SERVER_TOOL
+            COMPONENT_VERSIONS.json
+            README.md
+            CHANGELOG.md
+            server/install_public_server.sh
+            server/scbl_control_plane.py
+            server/test_ddns_go_native.py
+            .github/workflows/server-tool-release.yml
             docs/releases/SERVER_TOOL_v0.6.9.md
-          if git diff --cached --quiet; then
-            echo 'Generated source is already committed.'
-            exit 0
-          fi
-          git commit -m 'SCBL Server Tool v0.6.9: generate native DDNS-GO source'
-          git push origin "HEAD:${HEAD_REF}"

@@ -2,10 +2,17 @@ param(
     [string]$FifthRepository = "",
     [string]$FifthReleaseTag = "",
     [string]$FifthBranch = "",
-    [string]$GitHubToken = ""
+    [string]$GitHubToken = "",
+    [switch]$Fast,
+    [switch]$Clean,
+    [switch]$Package,
+    [string]$OutputDir = (Join-Path -Path $PSScriptRoot -ChildPath "dist")
 )
 
 $ErrorActionPreference = "Stop"
+
+if ($Fast) { $env:SCBL_FAST_BUILD = "1" }
+if ($Clean) { $env:SCBL_CLEAN_BUILD = "1" }
 
 if ([string]::IsNullOrWhiteSpace($FifthRepository)) {
     $FifthRepository = if ([string]::IsNullOrWhiteSpace($env:SCBL_5TH_REPOSITORY)) { "caox233/5th-echelon" } else { $env:SCBL_5TH_REPOSITORY.Trim() }
@@ -94,16 +101,29 @@ function Install-5thHooksBinary {
             }
         }
         else {
-            Write-Host "Downloading Hooks release from $FifthRepository tag $FifthReleaseTag ..."
+            Write-Host "Resolving Hooks release from $FifthRepository tag $FifthReleaseTag ..."
             $Base = "https://github.com/$FifthRepository/releases/download/$FifthReleaseTag"
             $Headers = Get-GitHubHeaders
-            Invoke-WebRequest -Uri "$Base/uplay_r1_loader.dll" -Headers $Headers -OutFile $DownloadedDll -UseBasicParsing
             $ChecksumFile = Join-Path $TempRoot "uplay_r1_loader.dll.sha256"
             Invoke-WebRequest -Uri "$Base/uplay_r1_loader.dll.sha256" -Headers $Headers -OutFile $ChecksumFile -UseBasicParsing
             $ChecksumText = Get-Content -LiteralPath $ChecksumFile -Raw -Encoding ASCII
             $Match = [regex]::Match($ChecksumText, '(?i)\b[0-9a-f]{64}\b')
             if (!$Match.Success) { throw "Hooks release checksum file is invalid." }
             $ExpectedHash = $Match.Value.ToLowerInvariant()
+
+            $ReuseExisting = $false
+            if (Test-Path -LiteralPath $DllPath) {
+                $ExistingHash = (Get-FileHash -LiteralPath $DllPath -Algorithm SHA256).Hash.ToLowerInvariant()
+                $ReuseExisting = $ExistingHash -eq $ExpectedHash
+            }
+            if ($ReuseExisting) {
+                Write-Host "Reusing cached Hooks DLL: $ExpectedHash"
+                Copy-Item -Force $DllPath $DownloadedDll
+            }
+            else {
+                Write-Host "Downloading Hooks DLL ..."
+                Invoke-WebRequest -Uri "$Base/uplay_r1_loader.dll" -Headers $Headers -OutFile $DownloadedDll -UseBasicParsing
+            }
         }
 
         $ActualHash = (Get-FileHash -LiteralPath $DownloadedDll -Algorithm SHA256).Hash.ToLowerInvariant()
@@ -227,3 +247,9 @@ if ($RootUpdaterHash -ne $PayloadUpdaterHash) { throw "Updater payload hash mism
 
 Write-Host "Updater payload verified: $RootUpdaterHash"
 Write-Host "Build finished: $Publish"
+
+if ($Package) {
+    Write-Host "Creating release package ..."
+    & powershell -ExecutionPolicy Bypass -File (Join-Path $Root "create_client_full_package.ps1") -Version $ScblVersion -OutputDir $OutputDir
+    if ($LASTEXITCODE -ne 0) { throw "Client package creation failed" }
+}

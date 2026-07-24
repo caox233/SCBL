@@ -6,7 +6,6 @@ on:
     paths:
       - VERSION_CLIENT
       - client/**
-      - .github/workflows/client-release.yml
   workflow_dispatch:
     inputs:
       version:
@@ -27,9 +26,14 @@ jobs:
     outputs:
       version: ${{ steps.version.outputs.version }}
       tag: ${{ steps.version.outputs.tag }}
+      skip: ${{ steps.version.outputs.skip }}
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 2
       - id: version
+        env:
+          GH_TOKEN: ${{ github.token }}
         shell: bash
         run: |
           set -euo pipefail
@@ -41,13 +45,27 @@ jobs:
           [[ "$requested" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]
           [[ "$requested" == "$source_version" ]]
           [[ "$requested" == "$props_version" ]]
+          tag="client-v$requested"
+          skip=false
+          if [[ "${GITHUB_EVENT_NAME}" == "push" ]] && gh release view "$tag" >/dev/null 2>&1; then
+            before='${{ github.event.before }}'
+            if [[ -n "$before" && ! "$before" =~ ^0+$ ]] && git cat-file -e "$before^{commit}" 2>/dev/null; then
+              previous="$(git show "$before:VERSION_CLIENT" 2>/dev/null | tr -d '\r\n ' || true)"
+              [[ "$previous" != "$requested" ]] || skip=true
+            fi
+          fi
           echo "version=$requested" >> "$GITHUB_OUTPUT"
-          echo "tag=client-v$requested" >> "$GITHUB_OUTPUT"
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+          echo "skip=$skip" >> "$GITHUB_OUTPUT"
+          if [[ "$skip" == true ]]; then
+            echo "Client v$requested already exists and VERSION_CLIENT did not change; skipping the expensive Windows rebuild."
+          fi
 
   build:
     needs: metadata
+    if: needs.metadata.outputs.skip != 'true'
     runs-on: windows-2022
-    timeout-minutes: 45
+    timeout-minutes: 35
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-dotnet@v4
@@ -58,44 +76,57 @@ jobs:
           go-version: 1.23.2
           cache: true
           cache-dependency-path: client/scbl-process-router/go.sum
-      - name: Build and package client
+
+      - uses: actions/cache@v4
+        name: Cache NuGet packages
+        with:
+          path: ~/.nuget/packages
+          key: nuget-${{ runner.os }}-${{ hashFiles('client/**/*.csproj', 'client/**/*.props', 'client/**/*.targets') }}
+          restore-keys: nuget-${{ runner.os }}-
+
+      - uses: actions/cache@v4
+        name: Cache pinned client runtimes
+        with:
+          path: |
+            client/easytier/bin
+            client/scbl-process-router/WinDivert.dll
+            client/scbl-process-router/WinDivert64.sys
+          key: client-runtime-${{ runner.os }}-${{ hashFiles('client/easytier/download_easytier_windows.ps1', 'client/scbl-process-router/download_windivert.ps1') }}
+
+      - uses: actions/cache@v4
+        name: Cache Hooks DLL
+        with:
+          path: client/ScblPublicLauncher/EmbeddedFiles/uplay_r1_loader.dll
+          key: hooks-win-x86-${{ hashFiles('client/ScblPublicLauncher/EmbeddedFiles/SCBL_EMBEDDED_SHA256.txt') }}
+
+      - name: Build and package client once
         shell: powershell
         run: |
           $ErrorActionPreference = 'Stop'
           Set-ExecutionPolicy -Scope Process Bypass -Force
-          .\client\build_all_windows.ps1
-          .\client\create_client_full_package.ps1 -Version '${{ needs.metadata.outputs.version }}' -OutputDir "$env:GITHUB_WORKSPACE\dist"
+          .\client\build_all_windows.ps1 -Fast -Package -OutputDir "$env:GITHUB_WORKSPACE\dist"
           $zip = Get-ChildItem .\dist\SCBL-Client-v*-win-x86.zip | Select-Object -First 1
           if ($null -eq $zip) { throw 'Client ZIP was not generated.' }
           $hash = (Get-FileHash $zip.FullName -Algorithm SHA256).Hash.ToLowerInvariant()
           "$hash  $($zip.Name)" | Set-Content -Encoding ascii "$($zip.FullName).sha256"
           $manifest = [ordered]@{
-            schemaVersion = 2
-            component = 'client'
-            product = 'SCBL'
-            channel = 'stable'
-            version = '${{ needs.metadata.outputs.version }}'
-            file = $zip.Name
-            sha256 = $hash
-            controlApiVersion = 1
-            minimumServerToolVersion = '0.6.2'
-            dedicatedServer = [ordered]@{
-              repository = 'caox233/5th-echelon'
-              releaseTag = 'scbl-public-stable-latest'
-            }
+            schemaVersion = 2; component = 'client'; product = 'SCBL'; channel = 'stable'
+            version = '${{ needs.metadata.outputs.version }}'; file = $zip.Name; sha256 = $hash
+            controlApiVersion = 1; minimumServerToolVersion = '0.6.2'
+            dedicatedServer = [ordered]@{ repository = 'caox233/5th-echelon'; releaseTag = 'scbl-public-stable-latest' }
           } | ConvertTo-Json -Depth 5
-          [IO.File]::WriteAllText(
-            (Join-Path $env:GITHUB_WORKSPACE 'dist\client-release-manifest.json'),
-            $manifest,
-            (New-Object Text.UTF8Encoding($false)))
+          [IO.File]::WriteAllText((Join-Path $env:GITHUB_WORKSPACE 'dist\client-release-manifest.json'), $manifest, (New-Object Text.UTF8Encoding($false)))
+
       - uses: actions/upload-artifact@v4
         with:
           name: scbl-client-release
           path: dist/*
           if-no-files-found: error
+          retention-days: 7
 
   publish:
     needs: [metadata, build]
+    if: needs.metadata.outputs.skip != 'true'
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
@@ -127,19 +158,11 @@ jobs:
           git tag -f client-stable-latest "$GITHUB_SHA"
           git push origin refs/tags/client-stable-latest --force
           if gh release view client-stable-latest >/dev/null 2>&1; then
-            while read -r asset; do
-              [[ -z "$asset" ]] || gh release delete-asset client-stable-latest "$asset" -y
-            done < <(gh release view client-stable-latest --json assets --jq '.assets[].name')
-            gh release edit client-stable-latest \
-              --title "SCBL Windows Client Stable v${version}" \
-              --notes-file "$notes" \
-              --latest=false
+            while read -r asset; do [[ -z "$asset" ]] || gh release delete-asset client-stable-latest "$asset" -y; done < <(gh release view client-stable-latest --json assets --jq '.assets[].name')
+            gh release edit client-stable-latest --title "SCBL Windows Client Stable v${version}" --notes-file "$notes" --latest=false
             gh release upload client-stable-latest dist/*
           else
-            gh release create client-stable-latest dist/* \
-              --title "SCBL Windows Client Stable v${version}" \
-              --notes-file "$notes" \
-              --latest=false
+            gh release create client-stable-latest dist/* --title "SCBL Windows Client Stable v${version}" --notes-file "$notes" --latest=false
           fi
 
-# Trigger the first independent client release after the workflow split.
+          bash scripts/maintenance/prune_component_releases.sh client 2

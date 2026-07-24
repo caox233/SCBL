@@ -25,13 +25,13 @@ public sealed class LauncherSettings
     // v0.5.9 continues to use EasyTier DHCP; this value is cleared and never applied to networking.
     public string EasyTierPinnedVirtualIp { get; set; } = "";
     public string EasyTierNetworkName { get; set; } = "scbl-public";
-    public bool EasyTierLatencyFirst { get; set; } = true;
+    public bool EasyTierLatencyFirst { get; set; } = false;
     public bool EasyTierEnableP2P { get; set; } = true;
     // Hidden maintenance setting. Must match SCBL_WSS_PORT on the public server.
     public int EasyTierWssPort { get; set; } = 10443;
 
-    // v0.5.14: compatibility field retained for older settings files. The production default
-    // is now server-anchored distributed mesh: P2P + client multi-hop relay + server fallback.
+    // Compatibility field retained for older settings files. The production topology uses
+    // direct client P2P where possible and the fixed server as the only data-relay fallback.
     public bool EasyTierStableRelayMode { get; set; } = false;
     public bool ForceGameVirtualAdapter { get; set; } = true;
 

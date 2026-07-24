@@ -2,17 +2,17 @@
 
 SCBL 是面向《细胞分裂：黑名单》社区联机环境的自建客户端、Linux 服务端部署和客户端更新管理项目。
 
-> 当前 Windows 客户端：**v1.0.0**  
-> 当前 Linux 服务端工具：**v1.0.0**
+> 当前 Windows 客户端：**v1.0.1**  
+> 当前 Linux 服务端工具：**v1.0.1**
 
 ## 快速开始
 
 ### Windows 客户端
 
-前往仓库的 Releases 页面，下载标题为 **[CLIENT] Windows Client v1.0.0** 的版本：
+前往仓库的 Releases 页面，下载标题为 **[CLIENT] Windows Client v1.0.1** 的版本：
 
 ```text
-SCBL-Client-v1.0.0-win-x86.zip
+SCBL-Client-v1.0.1-win-x86.zip
 ```
 
 解压后运行 `SplinterCellCNLauncher.exe`。启动器会先确认服务器当前正式版本；版本不一致时必须更新或退出。
@@ -45,6 +45,13 @@ curl -fsSL https://raw.githubusercontent.com/caox233/SCBL/main/scripts/install-s
 ```
 
 服务器把当前正式客户端版本写入更新信息。Launcher 启动时先读取该信息：版本一致才继续初始化游戏目录、网络和其他功能；版本不一致只能更新或退出。
+
+## 网络路径
+
+- 启动器、控制平面和游戏服务端流量优先与固定服务器直接通信。
+- 玩家之间的游戏 UDP 流量优先使用 EasyTier P2P 直连。
+- 普通客户端不承担第三方数据中继；P2P 失败时由固定服务器兜底。
+- 使用稳定的一跳优先策略，不为很小的延迟差异切换到多跳路径。
 
 ## 本地编译
 

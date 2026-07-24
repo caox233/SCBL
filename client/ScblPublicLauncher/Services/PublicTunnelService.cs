@@ -33,7 +33,7 @@ public sealed record EasyTierBroadcastRelayStatus(
 public sealed record EasyTierClientOptions(
     string InstanceId,
     string NetworkName,
-    bool LatencyFirst = true,
+    bool LatencyFirst = false,
     bool EnableP2P = true,
     bool StableRelayMode = false,
     bool EnableUdpBroadcastRelay = true,
@@ -46,7 +46,7 @@ public sealed record EasyTierClientOptions(
 /// </summary>
 public sealed class PublicTunnelService
 {
-    private const int RuntimeProfileRevision = 6;
+    private const int RuntimeProfileRevision = 7;
     private static readonly Regex ScblIpRegex = new(@"\b10\.66\.0\.(?:[1-9]|[1-9][0-9]|1[0-9]{2}|2[0-4][0-9]|25[0-4])(?:/24)?\b", RegexOptions.Compiled);
     private Process? _process;
     private string _lastAssignedIp = "";
@@ -248,8 +248,8 @@ public sealed class PublicTunnelService
         psi.ArgumentList.Add("off");
 
         bool effectiveP2P = options.EnableP2P;
-        string networkMode = "server-anchored-distributed-mesh";
-        LogService.Info($"Starting EasyTier. endpoint={PublicTunnelConfig.NormalizePublicEndpoint(publicEndpoint)}, wssPort={options.WssPort}, network={options.NetworkName}, mode={networkMode}, addressing=dhcp, p2p={effectiveP2P}, multiHopRelay=true, latencyFirst={options.LatencyFirst}, underlayDualStack=true");
+        string networkMode = "direct-p2p-with-server-fallback";
+        LogService.Info($"Starting EasyTier. endpoint={PublicTunnelConfig.NormalizePublicEndpoint(publicEndpoint)}, wssPort={options.WssPort}, network={options.NetworkName}, mode={networkMode}, addressing=dhcp, p2p={effectiveP2P}, clientDataRelay=false, serverFallback=true, latencyFirst={options.LatencyFirst}, underlayDualStack=true");
         _process = Process.Start(psi) ?? throw new InvalidOperationException("EasyTier 网络核心启动失败。");
         AttachOutputHandlers(_process);
 
@@ -354,7 +354,8 @@ p2p_only = false
 lazy_p2p = false
 need_p2p = false
 relay_all_peer_rpc = true
-disable_relay_data = false
+# Ordinary clients keep control-plane participation but never forward another player's data.
+disable_relay_data = true
 disable_udp_hole_punching = {disableHolePunching.ToString().ToLowerInvariant()}
 disable_tcp_hole_punching = {disableHolePunching.ToString().ToLowerInvariant()}
 disable_sym_hole_punching = {disableHolePunching.ToString().ToLowerInvariant()}
@@ -465,7 +466,7 @@ relay_network_whitelist = {Q(networkName)}
             options.ForceGameVirtualAdapter.ToString(),
             options.WssPort.ToString(),
             "dual-stack-underlay",
-            "distributed-client-relay",
+            "client-direct-p2p-server-fallback",
             PublicTunnelConfig.Mtu.ToString()
         });
         return Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(material)));

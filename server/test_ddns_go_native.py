@@ -22,5 +22,5 @@ end = manager.index("\n}\n\nrun_server_tool_migrations()", start) + 2
 service_function = manager[start:end]
 assert service_function.count("write_ddns_go_service") == 1
 assert "cat > /etc/systemd/system/ddns-go.service <<UNITEOF" in service_function
-assert "[SERVER] Server Tool v1.0.0" in Path("docs/releases/SERVER_TOOL_v1.0.0.md").read_text(encoding="utf-8")
+assert "[SERVER] Server Tool v1.0.1" in Path("docs/releases/SERVER_TOOL_v1.0.1.md").read_text(encoding="utf-8")
 print("DDNS-GO native management source checks passed")

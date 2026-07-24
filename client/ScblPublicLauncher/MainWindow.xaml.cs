@@ -2546,14 +2546,9 @@ public partial class MainWindow : Window
             }
             else if (!string.IsNullOrWhiteSpace(_gamePeerIp))
             {
-                string latency = _lastGameLatencyMs.HasValue ? $"{_lastGameLatencyMs.Value}ms" : L("检测中", "Detecting");
-                string quality = _gameLatencyP95Ms.HasValue
-                    ? L($" · P95 {_gameLatencyP95Ms} · 抖动 {_gameJitterMs ?? 0} · 丢包 {(_gameLossPercent ?? 0):0.#}%", $" · P95 {_gameLatencyP95Ms} · jitter {_gameJitterMs ?? 0} · loss {(_gameLossPercent ?? 0):0.#}%")
-                    : "";
-                string descriptor = FormatPathDescriptor(_lastGameAddressFamily, _lastGameTransport, _lastGameHopCount);
-                string suffix = string.IsNullOrWhiteSpace(descriptor) ? "" : IsEnglish ? $" ({descriptor})" : $"（{descriptor}）";
-                string hostLabel = string.IsNullOrWhiteSpace(_gameHostUsername) ? "" : $" {_gameHostUsername}";
-                normalText = L($"到房主{hostLabel}：{latency}{quality}{suffix}", $"To host{hostLabel}: {latency}{quality}{suffix}");
+                normalText = _lastGameLatencyMs.HasValue
+                    ? L($"与房主连接 {_lastGameLatencyMs.Value}ms 延时", $"Host connection {_lastGameLatencyMs.Value}ms latency")
+                    : L("正在检测与房主连接延时", "Checking host connection latency");
             }
             else if (_gameActivePeerCount > 0)
             {

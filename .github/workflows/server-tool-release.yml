@@ -53,8 +53,9 @@ jobs:
           version='${{ steps.version.outputs.version }}'
           bash -n server/install_public_server.sh
           bash -n scripts/install-server.sh
-          python3 -m py_compile server/scbl_control_plane.py server/test_control_plane.py
+          python3 -m py_compile server/scbl_control_plane.py server/test_control_plane.py server/test_ddns_go_native.py
           python3 server/test_control_plane.py
+          python3 server/test_ddns_go_native.py
 
           root="SCBL-Server-Tool-v${version}-linux-x86_64"
           mkdir -p "stage/$root/THIRD_PARTY_LICENSES" dist

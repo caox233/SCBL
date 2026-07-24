@@ -23,9 +23,9 @@ try {
     if (!(Test-Path -LiteralPath $WinDivertDll)) { throw "WinDivert.dll was not prepared: $WinDivertDll" }
     if (!(Test-Path -LiteralPath $WinDivertDriver)) { throw "WinDivert64.sys was not prepared: $WinDivertDriver" }
 
-    Write-Host "Restoring Go modules ..."
-    & go mod tidy
-    if ($LASTEXITCODE -ne 0) { throw "go mod tidy failed" }
+    Write-Host "Restoring Go modules without rewriting go.mod/go.sum ..."
+    & go mod download
+    if ($LASTEXITCODE -ne 0) { throw "go mod download failed" }
 
     Write-Host "Building scbl-process-router.exe ..."
     $OldGOOS = $env:GOOS
@@ -33,7 +33,7 @@ try {
     try {
         $env:GOOS = "windows"
         $env:GOARCH = "amd64"
-        & go build -trimpath -ldflags "-s -w" -o "scbl-process-router.exe" .
+        & go build -mod=readonly -trimpath -ldflags "-s -w" -o "scbl-process-router.exe" .
         if ($LASTEXITCODE -ne 0) { throw "go build failed" }
     }
     finally {

@@ -1,0 +1,49 @@
+name: Audit repository maintenance and build speed
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - '.github/workflows/repo-maintenance-audit.yml'
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  audit:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Collect repository inventory
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p audit/source
+          git ls-remote --heads origin | sort > audit/branches.txt
+          git ls-remote --tags --refs origin | sort > audit/tags.txt
+          gh release list --repo "$GITHUB_REPOSITORY" --limit 200 \
+            --json tagName,name,isDraft,isPrerelease,publishedAt > audit/releases.json
+          gh run list --repo "$GITHUB_REPOSITORY" --limit 100 \
+            --json databaseId,workflowName,event,status,conclusion,createdAt,startedAt,updatedAt,headBranch,headSha > audit/runs.json
+          find .github/workflows -maxdepth 1 -type f -print | sort > audit/workflow-files.txt
+          cp -a .github/workflows audit/source/
+          find client -maxdepth 4 -type f \
+            \( -name '*.sln' -o -name '*.csproj' -o -name '*.props' -o -name '*.targets' \
+               -o -name 'go.mod' -o -name 'go.sum' -o -name '*.ps1' -o -name '*.cmd' -o -name '*.bat' \) \
+            -print0 | xargs -0 -r cp --parents -a -t audit/source/
+          cp -a VERSION VERSION_CLIENT VERSION_SERVER_TOOL COMPONENT_VERSIONS.json audit/source/
+          git count-objects -vH > audit/git-objects.txt
+          du -ah client server .github 2>/dev/null | sort -h | tail -100 > audit/largest-paths.txt
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: scbl-repository-maintenance-audit
+          path: audit
+          retention-days: 7
+          if-no-files-found: error

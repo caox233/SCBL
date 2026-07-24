@@ -1,4 +1,4 @@
-﻿$ErrorActionPreference = "Stop"
+$ErrorActionPreference = "Stop"
 
 $Project = Join-Path $PSScriptRoot "SplinterCellCNLauncher.csproj"
 $Out = Join-Path $PSScriptRoot "publish-single"
@@ -42,14 +42,11 @@ if (!(Test-Path -LiteralPath $Project)) {
     throw "Project file not found: $Project"
 }
 
-# Preflight the source files referenced directly by MainWindow before cleaning/building.
-# This produces a clear packaging error instead of a later CS0246 compiler message.
 $RequiredSourceFiles = @(
     (Join-Path $PSScriptRoot "MainWindow.xaml.cs"),
     (Join-Path $PSScriptRoot "Services\UpdaterBootstrapService.cs"),
     (Join-Path $PSScriptRoot "Services\RemoteClientUpdateService.cs")
 )
-
 foreach ($RequiredSourceFile in $RequiredSourceFiles) {
     if (!(Test-Path -LiteralPath $RequiredSourceFile)) {
         throw ("Required launcher source file is missing: {0}. Reapply the latest complete patch or source package." -f $RequiredSourceFile)
@@ -57,12 +54,34 @@ foreach ($RequiredSourceFile in $RequiredSourceFiles) {
 }
 
 Remove-FolderSafe $Out
-Remove-FolderSafe $Bin
-Remove-FolderSafe $Obj
+if ($env:SCBL_CLEAN_BUILD -eq "1") {
+    Remove-FolderSafe $Bin
+    Remove-FolderSafe $Obj
+}
+else {
+    Write-Host "Keeping bin/obj for incremental compilation. Use -Clean for a full rebuild."
+}
 
 Write-Host "Publishing SplinterCellCNLauncher ..."
-
-& dotnet publish $Project -c Release -r win-x86 --self-contained true /p:PublishSingleFile=true /p:IncludeNativeLibrariesForSelfExtract=true /p:EnableCompressionInSingleFile=true /p:DebugType=none /p:DebugSymbols=false -o $Out
+$PublishArgs = @(
+    "publish", $Project,
+    "-c", "Release",
+    "-r", "win-x86",
+    "--self-contained", "true",
+    "--nologo",
+    "/p:PublishSingleFile=true",
+    "/p:IncludeNativeLibrariesForSelfExtract=true",
+    "/p:DebugType=none",
+    "/p:DebugSymbols=false",
+    "-o", $Out
+)
+if ($env:SCBL_FAST_BUILD -ne "1") {
+    $PublishArgs += "/p:EnableCompressionInSingleFile=true"
+}
+else {
+    Write-Host "Fast build enabled: single-file compression is skipped; the final ZIP is still compressed."
+}
+& dotnet @PublishArgs
 if ($LASTEXITCODE -ne 0) {
     throw "dotnet publish failed"
 }

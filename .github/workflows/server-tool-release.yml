@@ -7,7 +7,6 @@ on:
       - VERSION_SERVER_TOOL
       - server/**
       - scripts/install-server.sh
-      - .github/workflows/server-tool-release.yml
   workflow_dispatch:
     inputs:
       version:
@@ -111,6 +110,7 @@ jobs:
           name: scbl-server-tool-release
           path: dist/*
           if-no-files-found: error
+          retention-days: 7
 
   publish:
     needs: build
@@ -161,3 +161,5 @@ jobs:
               --latest=false \
               --target main
           fi
+
+          bash scripts/maintenance/prune_component_releases.sh server-tool 2

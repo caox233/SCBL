@@ -5,6 +5,7 @@ on:
     branches: [main]
     paths:
       - '.github/workflows/verify-build-release-optimization.yml'
+      - 'client/create_client_full_package.ps1'
 
 permissions:
   contents: read

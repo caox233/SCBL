@@ -1,0 +1,31 @@
+run_id=30083743587
+{"conclusion":"failure","jobs":[{"completedAt":"2026-07-24T09:45:48Z","conclusion":"failure","databaseId":89450977363,"name":"apply","startedAt":"2026-07-24T09:45:44Z","status":"completed","steps":[{"completedAt":"2026-07-24T09:45:46Z","conclusion":"success","name":"Set up job","number":1,"startedAt":"2026-07-24T09:45:45Z","status":"completed"},{"completedAt":"2026-07-24T09:45:46Z","conclusion":"success","name":"Run actions/checkout@v4","number":2,"startedAt":"2026-07-24T09:45:46Z","status":"completed"},{"completedAt":"2026-07-24T09:45:47Z","conclusion":"failure","name":"Run corrected server patch","number":3,"startedAt":"2026-07-24T09:45:46Z","status":"completed"},{"completedAt":"2026-07-24T09:45:47Z","conclusion":"success","name":"Post Run actions/checkout@v4","number":6,"startedAt":"2026-07-24T09:45:47Z","status":"completed"},{"completedAt":"2026-07-24T09:45:47Z","conclusion":"success","name":"Complete job","number":7,"startedAt":"2026-07-24T09:45:47Z","status":"completed"}],"url":"https://github.com/caox233/SCBL/actions/runs/30083743587/job/89450977363"}],"status":"completed","url":"https://github.com/caox233/SCBL/actions/runs/30083743587"}
+--- failed log ---
+apply	Run corrected server patch	﻿2026-07-24T09:45:46.9380153Z ##[group]Run set -euo pipefail
+apply	Run corrected server patch	2026-07-24T09:45:46.9381591Z ^[[36;1mset -euo pipefail^[[0m
+apply	Run corrected server patch	2026-07-24T09:45:46.9382806Z ^[[36;1mpython3 - <<'PY'^[[0m
+apply	Run corrected server patch	2026-07-24T09:45:46.9384017Z ^[[36;1mfrom pathlib import Path^[[0m
+apply	Run corrected server patch	2026-07-24T09:45:46.9385909Z ^[[36;1mtext = Path('.github/workflows/apply-v1-server.yml').read_text(encoding='utf-8')^[[0m
+apply	Run corrected server patch	2026-07-24T09:45:46.9388709Z ^[[36;1mmarker = '      - name: Apply server changes\n        shell: bash\n        run: |\n'^[[0m
+apply	Run corrected server patch	2026-07-24T09:45:46.9390667Z ^[[36;1mstart = text.index(marker) + len(marker)^[[0m
+apply	Run corrected server patch	2026-07-24T09:45:46.9392125Z ^[[36;1mlines = text[start:].splitlines()^[[0m
+apply	Run corrected server patch	2026-07-24T09:45:46.9394110Z ^[[36;1mscript = '\n'.join(line[10:] if line.startswith('          ') else line for line in lines) + '\n'^[[0m
+apply	Run corrected server patch	2026-07-24T09:45:46.9396912Z ^[[36;1mscript = script.replace('if manager.count(anchor) != 1:', 'if manager.count(anchor) < 1:', 1)^[[0m
+apply	Run corrected server patch	2026-07-24T09:45:46.9399358Z ^[[36;1mPath('/tmp/apply-v1-server.sh').write_text(script, encoding='utf-8')^[[0m
+apply	Run corrected server patch	2026-07-24T09:45:46.9401020Z ^[[36;1mPY^[[0m
+apply	Run corrected server patch	2026-07-24T09:45:46.9402037Z ^[[36;1mbash /tmp/apply-v1-server.sh^[[0m
+apply	Run corrected server patch	2026-07-24T09:45:46.9451746Z shell: /usr/bin/bash -e {0}
+apply	Run corrected server patch	2026-07-24T09:45:46.9452895Z ##[endgroup]
+apply	Run corrected server patch	2026-07-24T09:45:47.0935827Z Traceback (most recent call last):
+apply	Run corrected server patch	2026-07-24T09:45:47.0937909Z   File "<stdin>", line 311, in <module>
+apply	Run corrected server patch	2026-07-24T09:45:47.0940061Z   File "<stdin>", line 10, in replace_function
+apply	Run corrected server patch	2026-07-24T09:45:47.0942534Z   File "/usr/lib/python3.12/re/__init__.py", line 197, in subn
+apply	Run corrected server patch	2026-07-24T09:45:47.0944744Z     return _compile(pattern, flags).subn(repl, string, count)
+apply	Run corrected server patch	2026-07-24T09:45:47.0946727Z            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+apply	Run corrected server patch	2026-07-24T09:45:47.0948432Z   File "/usr/lib/python3.12/re/__init__.py", line 334, in _compile_template
+apply	Run corrected server patch	2026-07-24T09:45:47.0950972Z     return _sre.template(pattern, _parser.parse_template(repl, pattern))
+apply	Run corrected server patch	2026-07-24T09:45:47.0952782Z                                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+apply	Run corrected server patch	2026-07-24T09:45:47.0954476Z   File "/usr/lib/python3.12/re/_parser.py", line 1075, in parse_template
+apply	Run corrected server patch	2026-07-24T09:45:47.0956583Z     raise s.error('bad escape %s' % this, len(this)) from None
+apply	Run corrected server patch	2026-07-24T09:45:47.0958300Z re.error: bad escape \d at position 3694 (line 91, column 39)
+apply	Run corrected server patch	2026-07-24T09:45:47.1117220Z ##[error]Process completed with exit code 1.

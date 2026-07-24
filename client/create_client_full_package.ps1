@@ -1,115 +1,80 @@
 param(
     [string]$Version = "",
-    [string]$OutputDir = (Join-Path -Path $PSScriptRoot -ChildPath "dist")
+    [string]$OutputDir = (Join-Path -Path $PSScriptRoot -ChildPath "dist"),
+    [switch]$Fast
 )
 
 $ErrorActionPreference = "Stop"
 
 function Get-ScblSourceVersion {
     $VersionProps = Join-Path -Path $PSScriptRoot -ChildPath "SCBL.Version.props"
-    if (!(Test-Path -LiteralPath $VersionProps)) {
-        throw "Version source was not found: $VersionProps"
-    }
-
+    if (!(Test-Path -LiteralPath $VersionProps)) { throw "Version source was not found: $VersionProps" }
     $Text = Get-Content -LiteralPath $VersionProps -Raw -Encoding UTF8
     $Match = [regex]::Match($Text, '<ScblVersion>\s*([0-9]+\.[0-9]+\.[0-9]+)\s*</ScblVersion>')
-    if (!$Match.Success) {
-        throw "SCBL.Version.props must contain a three-part numeric ScblVersion, for example 0.4.9."
-    }
+    if (!$Match.Success) { throw "SCBL.Version.props must contain a three-part numeric ScblVersion, for example 0.6.3." }
     return $Match.Groups[1].Value
 }
 
-function Write-Step([string]$Message) {
-    Write-Host "[SCBL] $Message"
-}
+function Write-Step([string]$Message) { Write-Host "[SCBL] $Message" }
 
-# SCBL.Version.props is the only version source. -Version remains accepted for
-# compatibility, but it must exactly match the source version.
 $SourceVersion = Get-ScblSourceVersion
-$Version = $Version.Trim()
-if ($Version.StartsWith("v", [System.StringComparison]::OrdinalIgnoreCase)) {
-    $Version = $Version.Substring(1)
-}
-if ([string]::IsNullOrWhiteSpace($Version)) {
-    $Version = $SourceVersion
-}
-if ($Version -notmatch '^[0-9]+\.[0-9]+\.[0-9]+$') {
-    throw "Version must use three numeric parts only, for example 0.4.9."
-}
-if ($Version -ne $SourceVersion) {
-    throw "Requested version $Version does not match the single source version $SourceVersion in SCBL.Version.props."
+$Version = $Version.Trim().TrimStart('v', 'V')
+if ([string]::IsNullOrWhiteSpace($Version)) { $Version = $SourceVersion }
+if ($Version -notmatch '^[0-9]+\.[0-9]+\.[0-9]+$') { throw "Version must use three numeric parts only." }
+if ($Version -ne $SourceVersion) { throw "Requested version $Version does not match source version $SourceVersion." }
+
+$Publish = Join-Path $PSScriptRoot "ScblPublicLauncher\publish-single"
+$Required = @(
+    (Join-Path $Publish "SplinterCellCNLauncher.exe"),
+    (Join-Path $Publish "tools\easytier-core.exe"),
+    (Join-Path $Publish "tools\easytier-cli.exe"),
+    (Join-Path $Publish "tools\scbl-process-router.exe"),
+    (Join-Path $Publish "SCBL.Updater.exe"),
+    (Join-Path $Publish "tools\SCBL.Updater.payload.exe")
+)
+foreach ($File in $Required) {
+    if (!(Test-Path -LiteralPath $File)) { throw "Publish output is incomplete. Missing: $File" }
 }
 
-$Publish = Join-Path -Path $PSScriptRoot -ChildPath "ScblPublicLauncher\publish-single"
-$LauncherExe = Join-Path -Path $Publish -ChildPath "SplinterCellCNLauncher.exe"
-$EasyTierCore = Join-Path -Path $Publish -ChildPath "tools\easytier-core.exe"
-$EasyTierCli = Join-Path -Path $Publish -ChildPath "tools\easytier-cli.exe"
-$RouteGuard = Join-Path -Path $Publish -ChildPath "tools\scbl-process-router.exe"
-foreach ($RuntimeFile in @($LauncherExe, $EasyTierCore, $EasyTierCli, $RouteGuard)) {
-    if (!(Test-Path -LiteralPath $RuntimeFile)) {
-        throw "Publish output was not found or incomplete. Please run build_all_windows.ps1 first. Missing: $RuntimeFile"
-    }
-}
-Remove-Item -Force (Join-Path $Publish "tools\scbl-tunnel-client.exe") -ErrorAction SilentlyContinue
-
-$UpdaterExe = Join-Path -Path $Publish -ChildPath "SCBL.Updater.exe"
-$UpdaterPayload = Join-Path -Path $Publish -ChildPath "tools\SCBL.Updater.payload.exe"
-foreach ($RequiredUpdateFile in @($UpdaterExe, $UpdaterPayload)) {
-    if (!(Test-Path -LiteralPath $RequiredUpdateFile)) {
-        throw "Updater self-update file is missing: $RequiredUpdateFile. Run build_all_windows.ps1 before creating the full package."
-    }
-}
-$UpdaterHash = (Get-FileHash -LiteralPath $UpdaterExe -Algorithm SHA256).Hash
-$PayloadHash = (Get-FileHash -LiteralPath $UpdaterPayload -Algorithm SHA256).Hash
-if ($UpdaterHash -ne $PayloadHash) {
-    throw "SCBL.Updater.exe and tools\SCBL.Updater.payload.exe must be identical before packaging."
-}
+$UpdaterHash = (Get-FileHash (Join-Path $Publish "SCBL.Updater.exe") -Algorithm SHA256).Hash
+$PayloadHash = (Get-FileHash (Join-Path $Publish "tools\SCBL.Updater.payload.exe") -Algorithm SHA256).Hash
+if ($UpdaterHash -ne $PayloadHash) { throw "SCBL.Updater.exe and its payload must be identical." }
 
 New-Item -ItemType Directory -Force -Path $OutputDir | Out-Null
+$Zip = Join-Path $OutputDir ("SCBL-Client-v{0}-win-x86.zip" -f $Version)
+if (Test-Path -LiteralPath $Zip) { Remove-Item -LiteralPath $Zip -Force }
 
-$TempName = "SCBL_Client_Full_{0}" -f ([guid]::NewGuid().ToString("N"))
-$Temp = Join-Path -Path $env:TEMP -ChildPath $TempName
-New-Item -ItemType Directory -Force -Path $Temp | Out-Null
+Add-Type -AssemblyName System.IO.Compression
+Add-Type -AssemblyName System.IO.Compression.FileSystem
+$Compression = if ($Fast) { [System.IO.Compression.CompressionLevel]::Fastest } else { [System.IO.Compression.CompressionLevel]::Optimal }
+$ExcludedRoots = @('logs', 'updates', 'backup')
+$ExcludedFiles = @('launcher_settings.json', 'update_manifest.json', 'client_update_manifest.json')
 
+Write-Step "Creating ZIP directly from publish output (no temporary full-directory copy)..."
+$Stream = [System.IO.File]::Open($Zip, [System.IO.FileMode]::CreateNew, [System.IO.FileAccess]::ReadWrite, [System.IO.FileShare]::None)
 try {
-    Write-Step "Copying publish output..."
-    Copy-Item -Path (Join-Path -Path $Publish -ChildPath "*") -Destination $Temp -Recurse -Force
-
-    # Do not package local runtime data. These folders/files must be kept on the user's machine.
-    $ExcludeDirs = @("logs", "updates", "backup")
-    foreach ($dir in $ExcludeDirs) {
-        $path = Join-Path -Path $Temp -ChildPath $dir
-        if (Test-Path -LiteralPath $path) {
-            Remove-Item -LiteralPath $path -Recurse -Force -ErrorAction SilentlyContinue
+    $Archive = New-Object System.IO.Compression.ZipArchive($Stream, [System.IO.Compression.ZipArchiveMode]::Create, $false)
+    try {
+        $TrimChars = [char[]]@([System.IO.Path]::DirectorySeparatorChar, [System.IO.Path]::AltDirectorySeparatorChar)
+        $PublishPrefix = $Publish.TrimEnd($TrimChars) + [System.IO.Path]::DirectorySeparatorChar
+        foreach ($File in Get-ChildItem -LiteralPath $Publish -Recurse -File | Sort-Object FullName) {
+            $Relative = $File.FullName.Substring($PublishPrefix.Length).Replace([char]92, [char]47)
+            $Top = ($Relative -split '/', 2)[0]
+            if ($ExcludedRoots -contains $Top) { continue }
+            if ($ExcludedFiles -contains $Relative) { continue }
+            $Entry = $Archive.CreateEntry($Relative, $Compression)
+            $Input = $File.OpenRead()
+            try {
+                $Output = $Entry.Open()
+                try { $Input.CopyTo($Output) }
+                finally { $Output.Dispose() }
+            }
+            finally { $Input.Dispose() }
         }
     }
-
-    $ExcludeFiles = @("launcher_settings.json")
-    foreach ($file in $ExcludeFiles) {
-        $path = Join-Path -Path $Temp -ChildPath $file
-        if (Test-Path -LiteralPath $path) {
-            Remove-Item -LiteralPath $path -Force -ErrorAction SilentlyContinue
-        }
-    }
-
-    # Do not include update_manifest.json in the client full package.
-    # The server generates /opt/scbl-public/client-updates/client_update_manifest.json
-    # after extracting the full package. Packaging a local update_manifest.json causes
-    # clients to treat that metadata file as a changed runtime file.
-
-    $Zip = Join-Path -Path $OutputDir -ChildPath ("SCBL-Client-v{0}-win-x86.zip" -f $Version)
-    if (Test-Path -LiteralPath $Zip) {
-        Remove-Item -LiteralPath $Zip -Force
-    }
-
-    Write-Step "Creating full client package..."
-    Compress-Archive -Path (Join-Path -Path $Temp -ChildPath "*") -DestinationPath $Zip -Force
-
-    Write-Step "Client full package created: $Zip"
-    Write-Step "Upload this ZIP to GitHub Release, or place it in the server client package upload directory."
+    finally { $Archive.Dispose() }
 }
-finally {
-    if (Test-Path -LiteralPath $Temp) {
-        Remove-Item -LiteralPath $Temp -Recurse -Force -ErrorAction SilentlyContinue
-    }
-}
+finally { $Stream.Dispose() }
+
+if (!(Test-Path -LiteralPath $Zip) -or (Get-Item -LiteralPath $Zip).Length -le 0) { throw "Client ZIP was not created." }
+Write-Step "Client full package created: $Zip"

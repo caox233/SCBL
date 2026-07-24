@@ -7,6 +7,7 @@ on:
       - VERSION_SERVER_TOOL
       - server/**
       - scripts/install-server.sh
+      - .github/workflows/server-tool-release.yml
   workflow_dispatch:
     inputs:
       version:
@@ -22,89 +23,85 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  build:
+  metadata:
     runs-on: ubuntu-24.04
     outputs:
       version: ${{ steps.version.outputs.version }}
       tag: ${{ steps.version.outputs.tag }}
+      skip: ${{ steps.version.outputs.skip }}
     steps:
       - uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-
+        with: { fetch-depth: 2 }
       - id: version
+        env: { GH_TOKEN: '${{ github.token }}' }
         shell: bash
         run: |
           set -euo pipefail
           source_version="$(tr -d '\r\n ' < VERSION_SERVER_TOOL)"
-          requested='${{ inputs.version }}'
-          requested="${requested#v}"
+          requested='${{ inputs.version }}'; requested="${requested#v}"
           [[ -n "$requested" ]] || requested="$source_version"
           [[ "$requested" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]
           grep -Fq "SERVER_TOOL_VERSION=\"$requested\"" server/install_public_server.sh
+          tag="server-tool-v$requested"; skip=false
+          if [[ "${GITHUB_EVENT_NAME}" == push ]] && gh release view "$tag" >/dev/null 2>&1; then
+            before='${{ github.event.before }}'; previous=""; pipeline_changed=false
+            if [[ -n "$before" && ! "$before" =~ ^0+$ ]] && git cat-file -e "$before^{commit}" 2>/dev/null; then
+              previous="$(git show "$before:VERSION_SERVER_TOOL" 2>/dev/null | tr -d '\r\n ' || true)"
+              git diff --name-only "$before" "$GITHUB_SHA" | grep -Fxq '.github/workflows/server-tool-release.yml' && pipeline_changed=true || true
+            fi
+            if [[ "$previous" == "$requested" && "$pipeline_changed" != true ]]; then skip=true; fi
+          fi
           echo "version=$requested" >> "$GITHUB_OUTPUT"
-          echo "tag=server-tool-v$requested" >> "$GITHUB_OUTPUT"
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+          echo "skip=$skip" >> "$GITHUB_OUTPUT"
+          [[ "$skip" != true ]] || echo "Server Tool v$requested already exists and VERSION_SERVER_TOOL did not change; skipping duplicate packaging and upload."
 
+  build:
+    needs: metadata
+    if: needs.metadata.outputs.skip != 'true'
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with: { fetch-depth: 0 }
       - name: Validate and package server tool
         shell: bash
         run: |
           set -euo pipefail
-          version='${{ steps.version.outputs.version }}'
+          version='${{ needs.metadata.outputs.version }}'
           bash -n server/install_public_server.sh
           bash -n scripts/install-server.sh
-          python3 -m py_compile server/scbl_control_plane.py server/test_control_plane.py server/test_ddns_go_native.py
+          python3 -m py_compile server/scbl_control_plane.py server/test_control_plane.py server/test_ddns_go_native.py server/test_release_manifest_routing.py
           python3 server/test_control_plane.py
           python3 server/test_ddns_go_native.py
-
+          python3 server/test_release_manifest_routing.py
           root="SCBL-Server-Tool-v${version}-linux-x86_64"
           mkdir -p "stage/$root/THIRD_PARTY_LICENSES" dist
-          cp server/install_public_server.sh \
-             server/scbl_control_plane.py \
-             server/check_scbl_binary_release.sh \
-             server/5th-echelon_branch.txt \
-             scripts/install-server.sh \
-             VERSION_SERVER_TOOL VERSION_CLIENT COMPONENT_VERSIONS.json \
-             README.md CHANGELOG.md THIRD_PARTY_NOTICES.md \
-             "stage/$root/"
+          cp server/install_public_server.sh server/scbl_control_plane.py server/check_scbl_binary_release.sh \
+             server/5th-echelon_branch.txt scripts/install-server.sh VERSION_SERVER_TOOL VERSION_CLIENT \
+             COMPONENT_VERSIONS.json README.md CHANGELOG.md THIRD_PARTY_NOTICES.md "stage/$root/"
           cp THIRD_PARTY_LICENSES/EasyTier-LGPL-3.0.txt "stage/$root/THIRD_PARTY_LICENSES/"
-          chmod 0755 "stage/$root/install_public_server.sh" \
-                     "stage/$root/install-server.sh" \
-                     "stage/$root/check_scbl_binary_release.sh"
-
+          chmod 0755 "stage/$root/install_public_server.sh" "stage/$root/install-server.sh" "stage/$root/check_scbl_binary_release.sh"
           package="${root}.tar.gz"
           tar -C stage -czf "dist/$package" "$root"
-          cp "dist/$package" dist/SCBL-Server-Tool-latest-linux-x86_64.tar.gz
           cp scripts/install-server.sh dist/install-server.sh
-
-          for file in dist/*.tar.gz; do
-            hash="$(sha256sum "$file" | awk '{print $1}')"
-            printf '%s  %s\n' "$hash" "$(basename "$file")" > "${file}.sha256"
-          done
           package_sha="$(sha256sum "dist/$package" | awk '{print $1}')"
+          printf '%s  %s\n' "$package_sha" "$package" > "dist/${package}.sha256"
           cat > dist/server-tool-release-manifest.json <<JSON
           {
-            "schemaVersion": 2,
+            "schemaVersion": 3,
             "component": "server-tool",
             "product": "SCBL",
             "channel": "stable",
             "version": "${version}",
+            "releaseTag": "server-tool-v${version}",
             "file": "${package}",
             "sha256": "${package_sha}",
-            "latestAlias": "SCBL-Server-Tool-latest-linux-x86_64.tar.gz",
             "controlApiVersion": 1,
             "minimumClientVersion": "0.6.0",
-            "preserves": [
-              "scbl.env",
-              "server/5th-echelon.db",
-              "client-updates",
-              "incoming",
-              "backups",
-              "DDNS-GO configuration"
-            ]
+            "preserves": ["scbl.env", "server/5th-echelon.db", "client-updates", "incoming", "backups", "DDNS-GO configuration"]
           }
           JSON
           (cd dist && sha256sum $(find . -maxdepth 1 -type f ! -name SHA256SUMS.txt -printf '%f\n' | sort) > SHA256SUMS.txt)
-
       - uses: actions/upload-artifact@v4
         with:
           name: scbl-server-tool-release
@@ -113,53 +110,36 @@ jobs:
           retention-days: 7
 
   publish:
-    needs: build
+    needs: [metadata, build]
+    if: needs.metadata.outputs.skip != 'true'
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
+        with: { fetch-depth: 0 }
       - uses: actions/download-artifact@v4
-        with:
-          name: scbl-server-tool-release
-          path: dist
-      - name: Publish immutable and rolling server-tool releases
-        env:
-          GH_TOKEN: ${{ github.token }}
+        with: { name: scbl-server-tool-release, path: dist }
+      - name: Publish one immutable package and one rolling bootstrap
+        env: { GH_TOKEN: '${{ github.token }}' }
         shell: bash
         run: |
           set -euo pipefail
-          version='${{ needs.build.outputs.version }}'
-          tag='${{ needs.build.outputs.tag }}'
+          version='${{ needs.metadata.outputs.version }}'; tag='${{ needs.metadata.outputs.tag }}'
           notes="docs/releases/SERVER_TOOL_v${version}.md"
-          git fetch origin main
-          git checkout origin/main -- "$notes"
-          test -f "$notes"
-
+          git fetch origin main; git checkout origin/main -- "$notes"; test -f "$notes"
           if gh release view "$tag" >/dev/null 2>&1; then
             gh release upload "$tag" dist/* --clobber
             gh release edit "$tag" --title "SCBL Server Tool v${version}" --notes-file "$notes" --latest=false
           else
             gh release create "$tag" dist/* --title "SCBL Server Tool v${version}" --notes-file "$notes" --latest=false --target main
           fi
-
           git tag -f server-tool-stable-latest origin/main
           git push origin refs/tags/server-tool-stable-latest --force
           if gh release view server-tool-stable-latest >/dev/null 2>&1; then
-            while read -r asset; do
-              [[ -z "$asset" ]] || gh release delete-asset server-tool-stable-latest "$asset" -y
-            done < <(gh release view server-tool-stable-latest --json assets --jq '.assets[].name')
-            gh release edit server-tool-stable-latest \
-              --title "SCBL Server Tool Stable v${version}" \
-              --notes-file "$notes" \
-              --latest=false
-            gh release upload server-tool-stable-latest dist/*
+            while read -r asset; do [[ -z "$asset" ]] || gh release delete-asset server-tool-stable-latest "$asset" -y; done < <(gh release view server-tool-stable-latest --json assets --jq '.assets[].name')
+            gh release edit server-tool-stable-latest --title "SCBL Server Tool Stable v${version}" --notes-file "$notes" --latest=false
+            gh release upload server-tool-stable-latest dist/install-server.sh dist/server-tool-release-manifest.json
           else
-            gh release create server-tool-stable-latest dist/* \
-              --title "SCBL Server Tool Stable v${version}" \
-              --notes-file "$notes" \
-              --latest=false \
-              --target main
+            gh release create server-tool-stable-latest dist/install-server.sh dist/server-tool-release-manifest.json \
+              --title "SCBL Server Tool Stable v${version}" --notes-file "$notes" --latest=false --target main
           fi
-
           bash scripts/maintenance/prune_component_releases.sh server-tool 2

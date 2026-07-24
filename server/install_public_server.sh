@@ -2588,7 +2588,7 @@ download_latest_client_release() {
   local repo="${SCBL_RELEASE_REPOSITORY:-$DEFAULT_SCBL_RELEASE_REPOSITORY}"
   local tag="${SCBL_CLIENT_RELEASE_TAG:-$DEFAULT_CLIENT_RELEASE_TAG}"
   local base="https://github.com/${repo}/releases/download/${tag}"
-  local tmpdir manifest version package expected actual current cmp staged target component expected_package
+  local tmpdir manifest version package expected actual current cmp staged target component expected_package release_tag package_base
 
   tmpdir="$(mktemp -d -t scbl-client-release.XXXXXX)"
   manifest="$tmpdir/client-release-manifest.json"
@@ -2604,6 +2604,7 @@ download_latest_client_release() {
   package="$(manifest_value "$manifest" file)"
   expected="$(manifest_value "$manifest" sha256 | tr '[:upper:]' '[:lower:]')"
   component="$(manifest_value "$manifest" component)"
+  release_tag="$(manifest_value "$manifest" releaseTag)"
   expected_package="SCBL-Client-v${version}-win-x86.zip"
   if [[ "$component" != "client" ||
         ! "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ||
@@ -2612,6 +2613,16 @@ download_latest_client_release() {
     rm -rf "$tmpdir"
     echo "客户端 Release 清单格式不合法，拒绝下载。"
     return 1
+  fi
+
+  package_base="$base"
+  if [[ -n "$release_tag" ]]; then
+    if [[ "$release_tag" != "client-v${version}" ]]; then
+      rm -rf "$tmpdir"
+      echo "客户端 Release 清单 releaseTag 不合法。"
+      return 1
+    fi
+    package_base="${SCBL_CLIENT_PACKAGE_BASE_URL:-https://github.com/${repo}/releases/download/${release_tag}}"
   fi
 
   current="$(current_published_client_version)"
@@ -2637,7 +2648,7 @@ download_latest_client_release() {
   rm -f "$staged"
   echo "正在下载客户端全量包：$package"
   if ! curl -fL --connect-timeout 10 --max-time 900 --retry 3 --retry-all-errors \
-      "$base/$package" -o "$staged"; then
+      "$package_base/$package" -o "$staged"; then
     rm -f "$staged"; rm -rf "$tmpdir"
     echo "客户端全量包下载失败，当前发布版本未受影响。"
     return 1
@@ -2789,7 +2800,7 @@ update_server_tool_online() {
   local repo="${SCBL_RELEASE_REPOSITORY:-$DEFAULT_SCBL_RELEASE_REPOSITORY}"
   local tag="${SCBL_SERVER_TOOL_RELEASE_TAG:-$DEFAULT_SERVER_TOOL_RELEASE_TAG}"
   local base="https://github.com/${repo}/releases/download/${tag}"
-  local tmpdir manifest version package expected actual cmp extract_root manager_new control_new
+  local tmpdir manifest version package expected actual cmp extract_root manager_new control_new release_tag package_base
   local backup_root control_changed=0 binary_check_new branch_new component expected_package package_root
 
   tmpdir="$(mktemp -d -t scbl-server-tool.XXXXXX)"
@@ -2806,6 +2817,7 @@ update_server_tool_online() {
   package="$(manifest_value "$manifest" file)"
   expected="$(manifest_value "$manifest" sha256 | tr '[:upper:]' '[:lower:]')"
   component="$(manifest_value "$manifest" component)"
+  release_tag="$(manifest_value "$manifest" releaseTag)"
   expected_package="SCBL-Server-Tool-v${version}-linux-x86_64.tar.gz"
   if [[ "$component" != "server-tool" ||
         ! "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ||
@@ -2814,6 +2826,16 @@ update_server_tool_online() {
     rm -rf "$tmpdir"
     echo "服务端工具 Release 清单格式不合法。"
     return 1
+  fi
+
+  package_base="$base"
+  if [[ -n "$release_tag" ]]; then
+    if [[ "$release_tag" != "server-tool-v${version}" ]]; then
+      rm -rf "$tmpdir"
+      echo "服务端工具 Release 清单 releaseTag 不合法。"
+      return 1
+    fi
+    package_base="${SCBL_SERVER_TOOL_PACKAGE_BASE_URL:-https://github.com/${repo}/releases/download/${release_tag}}"
   fi
 
   cmp="$(semver_compare "$SERVER_TOOL_VERSION" "$version")"
@@ -2829,7 +2851,7 @@ update_server_tool_online() {
 
   echo "正在下载服务端工具包：$package"
   curl -fL --connect-timeout 10 --max-time 600 --retry 3 --retry-all-errors \
-    "$base/$package" -o "$tmpdir/$package"
+    "$package_base/$package" -o "$tmpdir/$package"
   actual="$(sha256sum "$tmpdir/$package" | awk '{print $1}')"
   if [[ "$actual" != "$expected" ]]; then
     rm -rf "$tmpdir"

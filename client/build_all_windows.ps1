@@ -6,6 +6,11 @@ param(
     [switch]$Fast,
     [switch]$Clean,
     [switch]$Package,
+    [switch]$Auto,
+    [switch]$LauncherOnly,
+    [switch]$UpdaterOnly,
+    [switch]$RouterOnly,
+    [switch]$RuntimeOnly,
     [string]$OutputDir = (Join-Path -Path $PSScriptRoot -ChildPath "dist")
 )
 
@@ -163,8 +168,6 @@ function Test-EmbeddedFilesIntegrity {
     Write-Host "Embedded Hooks DLL and save files verified."
 }
 
-Install-5thHooksBinary
-Test-EmbeddedFilesIntegrity
 
 $VersionProps = Join-Path -Path $PSScriptRoot -ChildPath "SCBL.Version.props"
 if (!(Test-Path -LiteralPath $VersionProps)) { throw "Version source was not found: $VersionProps" }
@@ -175,81 +178,182 @@ $ScblVersion = $VersionMatch.Groups[1].Value
 Write-Host "SCBL Public source version: $ScblVersion"
 
 function Invoke-Step {
-    param([Parameter(Mandatory=$true)][string]$ScriptPath)
-    & powershell -ExecutionPolicy Bypass -File $ScriptPath
+    param(
+        [Parameter(Mandatory=$true)][string]$ScriptPath,
+        [string[]]$Arguments = @()
+    )
+    & powershell -ExecutionPolicy Bypass -File $ScriptPath @Arguments
     if ($LASTEXITCODE -ne 0) { throw "Step failed: $ScriptPath" }
+}
+
+function Get-AutoChangedFiles {
+    $Files = New-Object System.Collections.Generic.HashSet[string]([System.StringComparer]::OrdinalIgnoreCase)
+    if (!(Get-Command git -ErrorAction SilentlyContinue)) { return @() }
+    try {
+        $RepoRoot = (& git -C $PSScriptRoot rev-parse --show-toplevel 2>$null).Trim()
+        if ([string]::IsNullOrWhiteSpace($RepoRoot)) { return @() }
+        foreach ($Args in @(
+            @('-C', $RepoRoot, 'diff', '--name-only'),
+            @('-C', $RepoRoot, 'diff', '--cached', '--name-only'),
+            @('-C', $RepoRoot, 'diff', '--name-only', 'HEAD~1', 'HEAD')
+        )) {
+            foreach ($Line in @(& git @Args 2>$null)) {
+                $Value = ([string]$Line).Trim().Replace('\\','/')
+                if (![string]::IsNullOrWhiteSpace($Value)) { [void]$Files.Add($Value) }
+            }
+        }
+    }
+    catch { }
+    return @($Files)
 }
 
 $Root = $PSScriptRoot
 $Publish = Join-Path $Root "ScblPublicLauncher\publish-single"
 $Tools = Join-Path $Publish "tools"
 
-Write-Host "[0/6] Stop SCBL runtime processes"
-Invoke-Step (Join-Path $Root "stop_runtime_processes.ps1")
+$BuildLauncher = $true
+$BuildUpdater = $true
+$BuildRouter = $true
+$PrepareRuntime = $true
+$ExplicitComponent = $LauncherOnly -or $UpdaterOnly -or $RouterOnly -or $RuntimeOnly
 
-Write-Host "[1/6] Prepare official EasyTier runtime"
-Invoke-Step (Join-Path $Root "easytier\download_easytier_windows.ps1")
+if ($Auto -or $ExplicitComponent) {
+    $BuildLauncher = $false
+    $BuildUpdater = $false
+    $BuildRouter = $false
+    $PrepareRuntime = $false
+}
 
-Write-Host "[2/6] Build per-game virtual-adapter route guard"
-Invoke-Step (Join-Path $Root "scbl-process-router\build_windows.ps1")
+if ($ExplicitComponent) {
+    $BuildLauncher = $LauncherOnly
+    $BuildUpdater = $UpdaterOnly
+    $BuildRouter = $RouterOnly
+    $PrepareRuntime = $RuntimeOnly
+}
+elseif ($Auto) {
+    $Changed = @(Get-AutoChangedFiles)
+    foreach ($Path in $Changed) {
+        switch -Regex ($Path) {
+            '^client/ScblPublicLauncher/' { $BuildLauncher = $true; continue }
+            '^client/SCBL\.Updater/' { $BuildUpdater = $true; continue }
+            '^client/scbl-process-router/' { $BuildRouter = $true; continue }
+            '^client/easytier/' { $PrepareRuntime = $true; continue }
+            '^client/SCBL\.Version\.props$' { $BuildLauncher = $true; $BuildUpdater = $true; $BuildRouter = $true; continue }
+            '^client/build_all_windows\.ps1$' { $BuildLauncher = $true; $BuildUpdater = $true; $BuildRouter = $true; $PrepareRuntime = $true; continue }
+            '^client/create_client_full_package\.ps1$' { continue }
+            '^client/WINDIVERT_NOTICE\.txt$' { $BuildRouter = $true; continue }
+            '^THIRD_PARTY_LICENSES/' { $PrepareRuntime = $true; continue }
+            '^VERSION(_CLIENT)?$' { $BuildLauncher = $true; $BuildUpdater = $true; $BuildRouter = $true; continue }
+            '^client/' { $BuildLauncher = $true; $BuildUpdater = $true; $BuildRouter = $true; $PrepareRuntime = $true; continue }
+        }
+    }
+    if (!$BuildLauncher -and !$BuildUpdater -and !$BuildRouter -and !$PrepareRuntime) {
+        Write-Host "Auto mode found no component changes; building the launcher for a quick local verification."
+        $BuildLauncher = $true
+    }
+}
 
-Write-Host "[3/6] Publish launcher"
-Invoke-Step (Join-Path $Root "ScblPublicLauncher\build_publish.ps1")
+if ($Package) {
+    $BuildLauncher = $true
+    $BuildUpdater = $true
+    $BuildRouter = $true
+    $PrepareRuntime = $true
+}
 
-Write-Host "[4/6] Build updater"
-Invoke-Step (Join-Path $Root "SCBL.Updater\build_windows.ps1")
+Write-Host ("Build plan: launcher={0}, updater={1}, router={2}, runtime={3}, package={4}" -f $BuildLauncher, $BuildUpdater, $BuildRouter, $PrepareRuntime, $Package)
 
-Write-Host "[5/6] Copy EasyTier, route guard and updater tools"
-New-Item -ItemType Directory -Force -Path $Tools | Out-Null
+if ($BuildLauncher -or $BuildUpdater -or $BuildRouter -or $PrepareRuntime) {
+    Write-Host "[0/6] Stop SCBL runtime processes"
+    Invoke-Step (Join-Path $Root "stop_runtime_processes.ps1")
+}
+
+if ($BuildLauncher) {
+    Write-Host "[1/6] Prepare verified Hooks binary"
+    Install-5thHooksBinary
+    Test-EmbeddedFilesIntegrity
+}
+
+if ($PrepareRuntime) {
+    Write-Host "[2/6] Prepare official EasyTier runtime"
+    Invoke-Step (Join-Path $Root "easytier\download_easytier_windows.ps1")
+}
+
+if ($BuildRouter) {
+    Write-Host "[3/6] Build per-game virtual-adapter route guard"
+    Invoke-Step (Join-Path $Root "scbl-process-router\build_windows.ps1")
+}
+
+if ($BuildLauncher) {
+    Write-Host "[4/6] Publish launcher"
+    Invoke-Step (Join-Path $Root "ScblPublicLauncher\build_publish.ps1")
+}
+
+if ($BuildUpdater) {
+    Write-Host "[5/6] Build updater"
+    Invoke-Step (Join-Path $Root "SCBL.Updater\build_windows.ps1")
+}
+
+Write-Host "[6/6] Assemble available runtime outputs"
+New-Item -ItemType Directory -Force -Path $Publish, $Tools | Out-Null
 Remove-Item -Force (Join-Path $Tools "scbl-tunnel-client.exe") -ErrorAction SilentlyContinue
 
-Get-ChildItem (Join-Path $Root "easytier\bin") -File | ForEach-Object {
-    Copy-Item -Force $_.FullName (Join-Path $Tools $_.Name)
+$EasyTierBin = Join-Path $Root "easytier\bin"
+if (Test-Path -LiteralPath $EasyTierBin) {
+    Get-ChildItem $EasyTierBin -File | ForEach-Object { Copy-Item -Force $_.FullName (Join-Path $Tools $_.Name) }
 }
 $EasyTierLicense = Join-Path (Split-Path $Root -Parent) "THIRD_PARTY_LICENSES\EasyTier-LGPL-3.0.txt"
-if (Test-Path -LiteralPath $EasyTierLicense) {
-    Copy-Item -Force $EasyTierLicense (Join-Path $Tools "EasyTier-LGPL-3.0.txt")
-}
-Copy-Item -Force (Join-Path $Root "scbl-process-router\scbl-process-router.exe") (Join-Path $Tools "scbl-process-router.exe")
-Copy-Item -Force (Join-Path $Root "scbl-process-router\WinDivert.dll") (Join-Path $Tools "WinDivert.dll")
-Copy-Item -Force (Join-Path $Root "scbl-process-router\WinDivert64.sys") (Join-Path $Tools "WinDivert64.sys")
+if (Test-Path -LiteralPath $EasyTierLicense) { Copy-Item -Force $EasyTierLicense (Join-Path $Tools "EasyTier-LGPL-3.0.txt") }
+
+$RouterSource = Join-Path $Root "scbl-process-router\scbl-process-router.exe"
+$WinDivertDll = Join-Path $Root "scbl-process-router\WinDivert.dll"
+$WinDivertSys = Join-Path $Root "scbl-process-router\WinDivert64.sys"
+if (Test-Path -LiteralPath $RouterSource) { Copy-Item -Force $RouterSource (Join-Path $Tools "scbl-process-router.exe") }
+if (Test-Path -LiteralPath $WinDivertDll) { Copy-Item -Force $WinDivertDll (Join-Path $Tools "WinDivert.dll") }
+if (Test-Path -LiteralPath $WinDivertSys) { Copy-Item -Force $WinDivertSys (Join-Path $Tools "WinDivert64.sys") }
 
 $WinDivertNotice = Join-Path $Root "WINDIVERT_NOTICE.txt"
-if (!(Test-Path -LiteralPath $WinDivertNotice)) { throw "WinDivert notice is missing: $WinDivertNotice" }
-Copy-Item -Force $WinDivertNotice (Join-Path $Publish "WINDIVERT_NOTICE.txt")
+if (Test-Path -LiteralPath $WinDivertNotice) { Copy-Item -Force $WinDivertNotice (Join-Path $Publish "WINDIVERT_NOTICE.txt") }
 
 $UpdaterBuild = Join-Path $Root "SCBL.Updater\publish\SCBL.Updater.exe"
-Copy-Item -Force $UpdaterBuild (Join-Path $Publish "SCBL.Updater.exe")
-Copy-Item -Force $UpdaterBuild (Join-Path $Tools "SCBL.Updater.payload.exe")
-
-$SettingsExample = Join-Path $Root "launcher_settings.example.json"
-if (Test-Path -LiteralPath $SettingsExample) {
-    Copy-Item -Force $SettingsExample (Join-Path $Publish "launcher_settings.example.json")
+if (Test-Path -LiteralPath $UpdaterBuild) {
+    Copy-Item -Force $UpdaterBuild (Join-Path $Publish "SCBL.Updater.exe")
+    Copy-Item -Force $UpdaterBuild (Join-Path $Tools "SCBL.Updater.payload.exe")
 }
 
-Write-Host "[6/6] Verify publish folder"
-$Required = @(
-    (Join-Path $Publish "SplinterCellCNLauncher.exe"),
-    (Join-Path $Tools "easytier-core.exe"),
-    (Join-Path $Tools "easytier-cli.exe"),
-    (Join-Path $Tools "scbl-process-router.exe"),
-    (Join-Path $Tools "WinDivert.dll"),
-    (Join-Path $Tools "WinDivert64.sys"),
-    (Join-Path $Publish "WINDIVERT_NOTICE.txt"),
-    (Join-Path $Publish "SCBL.Updater.exe"),
-    (Join-Path $Tools "SCBL.Updater.payload.exe")
-)
+$SettingsExample = Join-Path $Root "launcher_settings.example.json"
+if (Test-Path -LiteralPath $SettingsExample) { Copy-Item -Force $SettingsExample (Join-Path $Publish "launcher_settings.example.json") }
+
+$Required = New-Object System.Collections.Generic.List[string]
+if ($BuildLauncher -or $Package) { $Required.Add((Join-Path $Publish "SplinterCellCNLauncher.exe")) }
+if ($BuildUpdater -or $Package) {
+    $Required.Add((Join-Path $Publish "SCBL.Updater.exe"))
+    $Required.Add((Join-Path $Tools "SCBL.Updater.payload.exe"))
+}
+if ($BuildRouter -or $Package) {
+    $Required.Add((Join-Path $Tools "scbl-process-router.exe"))
+    $Required.Add((Join-Path $Tools "WinDivert.dll"))
+    $Required.Add((Join-Path $Tools "WinDivert64.sys"))
+}
+if ($PrepareRuntime -or $Package) {
+    $Required.Add((Join-Path $Tools "easytier-core.exe"))
+    $Required.Add((Join-Path $Tools "easytier-cli.exe"))
+}
 foreach ($File in $Required) { if (!(Test-Path -LiteralPath $File)) { throw "Missing output: $File" } }
 
-$RootUpdaterHash = (Get-FileHash -LiteralPath (Join-Path $Publish "SCBL.Updater.exe") -Algorithm SHA256).Hash
-$PayloadUpdaterHash = (Get-FileHash -LiteralPath (Join-Path $Tools "SCBL.Updater.payload.exe") -Algorithm SHA256).Hash
-if ($RootUpdaterHash -ne $PayloadUpdaterHash) { throw "Updater payload hash mismatch." }
+$RootUpdater = Join-Path $Publish "SCBL.Updater.exe"
+$PayloadUpdater = Join-Path $Tools "SCBL.Updater.payload.exe"
+if ((Test-Path -LiteralPath $RootUpdater) -and (Test-Path -LiteralPath $PayloadUpdater)) {
+    $RootUpdaterHash = (Get-FileHash -LiteralPath $RootUpdater -Algorithm SHA256).Hash
+    $PayloadUpdaterHash = (Get-FileHash -LiteralPath $PayloadUpdater -Algorithm SHA256).Hash
+    if ($RootUpdaterHash -ne $PayloadUpdaterHash) { throw "Updater payload hash mismatch." }
+    Write-Host "Updater payload verified: $RootUpdaterHash"
+}
 
-Write-Host "Updater payload verified: $RootUpdaterHash"
 Write-Host "Build finished: $Publish"
 
 if ($Package) {
     Write-Host "Creating release package ..."
-    & powershell -ExecutionPolicy Bypass -File (Join-Path $Root "create_client_full_package.ps1") -Version $ScblVersion -OutputDir $OutputDir
-    if ($LASTEXITCODE -ne 0) { throw "Client package creation failed" }
+    $PackageArgs = @('-Version', $ScblVersion, '-OutputDir', $OutputDir)
+    if ($Fast) { $PackageArgs += '-Fast' }
+    Invoke-Step (Join-Path $Root "create_client_full_package.ps1") $PackageArgs
 }

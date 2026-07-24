@@ -9,7 +9,22 @@ $ErrorActionPreference = 'Stop'
 $Root = $PSScriptRoot
 $Bin = Join-Path $Root 'bin'
 $Cache = Join-Path $Root 'cache'
+$Marker = Join-Path $Bin ('.scbl-prepared-{0}-{1}' -f $Version, $Arch)
+$CorePath = Join-Path $Bin 'easytier-core.exe'
+$CliPath = Join-Path $Bin 'easytier-cli.exe'
 New-Item -ItemType Directory -Force -Path $Bin, $Cache | Out-Null
+
+if ((Test-Path -LiteralPath $Marker) -and
+    (Test-Path -LiteralPath $CorePath) -and
+    (Test-Path -LiteralPath $CliPath)) {
+    $MarkerValue = (Get-Content -LiteralPath $Marker -Raw -ErrorAction SilentlyContinue).Trim()
+    if ($MarkerValue -eq "$Version|$Arch") {
+        Write-Host "Reusing prepared EasyTier runtime: $Version / $Arch"
+        & $CorePath --version
+        & $CliPath --version
+        exit 0
+    }
+}
 
 if ([string]::IsNullOrWhiteSpace($PackagePath)) {
     $PackagePath = Join-Path $Cache ("easytier-windows-{0}-{1}.zip" -f $Arch, $Version)
@@ -18,12 +33,11 @@ if ([string]::IsNullOrWhiteSpace($PackagePath)) {
 if (!(Test-Path -LiteralPath $PackagePath)) {
     $Url = "https://github.com/EasyTier/EasyTier/releases/download/$Version/easytier-windows-$Arch-$Version.zip"
     Write-Host "Downloading official EasyTier package: $Url"
-    try {
-        Invoke-WebRequest -UseBasicParsing -Uri $Url -OutFile $PackagePath
-    }
-    catch {
-        throw "EasyTier download failed. Download the official package manually and set EASYTIER_WINDOWS_PACKAGE. Expected asset: easytier-windows-$Arch-$Version.zip"
-    }
+    try { Invoke-WebRequest -UseBasicParsing -Uri $Url -OutFile $PackagePath }
+    catch { throw "EasyTier download failed. Download the official package manually and set EASYTIER_WINDOWS_PACKAGE. Expected asset: easytier-windows-$Arch-$Version.zip" }
+}
+else {
+    Write-Host "Reusing cached EasyTier package: $PackagePath"
 }
 
 $Temp = Join-Path ([System.IO.Path]::GetTempPath()) ("scbl-easytier-win-" + [guid]::NewGuid().ToString('N'))
@@ -35,8 +49,8 @@ try {
 
     Remove-Item -Recurse -Force $Bin -ErrorAction SilentlyContinue
     New-Item -ItemType Directory -Force -Path $Bin | Out-Null
-    Copy-Item -Force $Core.FullName (Join-Path $Bin 'easytier-core.exe')
-    Copy-Item -Force $Cli.FullName (Join-Path $Bin 'easytier-cli.exe')
+    Copy-Item -Force $Core.FullName $CorePath
+    Copy-Item -Force $Cli.FullName $CliPath
 
     Get-ChildItem $Temp -Recurse -File | Where-Object { $_.Extension -in '.dll', '.sys' } | ForEach-Object {
         Copy-Item -Force $_.FullName (Join-Path $Bin $_.Name)
@@ -51,8 +65,9 @@ License: LGPL-3.0
 The binaries are used unmodified as an independent process.
 "@ | Set-Content -LiteralPath (Join-Path $Bin 'THIRD_PARTY_NOTICES_EASYTIER.txt') -Encoding UTF8
 
-    & (Join-Path $Bin 'easytier-core.exe') --version
-    & (Join-Path $Bin 'easytier-cli.exe') --version
+    "$Version|$Arch" | Set-Content -LiteralPath $Marker -Encoding ASCII -NoNewline
+    & $CorePath --version
+    & $CliPath --version
     Write-Host "EasyTier prepared: $Bin"
 }
 finally {

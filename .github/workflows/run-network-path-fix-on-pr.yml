@@ -1,0 +1,84 @@
+name: Run network path fix on PR
+
+on:
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    if: github.head_ref == 'agent/fix-p2p-relay-and-host-latency'
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: agent/fix-p2p-relay-and-host-latency
+          fetch-depth: 0
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 8.0.x
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: 1.23.2
+          cache: true
+          cache-dependency-path: client/scbl-process-router/go.sum
+
+      - name: Apply exact source patch
+        run: python3 scripts/maintenance/apply_network_path_fix.py
+
+      - name: Validate server and policy
+        shell: bash
+        run: |
+          set -euo pipefail
+          bash -n server/install_public_server.sh
+          python3 -m py_compile server/test_network_topology.py server/test_ddns_go_native.py
+          python3 server/test_network_topology.py
+          python3 server/test_ddns_go_native.py
+
+      - name: Build Launcher and Updater
+        shell: bash
+        run: |
+          set -euo pipefail
+          dotnet restore client/ScblPublicLauncher/SplinterCellCNLauncher.csproj -p:EnableWindowsTargeting=true
+          dotnet build client/ScblPublicLauncher/SplinterCellCNLauncher.csproj -c Release -p:EnableWindowsTargeting=true --no-restore
+          dotnet restore client/SCBL.Updater/SCBL.Updater.csproj -p:EnableWindowsTargeting=true
+          dotnet build client/SCBL.Updater/SCBL.Updater.csproj -c Release -p:EnableWindowsTargeting=true --no-restore
+
+      - name: Validate Route Guard
+        working-directory: client/scbl-process-router
+        shell: bash
+        run: |
+          set -euo pipefail
+          go mod download
+          test -z "$(gofmt -l .)"
+          GOOS=windows GOARCH=amd64 go vet ./...
+          GOOS=windows GOARCH=amd64 go test ./...
+          GOOS=windows GOARCH=amd64 go build -mod=readonly -trimpath -o /tmp/scbl-process-router.exe .
+          test -s /tmp/scbl-process-router.exe
+
+      - name: Commit verified source changes
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add \
+            VERSION VERSION_CLIENT VERSION_SERVER_TOOL COMPONENT_VERSIONS.json \
+            README.md CHANGELOG.md \
+            client/ScblPublicLauncher/Models/LauncherSettings.cs \
+            client/ScblPublicLauncher/Services/LauncherSettingsService.cs \
+            client/ScblPublicLauncher/Services/PublicTunnelService.cs \
+            client/ScblPublicLauncher/MainWindow.xaml.cs \
+            client/scbl-process-router/main.go \
+            server/install_public_server.sh \
+            server/test_ddns_go_native.py \
+            server/test_network_topology.py \
+            docs/releases/CLIENT_v1.0.1.md \
+            docs/releases/SERVER_TOOL_v1.0.1.md
+          git diff --cached --check
+          git commit -m "Release v1.0.1 P2P relay stability fix"
+          git push origin HEAD:agent/fix-p2p-relay-and-host-latency

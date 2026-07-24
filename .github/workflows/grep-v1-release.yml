@@ -1,0 +1,40 @@
+name: Inspect v1 release dependencies
+
+on:
+  push:
+    branches: [agent/release-v1.0.0]
+    paths:
+      - '.github/workflows/grep-v1-release.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  inspect:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: agent/release-v1.0.0
+      - name: Record exact references
+        run: |
+          set -euo pipefail
+          {
+            echo '# Exact v1 references'
+            for pattern in \
+              'stable-latest' \
+              'SCBL_MIN_CLIENT_VERSION|MinimumClientVersion|ClientVersionAccepted|clientVersionAccepted|minimumClientVersion' \
+              '_lastBootstrapContext' \
+              'ShowConfirmDialogAsync|ShowInfoDialogAsync' \
+              'download_latest_client_release|update_server_tool|install_or_reinstall|write_package_watcher_files' \
+              '原子'; do
+              echo
+              echo "## $pattern"
+              grep -RInE "$pattern" --exclude-dir=.git --exclude='docs/_tmp_v1_release_audit.txt' . || true
+            done
+          } > docs/_tmp_v1_exact_refs.txt
+          git config user.name github-actions
+          git config user.email github-actions@github.com
+          git add docs/_tmp_v1_exact_refs.txt
+          git commit -m 'record exact v1 references'
+          git push

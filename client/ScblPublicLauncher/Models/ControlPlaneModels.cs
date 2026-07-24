@@ -41,8 +41,9 @@ public sealed class ControlPlaneTopologySummary
 public sealed class ControlPlaneBootstrapContext
 {
     public string ServerToolVersion { get; init; } = "";
-    public string MinimumClientVersion { get; init; } = "";
-    public bool ClientVersionAccepted { get; init; } = true;
+    public string RequiredClientVersion { get; init; } = "";
+    public bool ClientVersionAccepted { get; init; }
+    public bool UpdateRequired { get; init; }
     public bool Maintenance { get; init; }
     public bool? AccountExists { get; init; }
     public int OnlineCount { get; init; }

@@ -14,6 +14,7 @@ internal static class Program
             string? target = GetArg(args, "--target");
             string? pidText = GetArg(args, "--pid");
             string? restart = GetArg(args, "--restart");
+            string? requestedVersion = GetArg(args, "--version");
 
             if (string.IsNullOrWhiteSpace(target))
             {
@@ -77,6 +78,9 @@ internal static class Program
                     throw new FileNotFoundException("Update package not found", package);
 
                 ApplyFullPackage(package, target);
+                appliedVersion = NormalizeVersion(requestedVersion);
+                if (string.IsNullOrWhiteSpace(appliedVersion))
+                    throw new InvalidOperationException("Missing or invalid --version for full client update.");
             }
 
             CleanupBackupDirectory(target);
@@ -101,6 +105,15 @@ internal static class Program
             Console.Error.WriteLine(ex);
             return 1;
         }
+    }
+
+    private static string NormalizeVersion(string? value)
+    {
+        string normalized = (value ?? string.Empty).Trim().TrimStart('v', 'V');
+        string[] parts = normalized.Split('.');
+        return parts.Length == 3 && parts.All(x => int.TryParse(x, out int number) && number >= 0)
+            ? normalized
+            : string.Empty;
     }
 
     private static string? GetArg(string[] args, string name)

@@ -55,7 +55,6 @@ public partial class MainWindow : Window
     private bool _isBusy;
     private bool _isLaunchFlowActive;
     private bool _isUpdating;
-    private bool _remoteUpdateDeferredForGame;
     private bool _isGameStarting;
     private bool _isGameRunning;
     private bool _isEndingGame;
@@ -75,7 +74,6 @@ public partial class MainWindow : Window
     private bool _networkAutoRetryScheduled;
     private bool _networkReady;
     private bool _startupNetworkPreparationDone;
-    private bool _remoteUpdateCheckedThisSession;
     private bool _remoteAnnouncementCheckedThisSession;
     private bool _networkLifecycleStarted;
     private bool _networkShutdownStarted;
@@ -200,12 +198,6 @@ public partial class MainWindow : Window
         InitializeAnnouncementTicker();
         ForceEnglishInputForPlainTextBoxes();
         LoadSettingsToUi();
-        if (NormalizeVersionForComparison(_settings.LastConfirmedRemoteUpdateVersion)
-            .Equals(NormalizeVersionForComparison(LauncherVersion), StringComparison.OrdinalIgnoreCase))
-        {
-            _settings.LastConfirmedRemoteUpdateVersion = "";
-            _settingsService.Save(_settings);
-        }
         _networkOrchestrator = new NetworkOrchestrator(
             _tunnelService,
             _processRouterService,
@@ -234,8 +226,6 @@ public partial class MainWindow : Window
             Dispatcher.InvokeAsync(() => ApplyNetworkStatusSnapshot(snapshot));
         };
         ApplyLocalization();
-        SetGameRunningState(false);
-        PlayStartupMusicIfEnabled();
     }
 
     private bool IsEnglish => _settings.Language.Equals("en-US", StringComparison.OrdinalIgnoreCase);
@@ -317,7 +307,11 @@ public partial class MainWindow : Window
         txtPassword.Password = _settings.Password;
         cmbGameExecutable.SelectedIndex = _settings.GameExecutable.Equals("Blacklist_DX11_game.exe", StringComparison.OrdinalIgnoreCase) ? 1 : 0;
         _assignedIp = !string.IsNullOrWhiteSpace(_settings.LastAssignedVirtualIp) ? _settings.LastAssignedVirtualIp : _settings.LastBindIp;
+        Directory.CreateDirectory(LogService.LogDirectory);
+    }
 
+    private void InitializeLocalStateAfterVersionCheck()
+    {
         if (_gameLocatorService.IsValidGameDirectory(_settings.GameDirectory))
         {
             _gameDir = _settings.GameDirectory;
@@ -330,7 +324,6 @@ public partial class MainWindow : Window
             {
                 _gameDir = detectedDir;
                 _settings.GameDirectory = detectedDir;
-                _settingsService.Save(_settings);
                 LogService.Info($"Auto detected game directory: {detectedDir}");
             }
             else
@@ -340,8 +333,7 @@ public partial class MainWindow : Window
             }
         }
 
-        Directory.CreateDirectory(LogService.LogDirectory);
-        _settingsService.Save(_settings); // 写入公网入口/隧道密钥默认项，方便维护者后续修改。
+        _settingsService.Save(_settings);
         LogService.Info("Public launcher ready.");
         LogService.Info($"Settings path: {_settingsService.SettingsPath}");
         LogService.Info($"Public endpoint loaded: {GetConfiguredPublicEndpoint()}");
@@ -395,13 +387,14 @@ public partial class MainWindow : Window
         // freshly updated launcher can be mistaken for an incomplete same-version repair.
         await _updaterBootstrapService.EnsureCurrentUpdaterAsync();
 
-        // v0.6.0: keep the existing update protocol, but check it before EasyTier starts.
-        // The public update endpoint uses the configured public host with TCP/18080.
-        // If it is unavailable, startup continues and the original private endpoint is retried
-        // after the EasyTier overlay becomes ready.
-        await CheckRemoteClientUpdateBeforeNetworkAsync();
-        if (_allowClose)
+        // Version confirmation is the first functional startup step. Nothing else is
+        // initialized until the server confirms that this is the current formal client.
+        if (!await EnsureRequiredClientVersionAsync() || _allowClose)
             return;
+
+        InitializeLocalStateAfterVersionCheck();
+        SetGameRunningState(false);
+        PlayStartupMusicIfEnabled();
 
         await HandleFirstRunSaveOverwritePromptAsync();
 
@@ -476,179 +469,107 @@ public partial class MainWindow : Window
 
     private async Task CheckRemoteClientServicesAfterNetworkAsync()
     {
-        if (!_networkReady)
-            return;
-
-        // Public preflight is authoritative when it completed successfully. Only fall back to
-        // the original private update endpoint when the public manifest could not be reached.
-        if (!_remoteUpdateCheckedThisSession)
-            await CheckRemoteClientUpdateAfterNetworkAsync();
-
-        // Update notice has priority. Starting the updater sets _allowClose and exits the launcher.
-        if (!_allowClose)
+        if (_networkReady && !_allowClose)
             await CheckRemoteAnnouncementsAfterNetworkAsync();
     }
 
-    private async Task<bool> CheckRemoteClientUpdateBeforeNetworkAsync()
+    private async Task<bool> EnsureRequiredClientVersionAsync()
     {
-        if (_remoteUpdateCheckedThisSession || !_settings.AutoCheckRemoteUpdate || _allowClose)
-            return false;
-
         string baseUrl = PublicTunnelConfig.BuildPublicUpdateBaseUrl(
             GetConfiguredPublicEndpoint(),
             _settings.PublicUpdatePort);
-        LogService.Info($"Startup remote update preflight: {baseUrl}");
-        return await CheckRemoteClientUpdateAsync(baseUrl, requireNetworkReady: false, source: "public preflight");
-    }
+        SetUpdatingState(true);
+        SetBusy(true, L("正在检查客户端版本...", "Checking client version..."));
 
-    private async Task<bool> CheckRemoteClientUpdateAfterNetworkAsync()
-    {
-        if (!_networkReady)
-            return false;
-
-        LogService.Info($"Remote update private fallback: {PublicTunnelConfig.PrivateUpdateBaseUrl}");
-        return await CheckRemoteClientUpdateAsync(
-            PublicTunnelConfig.PrivateUpdateBaseUrl,
-            requireNetworkReady: true,
-            source: "private fallback");
-    }
-
-    private async Task<bool> CheckRemoteClientUpdateAsync(string baseUrl, bool requireNetworkReady, string source)
-    {
-        if (_remoteUpdateCheckedThisSession || !_settings.AutoCheckRemoteUpdate || _allowClose)
-            return false;
-        if (requireNetworkReady && !_networkReady)
-            return false;
-
-        try
+        while (!_allowClose)
         {
-            var check = await _remoteUpdateService.CheckAsync(
-                LauncherVersion,
-                _settings.LastSkippedRemoteUpdateVersion,
-                baseUrl);
+            var check = await _remoteUpdateService.CheckAsync(LauncherVersion, baseUrl);
             if (!check.Succeeded)
             {
-                LogService.Info($"Remote update endpoint unavailable; source={source}, endpoint={baseUrl}");
+                MessageBoxResult retry = await ShowConfirmDialogAsync(
+                    L("无法检查客户端版本", "Unable to Check Client Version"),
+                    L("暂时无法连接客户端更新服务。需要确认版本后才能继续使用。\n\n请检查网络连接后重新检查。",
+                      "The client update service is currently unavailable. The launcher must confirm the current version before continuing.\n\nCheck your network connection and try again."),
+                    L("重新检查", "Try Again"),
+                    L("退出", "Exit"));
+                if (retry == MessageBoxResult.Yes)
+                    continue;
+                ExitForRequiredUpdate();
                 return false;
             }
 
-            // A valid manifest response, including "no update", completes the session check.
-            // This prevents a second private request after a successful public preflight.
-            _remoteUpdateCheckedThisSession = true;
-            var info = check.Update;
+            RemoteClientUpdateService.RemoteUpdateInfo? info = check.Update;
             if (info == null)
             {
-                LogService.Info($"Remote update check completed with no action; source={source}, endpoint={check.BaseUrl}");
-                return false;
-            }
-
-            // Never start an updater while the game launch flow or game process is active.
-            // The updater intentionally stops the tunnel and process router, so allowing both
-            // workflows to overlap would interrupt an online session or corrupt launch state.
-            if (_isLaunchFlowActive || _isGameStarting || _isGameRunning)
-            {
-                _remoteUpdateDeferredForGame = true;
-                _remoteUpdateCheckedThisSession = false;
-                LogService.Info($"Remote update deferred until the game is idle. target={info.Version}, launchFlow={_isLaunchFlowActive}, starting={_isGameStarting}, running={_isGameRunning}");
-                return false;
-            }
-
-            bool updateAnnouncementAlreadyConfirmed = info.IsVersionUpgrade
-                && NormalizeVersionForComparison(_settings.LastConfirmedRemoteUpdateVersion)
-                    .Equals(NormalizeVersionForComparison(info.Version), StringComparison.OrdinalIgnoreCase);
-
-            if (info.IsVersionUpgrade && !updateAnnouncementAlreadyConfirmed)
-            {
-                string notes = info.ReleaseNotes.Length > 0
-                    ? string.Join("\n", info.ReleaseNotes.Select(x => "- " + x))
-                    : L("- 本版本未填写更新内容", "- No release notes were provided for this version.");
-
-                string announcementTitle;
-                string announcementBody;
-                if (info.HasCustomUpdateAnnouncement)
-                {
-                    announcementTitle = IsEnglish && !string.IsNullOrWhiteSpace(info.UpdateAnnouncementTitleEn)
-                        ? info.UpdateAnnouncementTitleEn
-                        : (!string.IsNullOrWhiteSpace(info.UpdateAnnouncementTitle)
-                            ? info.UpdateAnnouncementTitle
-                            : info.UpdateAnnouncementTitleEn);
-                    announcementBody = IsEnglish && !string.IsNullOrWhiteSpace(info.UpdateAnnouncementBodyEn)
-                        ? info.UpdateAnnouncementBodyEn
-                        : (!string.IsNullOrWhiteSpace(info.UpdateAnnouncementBody)
-                            ? info.UpdateAnnouncementBody
-                            : info.UpdateAnnouncementBodyEn);
-                }
-                else
-                {
-                    announcementTitle = L($"版本更新公告 v{info.Version}", $"Version Update v{info.Version}");
-                    announcementBody = L(
-                        $"检测到客户端新版本：{info.Version}\n\n更新内容：\n{notes}",
-                        $"A new client version is available: {info.Version}\n\nRelease notes:\n{notes}");
-                }
-
-                LogService.Info($"Showing update announcement before download. source={source}, current={LauncherVersion}, target={info.Version}, custom={info.HasCustomUpdateAnnouncement}, notes={info.ReleaseNotes.Length}, bodyLength={announcementBody.Length}");
-                await ShowInfoDialogAsync(
-                    announcementTitle,
-                    announcementBody,
-                    L("更新", "Update"));
-                _settings.LastConfirmedRemoteUpdateVersion = info.Version;
-                _settingsService.Save(_settings);
-                LogService.Info($"Update announcement confirmed; starting download for version {info.Version}.");
-            }
-            else
-            {
-                LogService.Info($"Showing client repair/retry notice before download. version={info.Version}, priorUpdateConfirmed={updateAnnouncementAlreadyConfirmed}");
-                string repairMessage = updateAnnouncementAlreadyConfirmed
-                    ? L("上次更新没有完整生效，启动器将重新校验并补齐缺失文件。\n\n更新公告不会再次显示。点击“修复”后继续。",
-                        "The previous update did not fully take effect. The launcher will verify and restore missing files.\n\nThe update announcement will not be shown again. Click Repair to continue.")
-                    : L("检测到客户端文件缺失或损坏。\n\n点击“修复”后，启动器会下载缺失或变化的文件，并在完成后自动重新打开。",
-                        "Missing or damaged client files were detected.\n\nClick Repair to download only the missing or changed files. The launcher will restart automatically when finished.");
-                await ShowInfoDialogAsync(
-                    L("客户端文件修复", "Client File Repair"),
-                    repairMessage,
-                    L("修复", "Repair"));
-                LogService.Info($"Client repair confirmed; starting download for version {info.Version}.");
-            }
-
-            if (IsAnyBlacklistGameProcessRunning())
-            {
-                _remoteUpdateDeferredForGame = true;
-                _remoteUpdateCheckedThisSession = false;
-                LogService.Warning($"Remote update cancelled by final game-process gate. target={info.Version}");
-                return false;
-            }
-
-            SetUpdatingState(true);
-            SetBusy(true, info.IsVersionUpgrade
-                ? L("正在下载更新...", "Downloading update...")
-                : L("正在下载修复文件...", "Downloading repair files..."));
-            var package = await _remoteUpdateService.DownloadAsync(info);
-            LogService.Info($"Starting remote client update: source={source}, package={package.PackagePath}, version={package.Version}");
-            _localUpdateService.StartUpdater(package, Environment.ProcessId);
-            _allowClose = true;
-            Application.Current.Shutdown();
-            return true;
-        }
-        catch (Exception ex)
-        {
-            LogService.Error($"Remote client update failed: source={source}, endpoint={baseUrl}, error={ex}");
-            _settings.LastConfirmedRemoteUpdateVersion = "";
-            _settingsService.Save(_settings);
-            _remoteUpdateCheckedThisSession = false;
-            await ShowInfoDialogAsync(
-                L("客户端更新失败", "Client Update Failed"),
-                L("本次更新未完成，启动器将继续尝试连接服务器。\n\n私网接入成功后会按原方式再次检查；详细原因已写入 logs\\scbl-public.log。",
-                  "The update did not complete. The launcher will continue connecting to the server.\n\nAfter the private network is ready it will retry using the original update path. Details were written to logs\\scbl-public.log."));
-            return false;
-        }
-        finally
-        {
-            if (!_allowClose)
-            {
+                LogService.Info($"Client version confirmed: {LauncherVersion}");
                 SetBusy(false);
                 SetUpdatingState(false);
+                return true;
+            }
+
+            string notes = info.ReleaseNotes.Length > 0
+                ? string.Join("\n", info.ReleaseNotes.Select(x => "- " + x))
+                : L("- 正式版本更新", "- Formal release update");
+            string title = info.HasCustomUpdateAnnouncement
+                ? (IsEnglish && !string.IsNullOrWhiteSpace(info.UpdateAnnouncementTitleEn)
+                    ? info.UpdateAnnouncementTitleEn
+                    : FirstNonEmptyText(info.UpdateAnnouncementTitle, info.UpdateAnnouncementTitleEn,
+                        L($"发现新版本 v{info.Version}", $"New Version v{info.Version}")))
+                : L($"发现新版本 v{info.Version}", $"New Version v{info.Version}");
+            string body = info.HasCustomUpdateAnnouncement
+                ? (IsEnglish && !string.IsNullOrWhiteSpace(info.UpdateAnnouncementBodyEn)
+                    ? info.UpdateAnnouncementBodyEn
+                    : FirstNonEmptyText(info.UpdateAnnouncementBody, info.UpdateAnnouncementBodyEn,
+                        L($"需要更新到 v{info.Version} 后才能继续使用。", $"Update to v{info.Version} is required before continuing.")))
+                : L($"当前版本：v{LauncherVersion}\n正式版本：v{info.Version}\n\n需要完成更新后才能继续使用。\n\n更新内容：\n{notes}",
+                    $"Current version: v{LauncherVersion}\nRequired version: v{info.Version}\n\nThe update must be completed before continuing.\n\nChanges:\n{notes}");
+
+            MessageBoxResult choice = await ShowConfirmDialogAsync(
+                title,
+                body,
+                L("立即更新", "Update Now"),
+                L("退出", "Exit"));
+            if (choice != MessageBoxResult.Yes)
+            {
+                ExitForRequiredUpdate();
+                return false;
+            }
+
+            try
+            {
+                SetBusy(true, L("正在下载客户端更新...", "Downloading client update..."));
+                var package = await _remoteUpdateService.DownloadAsync(info);
+                _localUpdateService.StartUpdater(package, Environment.ProcessId);
+                _allowClose = true;
+                Application.Current.Shutdown();
+                return false;
+            }
+            catch (Exception ex)
+            {
+                LogService.Error($"Client update failed: {ex}");
+                MessageBoxResult retry = await ShowConfirmDialogAsync(
+                    L("客户端更新失败", "Client Update Failed"),
+                    L("客户端更新没有完成，请检查网络连接后重试。\n\n详细信息已写入日志。",
+                      "The client update did not complete. Check your network connection and try again.\n\nDetails were written to the log."),
+                    L("重新尝试", "Try Again"),
+                    L("退出", "Exit"));
+                if (retry == MessageBoxResult.Yes)
+                    continue;
+                ExitForRequiredUpdate();
+                return false;
             }
         }
+
+        return false;
+    }
+
+    private static string FirstNonEmptyText(params string[] values)
+        => values.FirstOrDefault(x => !string.IsNullOrWhiteSpace(x))?.Trim() ?? "";
+
+    private void ExitForRequiredUpdate()
+    {
+        _allowClose = true;
+        Application.Current.Shutdown();
     }
 
     private async Task CheckRemoteAnnouncementsAfterNetworkAsync()
@@ -1753,12 +1674,11 @@ public partial class MainWindow : Window
         _lastBootstrapContext = bootstrap;
         if (bootstrap.Maintenance)
             throw new InvalidOperationException(L("服务器当前处于维护状态，请稍后再试。", "The server is currently under maintenance. Please try again later."));
-        if (!bootstrap.ClientVersionAccepted
-            || ControlPlaneService.IsVersionOlderThan(LauncherVersion, bootstrap.MinimumClientVersion))
+        if (!bootstrap.ClientVersionAccepted || bootstrap.UpdateRequired)
         {
             throw new InvalidOperationException(L(
-                $"当前客户端版本过低。服务器要求至少 v{bootstrap.MinimumClientVersion}，请先更新客户端。",
-                $"This client is too old. Server minimum is v{bootstrap.MinimumClientVersion}; update the client first."));
+                $"客户端版本与服务器当前版本不一致。请重新打开启动器并完成 v{bootstrap.RequiredClientVersion} 更新。",
+                $"The client version does not match the server. Reopen the launcher and complete the v{bootstrap.RequiredClientVersion} update."));
         }
 
         if (bootstrap.Health.Overall.Equals("down", StringComparison.OrdinalIgnoreCase))
@@ -1775,7 +1695,7 @@ public partial class MainWindow : Window
         if (capabilities.Mtu > 0 && capabilities.Mtu != PublicTunnelConfig.Mtu)
             LogService.Warning($"Server/client MTU mismatch: server={capabilities.Mtu}, client={PublicTunnelConfig.Mtu}.");
 
-        LogService.Info($"Control plane bootstrap: serverTool={bootstrap.ServerToolVersion}, minClient={bootstrap.MinimumClientVersion}, online={bootstrap.OnlineCount}, accountExists={bootstrap.AccountExists?.ToString() ?? "unknown"}, health={bootstrap.Health.Overall}.");
+        LogService.Info($"Control plane bootstrap: serverTool={bootstrap.ServerToolVersion}, requiredClient={bootstrap.RequiredClientVersion}, online={bootstrap.OnlineCount}, accountExists={bootstrap.AccountExists?.ToString() ?? "unknown"}, health={bootstrap.Health.Overall}.");
     }
 
     private async Task RunBackgroundVirtualLanDiagnosticsAsync(string bindIp)
@@ -2205,12 +2125,6 @@ public partial class MainWindow : Window
         }
         RefreshServerStatusTextFromKind();
 
-        if (!running && _remoteUpdateDeferredForGame && _networkReady && !_allowClose && !_isUpdating)
-        {
-            _remoteUpdateDeferredForGame = false;
-            LogService.Info("Game is idle; retrying the deferred remote update check.");
-            _ = CheckRemoteClientServicesAfterNetworkAsync();
-        }
     }
 
     private void StartGameMonitor(

@@ -4,9 +4,6 @@ using System.IO;
 
 namespace SplinterCellCNLauncher.Services;
 
-/// <summary>
-/// Starts SCBL.Updater. Local update scanning has been removed; updates only come from the server manifest.
-/// </summary>
 public sealed class LocalClientUpdateService
 {
     public sealed class UpdatePackageInfo
@@ -25,19 +22,15 @@ public sealed class LocalClientUpdateService
         if (!File.Exists(updater))
             updater = Path.Combine(baseDir, "tools", "SCBL.Updater.exe");
         if (!File.Exists(updater))
-            throw new FileNotFoundException("SCBL.Updater.exe not found", updater);
+            throw new FileNotFoundException("没有找到客户端更新程序。", updater);
 
         string launcherExe = Process.GetCurrentProcess().MainModule?.FileName ?? Path.Combine(baseDir, "SplinterCellCNLauncher.exe");
-        string modeArg = package.PackageType.Equals("file_delta", StringComparison.OrdinalIgnoreCase)
-            ? $"--plan {Quote(package.PackagePath)}"
-            : $"--package {Quote(package.PackagePath)}";
-
         var psi = new ProcessStartInfo
         {
             FileName = updater,
             UseShellExecute = true,
             WorkingDirectory = baseDir,
-            Arguments = $"{modeArg} --target {Quote(baseDir)} --pid {launcherPid} --restart {Quote(launcherExe)}"
+            Arguments = $"--package {Quote(package.PackagePath)} --version {Quote(package.Version)} --target {Quote(baseDir)} --pid {launcherPid} --restart {Quote(launcherExe)}"
         };
         Process.Start(psi);
     }

@@ -42,12 +42,8 @@ public sealed class LauncherSettings
 
     // v0.3.5 起客户端只走服务端网络更新，不再扫描本地 updates 目录。
 
-    // 服务端远程更新：启动时先通过公网主机:PublicUpdatePort 检查；公网失败后，
-    // 接入 EasyTier 私网并继续使用 10.66.0.1:18080 作为兼容兜底。
-    public bool AutoCheckRemoteUpdate { get; set; } = true;
+    // 启动器首先通过公网更新端口确认正式版本，版本不一致时必须更新。
     public int PublicUpdatePort { get; set; } = 18080;
-    public string LastSkippedRemoteUpdateVersion { get; set; } = "";
-    public string LastConfirmedRemoteUpdateVersion { get; set; } = "";
 
     // v0.4.3: 运行期网络状态缓存。替代旧的 assigned-ip.txt，仅作快速复用参考，启动时仍会实际验证。
     public string LastAssignedVirtualIp { get; set; } = "";

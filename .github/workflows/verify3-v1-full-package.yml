@@ -1,6 +1,6 @@
 name: Final complete v1 client package verification
 
-# Re-run on the latest v1.0.0 source after version-source cleanup.
+# Hooks is verified before compilation and embedded into the launcher; it is not a standalone package file.
 on:
   push:
     branches: [agent/release-v1.0.0]
@@ -57,19 +57,26 @@ jobs:
           $extract = Join-Path $env:RUNNER_TEMP 'scbl-v1-package'
           if (Test-Path $extract) { Remove-Item $extract -Recurse -Force }
           Expand-Archive -LiteralPath $zip -DestinationPath $extract -Force
-          $launcher = Get-ChildItem $extract -Recurse -Filter SplinterCellCNLauncher.exe | Select-Object -First 1
-          $updater = Get-ChildItem $extract -Recurse -Filter SCBL.Updater.exe | Select-Object -First 1
-          $router = Get-ChildItem $extract -Recurse -Filter scbl-process-router.exe | Select-Object -First 1
-          $core = Get-ChildItem $extract -Recurse -Filter easytier-core.exe | Select-Object -First 1
-          $cli = Get-ChildItem $extract -Recurse -Filter easytier-cli.exe | Select-Object -First 1
-          $hooks = Get-ChildItem $extract -Recurse -Filter uplay_r1_loader.dll | Select-Object -First 1
-          foreach ($required in @($launcher,$updater,$router,$core,$cli,$hooks)) {
-            if ($null -eq $required) { throw 'Client package is missing a required runtime file.' }
+          $requiredNames = @(
+            'SplinterCellCNLauncher.exe',
+            'SCBL.Updater.exe',
+            'SCBL.Updater.payload.exe',
+            'scbl-process-router.exe',
+            'easytier-core.exe',
+            'easytier-cli.exe',
+            'WinDivert.dll',
+            'WinDivert64.sys'
+          )
+          $found = @{}
+          foreach ($name in $requiredNames) {
+            $item = Get-ChildItem $extract -Recurse -Filter $name | Select-Object -First 1
+            if ($null -eq $item) { throw "Client package is missing: $name" }
+            $found[$name] = $item
           }
-          foreach ($exe in @($launcher,$updater)) {
-            $info = (Get-Item $exe.FullName).VersionInfo
-            if (-not $info.FileVersion.StartsWith('1.0.0')) { throw "$($exe.Name) FileVersion is $($info.FileVersion)" }
-            if (-not $info.ProductVersion.StartsWith('1.0.0')) { throw "$($exe.Name) ProductVersion is $($info.ProductVersion)" }
+          foreach ($name in @('SplinterCellCNLauncher.exe','SCBL.Updater.exe')) {
+            $info = (Get-Item $found[$name].FullName).VersionInfo
+            if (-not $info.FileVersion.StartsWith('1.0.0')) { throw "$name FileVersion is $($info.FileVersion)" }
+            if (-not $info.ProductVersion.StartsWith('1.0.0')) { throw "$name ProductVersion is $($info.ProductVersion)" }
           }
           $relative = Get-ChildItem $extract -Recurse -Force | ForEach-Object { $_.FullName.Substring($extract.Length).TrimStart('\').Replace('\','/') }
           foreach ($name in @('launcher_settings.json','client_update_manifest.json','update_manifest.json')) {

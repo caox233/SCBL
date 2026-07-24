@@ -61,24 +61,76 @@ jobs:
           test -s /tmp/scbl-process-router.exe
 
       - name: Commit verified source changes
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPOSITORY: ${{ github.repository }}
+          TARGET_BRANCH: agent/fix-p2p-relay-and-host-latency
         shell: bash
         run: |
           set -euo pipefail
-          git config user.name github-actions[bot]
-          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
-          git add \
-            VERSION VERSION_CLIENT VERSION_SERVER_TOOL COMPONENT_VERSIONS.json \
-            README.md CHANGELOG.md \
-            client/ScblPublicLauncher/Models/LauncherSettings.cs \
-            client/ScblPublicLauncher/Services/LauncherSettingsService.cs \
-            client/ScblPublicLauncher/Services/PublicTunnelService.cs \
-            client/ScblPublicLauncher/MainWindow.xaml.cs \
-            client/scbl-process-router/main.go \
-            server/install_public_server.sh \
-            server/test_ddns_go_native.py \
-            server/test_network_topology.py \
-            docs/releases/CLIENT_v1.0.1.md \
-            docs/releases/SERVER_TOOL_v1.0.1.md
-          git diff --cached --check
-          git commit -m "Release v1.0.1 P2P relay stability fix"
-          git push origin HEAD:agent/fix-p2p-relay-and-host-latency
+          python3 - <<'PY'
+          import base64
+          import json
+          import os
+          import subprocess
+          import urllib.request
+
+          paths = [
+              'VERSION', 'VERSION_CLIENT', 'VERSION_SERVER_TOOL', 'COMPONENT_VERSIONS.json',
+              'README.md', 'CHANGELOG.md',
+              'client/ScblPublicLauncher/Models/LauncherSettings.cs',
+              'client/ScblPublicLauncher/Services/LauncherSettingsService.cs',
+              'client/ScblPublicLauncher/Services/PublicTunnelService.cs',
+              'client/ScblPublicLauncher/MainWindow.xaml.cs',
+              'client/scbl-process-router/main.go',
+              'server/install_public_server.sh',
+              'server/test_ddns_go_native.py',
+              'server/test_network_topology.py',
+              'docs/releases/CLIENT_v1.0.1.md',
+              'docs/releases/SERVER_TOOL_v1.0.1.md',
+          ]
+          token = os.environ['GH_TOKEN']
+          repository = os.environ['REPOSITORY']
+          branch = os.environ['TARGET_BRANCH']
+          api = f'https://api.github.com/repos/{repository}'
+
+          def request(method, url, payload):
+              data = json.dumps(payload).encode('utf-8')
+              req = urllib.request.Request(
+                  url,
+                  data=data,
+                  method=method,
+                  headers={
+                      'Authorization': f'Bearer {token}',
+                      'Accept': 'application/vnd.github+json',
+                      'X-GitHub-Api-Version': '2022-11-28',
+                      'Content-Type': 'application/json',
+                  },
+              )
+              with urllib.request.urlopen(req, timeout=60) as response:
+                  return json.load(response)
+
+          parent = subprocess.check_output(['git', 'rev-parse', 'HEAD'], text=True).strip()
+          base_tree = subprocess.check_output(['git', 'rev-parse', 'HEAD^{tree}'], text=True).strip()
+          entries = []
+          for path in paths:
+              content = open(path, 'rb').read()
+              blob = request('POST', api + '/git/blobs', {
+                  'content': base64.b64encode(content).decode('ascii'),
+                  'encoding': 'base64',
+              })
+              try:
+                  mode = subprocess.check_output(['git', 'ls-files', '-s', '--', path], text=True).split()[0]
+              except Exception:
+                  mode = '100644'
+              entries.append({'path': path, 'mode': mode or '100644', 'type': 'blob', 'sha': blob['sha']})
+
+          tree = request('POST', api + '/git/trees', {'base_tree': base_tree, 'tree': entries})
+          commit = request('POST', api + '/git/commits', {
+              'message': 'Release v1.0.1 P2P relay stability fix',
+              'tree': tree['sha'],
+              'parents': [parent],
+          })
+          request('PATCH', api + f'/git/refs/heads/{branch}', {'sha': commit['sha'], 'force': False})
+          print('Created commit:', commit['sha'])
+          PY

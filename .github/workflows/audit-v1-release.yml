@@ -1,0 +1,86 @@
+name: Audit v1 release paths
+
+on:
+  push:
+    branches: [agent/release-v1.0.0]
+    paths:
+      - '.github/workflows/audit-v1-release.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  audit:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: agent/release-v1.0.0
+          fetch-depth: 0
+      - name: Generate source audit
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+          import re
+
+          root = Path('.')
+          out = []
+          out.append('# SCBL v1.0.0 source audit\n')
+
+          for base in ['client/ScblPublicLauncher', 'client/SCBL.Updater', '.github/workflows', 'server']:
+              out.append(f'\n## Files: {base}\n')
+              p = root / base
+              if p.exists():
+                  for item in sorted(x for x in p.rglob('*') if x.is_file()):
+                      out.append(str(item))
+
+          patterns = [
+              r'stable-latest', r'VERSION_CLIENT', r'VERSION_SERVER_TOOL',
+              r'SCBL_MIN_CLIENT_VERSION', r'minimumClientVersion',
+              r'clientVersionAccepted', r'updateRequired', r'requiredClientVersion',
+              r'CheckForUpdate', r'Check.*Update', r'Updater', r'LaunchGame',
+              r'StartGame', r'OnStartup', r'Application_Startup', r'原子',
+          ]
+          rx = re.compile('|'.join(f'(?:{p})' for p in patterns), re.I)
+          include_suffixes = {'.cs', '.xaml', '.csproj', '.ps1', '.sh', '.py', '.yml', '.yaml', '.json', '.md'}
+          candidates = []
+          for item in root.rglob('*'):
+              if not item.is_file() or item.suffix.lower() not in include_suffixes:
+                  continue
+              if any(part in {'.git', 'bin', 'obj', 'dist'} for part in item.parts):
+                  continue
+              try:
+                  text = item.read_text(encoding='utf-8')
+              except Exception:
+                  continue
+              lines = text.splitlines()
+              hits = [i for i, line in enumerate(lines) if rx.search(line)]
+              if hits:
+                  candidates.append((item, lines, hits))
+
+          out.append('\n## Matched source contexts\n')
+          for item, lines, hits in sorted(candidates, key=lambda x: str(x[0])):
+              out.append(f'\n### {item}\n')
+              ranges = []
+              for i in hits:
+                  start, end = max(0, i-8), min(len(lines), i+10)
+                  if ranges and start <= ranges[-1][1] + 1:
+                      ranges[-1] = (ranges[-1][0], max(ranges[-1][1], end))
+                  else:
+                      ranges.append((start, end))
+              for start, end in ranges:
+                  out.append(f'-- lines {start+1}-{end} --')
+                  for n in range(start, end):
+                      out.append(f'{n+1:05d}: {lines[n]}')
+
+          report = Path('docs/_tmp_v1_release_audit.txt')
+          report.write_text('\n'.join(out) + '\n', encoding='utf-8')
+          print(f'wrote {report} ({report.stat().st_size} bytes)')
+          PY
+          git config user.name github-actions
+          git config user.email github-actions@github.com
+          git add docs/_tmp_v1_release_audit.txt
+          git commit -m "record v1 release audit"
+          git push

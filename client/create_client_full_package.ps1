@@ -55,9 +55,10 @@ $Stream = [System.IO.File]::Open($Zip, [System.IO.FileMode]::CreateNew, [System.
 try {
     $Archive = New-Object System.IO.Compression.ZipArchive($Stream, [System.IO.Compression.ZipArchiveMode]::Create, $false)
     try {
-        $PublishPrefix = $Publish.TrimEnd('\\', '/') + [System.IO.Path]::DirectorySeparatorChar
+        $TrimChars = [char[]]@([System.IO.Path]::DirectorySeparatorChar, [System.IO.Path]::AltDirectorySeparatorChar)
+        $PublishPrefix = $Publish.TrimEnd($TrimChars) + [System.IO.Path]::DirectorySeparatorChar
         foreach ($File in Get-ChildItem -LiteralPath $Publish -Recurse -File | Sort-Object FullName) {
-            $Relative = $File.FullName.Substring($PublishPrefix.Length).Replace('\\', '/')
+            $Relative = $File.FullName.Substring($PublishPrefix.Length).Replace([char]92, [char]47)
             $Top = ($Relative -split '/', 2)[0]
             if ($ExcludedRoots -contains $Top) { continue }
             if ($ExcludedFiles -contains $Relative) { continue }

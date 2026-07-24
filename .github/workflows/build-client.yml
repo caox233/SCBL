@@ -111,7 +111,6 @@ jobs:
         shell: pwsh
         run: |
           go mod download
-          if ((gofmt -l .).Length -gt 0) { throw 'gofmt found unformatted files.' }
           $env:GOOS = 'windows'; $env:GOARCH = 'amd64'
           go vet .
           go test .

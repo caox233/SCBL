@@ -1,0 +1,193 @@
+# Exact v1 references
+
+## stable-latest
+./README.md:34:curl -fsSL https://github.com/caox233/SCBL/releases/download/server-tool-stable-latest/install-server.sh | sudo bash
+./README.md:96:| Windows 客户端 | `client-vX.Y.Z` | `client-stable-latest` |
+./README.md:97:| Linux 服务端工具 | `server-tool-vX.Y.Z` | `server-tool-stable-latest` |
+./README.md:98:| 5th dedicated server 与 Hooks | 5th 项目 Release | `scbl-public-stable-latest` |
+./COMPONENT_VERSIONS.json:8:    "releaseTag": "scbl-public-stable-latest",
+./.github/workflows/validate.yml:63:          assert data['dedicatedServer']['releaseTag'] == 'scbl-public-stable-latest'
+./.github/workflows/server-tool-release.yml:141:          git tag -f server-tool-stable-latest origin/main
+./.github/workflows/server-tool-release.yml:142:          git push origin refs/tags/server-tool-stable-latest --force
+./.github/workflows/server-tool-release.yml:143:          if gh release view server-tool-stable-latest >/dev/null 2>&1; then
+./.github/workflows/server-tool-release.yml:144:            while read -r asset; do [[ -z "$asset" ]] || gh release delete-asset server-tool-stable-latest "$asset" -y; done < <(gh release view server-tool-stable-latest --json assets --jq '.assets[].name')
+./.github/workflows/server-tool-release.yml:145:            gh release edit server-tool-stable-latest --title "SCBL Server Tool Stable v${version}" --notes-file "$notes" --latest=false
+./.github/workflows/server-tool-release.yml:146:            gh release upload server-tool-stable-latest dist/install-server.sh dist/server-tool-release-manifest.json
+./.github/workflows/server-tool-release.yml:148:            gh release create server-tool-stable-latest dist/install-server.sh dist/server-tool-release-manifest.json \
+./.github/workflows/client-release.yml:111:            dedicatedServer = [ordered]@{ repository = 'caox233/5th-echelon'; releaseTag = 'scbl-public-stable-latest' }
+./.github/workflows/client-release.yml:144:          git tag -f client-stable-latest "$GITHUB_SHA"
+./.github/workflows/client-release.yml:145:          git push origin refs/tags/client-stable-latest --force
+./.github/workflows/client-release.yml:146:          if gh release view client-stable-latest >/dev/null 2>&1; then
+./.github/workflows/client-release.yml:147:            while read -r asset; do [[ -z "$asset" ]] || gh release delete-asset client-stable-latest "$asset" -y; done < <(gh release view client-stable-latest --json assets --jq '.assets[].name')
+./.github/workflows/client-release.yml:148:            gh release edit client-stable-latest --title "SCBL Windows Client Stable v${version}" --notes-file "$notes" --latest=false
+./.github/workflows/client-release.yml:149:            gh release upload client-stable-latest dist/client-release-manifest.json
+./.github/workflows/client-release.yml:151:            gh release create client-stable-latest dist/client-release-manifest.json --title "SCBL Windows Client Stable v${version}" --notes-file "$notes" --latest=false
+./.github/workflows/grep-v1-release.yml:25:              'stable-latest' \
+./.github/workflows/repository-maintenance.yml:54:              printf '%s\n' client-stable-latest server-tool-stable-latest
+./.github/workflows/audit-v1-release.yml:40:              r'stable-latest', r'VERSION_CLIENT', r'VERSION_SERVER_TOOL',
+./.github/SCBL_BOOTSTRAP_STATUS.md:4:- Release: server-tool-stable-latest
+./server/install_public_server.sh:27:DEFAULT_DEDICATED_RELEASE_TAG="scbl-public-stable-latest"
+./server/install_public_server.sh:41:DEFAULT_CLIENT_RELEASE_TAG="client-stable-latest"
+./server/install_public_server.sh:42:DEFAULT_SERVER_TOOL_RELEASE_TAG="server-tool-stable-latest"
+./server/check_scbl_binary_release.sh:3:TAG="${1:-scbl-public-stable-latest}"
+./server/5th-echelon_branch.txt:13:- rolling release tag: scbl-public-stable-latest
+./server/test_release_manifest_routing.py:16:assert 'gh release upload client-stable-latest dist/client-release-manifest.json' in client_workflow
+./server/test_release_manifest_routing.py:18:assert 'gh release upload server-tool-stable-latest dist/install-server.sh dist/server-tool-release-manifest.json' in server_workflow
+./server/test_release_manifest_routing.py:20:assert 'gh release upload server-tool-stable-latest dist/*' not in server_workflow
+./client/build_all_windows.ps1:26:    $FifthReleaseTag = if ([string]::IsNullOrWhiteSpace($env:SCBL_5TH_RELEASE_TAG)) { "scbl-public-stable-latest" } else { $env:SCBL_5TH_RELEASE_TAG.Trim() }
+./scripts/install-server.sh:9:TAG="${SCBL_SERVER_TOOL_RELEASE_TAG:-server-tool-stable-latest}"
+./scripts/install-server.sh:76:  # Compatibility with old manifests that stored the package in stable-latest.
+./docs/RELEASE_ARCHITECTURE.md:11:| Windows client | `VERSION_CLIENT` and `client/SCBL.Version.props` | `client-vX.Y.Z` | `client-stable-latest` |
+./docs/RELEASE_ARCHITECTURE.md:12:| Linux server tool | `VERSION_SERVER_TOOL` and `SERVER_TOOL_VERSION` | `server-tool-vX.Y.Z` | `server-tool-stable-latest` |
+./docs/RELEASE_ARCHITECTURE.md:13:| 5th dedicated server and Hooks | `caox233/5th-echelon` | project release | `scbl-public-stable-latest` |
+./docs/RELEASE_ARCHITECTURE.md:21:from `client-stable-latest`. It verifies SHA256 and the ZIP structure, then moves the
+./docs/RELEASE_ARCHITECTURE.md:31:The installed `SCBL` manager downloads only from `server-tool-stable-latest`.
+./docs/_tmp_v1_release_audit.txt:99:00004: - Release: server-tool-stable-latest
+./docs/_tmp_v1_release_audit.txt:124:00040:               r'stable-latest', r'VERSION_CLIENT', r'VERSION_SERVER_TOOL',
+./docs/_tmp_v1_release_audit.txt:308:00111:             dedicatedServer = [ordered]@{ repository = 'caox233/5th-echelon'; releaseTag = 'scbl-public-stable-latest' }
+./docs/_tmp_v1_release_audit.txt:327:00144:           git tag -f client-stable-latest "$GITHUB_SHA"
+./docs/_tmp_v1_release_audit.txt:328:00145:           git push origin refs/tags/client-stable-latest --force
+./docs/_tmp_v1_release_audit.txt:329:00146:           if gh release view client-stable-latest >/dev/null 2>&1; then
+./docs/_tmp_v1_release_audit.txt:330:00147:             while read -r asset; do [[ -z "$asset" ]] || gh release delete-asset client-stable-latest "$asset" -y; done < <(gh release view client-stable-latest --json assets --jq '.assets[].name')
+./docs/_tmp_v1_release_audit.txt:331:00148:             gh release edit client-stable-latest --title "SCBL Windows Client Stable v${version}" --notes-file "$notes" --latest=false
+./docs/_tmp_v1_release_audit.txt:332:00149:             gh release upload client-stable-latest dist/client-release-manifest.json
+./docs/_tmp_v1_release_audit.txt:334:00151:             gh release create client-stable-latest dist/client-release-manifest.json --title "SCBL Windows Client Stable v${version}" --notes-file "$notes" --latest=false
+./docs/_tmp_v1_release_audit.txt:349:00054:               printf '%s\n' client-stable-latest server-tool-stable-latest
+./docs/_tmp_v1_release_audit.txt:469:00141:           git tag -f server-tool-stable-latest origin/main
+./docs/_tmp_v1_release_audit.txt:470:00142:           git push origin refs/tags/server-tool-stable-latest --force
+./docs/_tmp_v1_release_audit.txt:471:00143:           if gh release view server-tool-stable-latest >/dev/null 2>&1; then
+./docs/_tmp_v1_release_audit.txt:472:00144:             while read -r asset; do [[ -z "$asset" ]] || gh release delete-asset server-tool-stable-latest "$asset" -y; done < <(gh release view server-tool-stable-latest --json assets --jq '.assets[].name')
+./docs/_tmp_v1_release_audit.txt:473:00145:             gh release edit server-tool-stable-latest --title "SCBL Server Tool Stable v${version}" --notes-file "$notes" --latest=false
+./docs/_tmp_v1_release_audit.txt:474:00146:             gh release upload server-tool-stable-latest dist/install-server.sh dist/server-tool-release-manifest.json
+./docs/_tmp_v1_release_audit.txt:476:00148:             gh release create server-tool-stable-latest dist/install-server.sh dist/server-tool-release-manifest.json \
+./docs/_tmp_v1_release_audit.txt:510:00063:           assert data['dedicatedServer']['releaseTag'] == 'scbl-public-stable-latest'
+./docs/_tmp_v1_release_audit.txt:546:00008:     "releaseTag": "scbl-public-stable-latest",
+./docs/_tmp_v1_release_audit.txt:583:00034: curl -fsSL https://github.com/caox233/SCBL/releases/download/server-tool-stable-latest/install-server.sh | sudo bash
+./docs/_tmp_v1_release_audit.txt:626:00096: | Windows 客户端 | `client-vX.Y.Z` | `client-stable-latest` |
+./docs/_tmp_v1_release_audit.txt:627:00097: | Linux 服务端工具 | `server-tool-vX.Y.Z` | `server-tool-stable-latest` |
+./docs/_tmp_v1_release_audit.txt:628:00098: | 5th dedicated server 与 Hooks | 5th 项目 Release | `scbl-public-stable-latest` |
+./docs/_tmp_v1_release_audit.txt:1803:00026:     $FifthReleaseTag = if ([string]::IsNullOrWhiteSpace($env:SCBL_5TH_RELEASE_TAG)) { "scbl-public-stable-latest" } else { $env:SCBL_5TH_RELEASE_TAG.Trim() }
+./docs/_tmp_v1_release_audit.txt:1997:00011: | Windows client | `VERSION_CLIENT` and `client/SCBL.Version.props` | `client-vX.Y.Z` | `client-stable-latest` |
+./docs/_tmp_v1_release_audit.txt:1998:00012: | Linux server tool | `VERSION_SERVER_TOOL` and `SERVER_TOOL_VERSION` | `server-tool-vX.Y.Z` | `server-tool-stable-latest` |
+./docs/_tmp_v1_release_audit.txt:1999:00013: | 5th dedicated server and Hooks | `caox233/5th-echelon` | project release | `scbl-public-stable-latest` |
+./docs/_tmp_v1_release_audit.txt:2007:00021: from `client-stable-latest`. It verifies SHA256 and the ZIP structure, then moves the
+./docs/_tmp_v1_release_audit.txt:2017:00031: The installed `SCBL` manager downloads only from `server-tool-stable-latest`.
+./docs/_tmp_v1_release_audit.txt:2039:00015: client-stable-latest
+./docs/_tmp_v1_release_audit.txt:2041:00017: server-tool-stable-latest
+./docs/_tmp_v1_release_audit.txt:2050:00026: server-tool-stable-latest	SCBL Server Tool Stable v0.6.9	2026-07-21T10:25:06Z
+./docs/_tmp_v1_release_audit.txt:2066:00016: - 5th binary channel: `scbl-public-stable-latest`
+./docs/_tmp_v1_release_audit.txt:2086:00020: 已升级到 v0.6.9 且运行 `SCBL` 卡在 DDNS-GO 迁移提示的服务器，应直接使用 `server-tool-stable-latest/install-server.sh` 升级到本版本。
+./docs/_tmp_v1_release_audit.txt:2099:00013: - Uses independent `client-stable-latest`, `server-tool-stable-latest` and
+./docs/_tmp_v1_release_audit.txt:2100:00014:   `scbl-public-stable-latest` channels.
+./docs/_tmp_v1_release_audit.txt:2122:00009: TAG="${SCBL_SERVER_TOOL_RELEASE_TAG:-server-tool-stable-latest}"
+./docs/_tmp_v1_release_audit.txt:2141:00076:   # Compatibility with old manifests that stored the package in stable-latest.
+./docs/_tmp_v1_release_audit.txt:2157:00003: TAG="${1:-scbl-public-stable-latest}"
+./docs/_tmp_v1_release_audit.txt:2181:00027: DEFAULT_DEDICATED_RELEASE_TAG="scbl-public-stable-latest"
+./docs/_tmp_v1_release_audit.txt:2195:00041: DEFAULT_CLIENT_RELEASE_TAG="client-stable-latest"
+./docs/_tmp_v1_release_audit.txt:2196:00042: DEFAULT_SERVER_TOOL_RELEASE_TAG="server-tool-stable-latest"
+./docs/_tmp_v1_release_audit.txt:2542:00016: assert 'gh release upload client-stable-latest dist/client-release-manifest.json' in client_workflow
+./docs/_tmp_v1_release_audit.txt:2544:00018: assert 'gh release upload server-tool-stable-latest dist/install-server.sh dist/server-tool-release-manifest.json' in server_workflow
+./docs/_tmp_v1_release_audit.txt:2546:00020: assert 'gh release upload server-tool-stable-latest dist/*' not in server_workflow
+./docs/releases/SERVER_TOOL_v0.6.3.md:13:- Uses independent `client-stable-latest`, `server-tool-stable-latest` and
+./docs/releases/SERVER_TOOL_v0.6.3.md:14:  `scbl-public-stable-latest` channels.
+./docs/releases/SERVER_TOOL_v0.6.10.md:20:已升级到 v0.6.9 且运行 `SCBL` 卡在 DDNS-GO 迁移提示的服务器，应直接使用 `server-tool-stable-latest/install-server.sh` 升级到本版本。
+./docs/releases/CLIENT_v0.6.3.md:16:- 5th binary channel: `scbl-public-stable-latest`
+./docs/REPOSITORY_MAINTENANCE_STATUS.md:15:client-stable-latest
+./docs/REPOSITORY_MAINTENANCE_STATUS.md:17:server-tool-stable-latest
+./docs/REPOSITORY_MAINTENANCE_STATUS.md:26:server-tool-stable-latest	SCBL Server Tool Stable v0.6.9	2026-07-21T10:25:06Z
+
+## SCBL_MIN_CLIENT_VERSION|MinimumClientVersion|ClientVersionAccepted|clientVersionAccepted|minimumClientVersion
+./.github/workflows/server-tool-release.yml:100:            "minimumClientVersion": "0.6.0",
+./.github/workflows/grep-v1-release.yml:26:              'SCBL_MIN_CLIENT_VERSION|MinimumClientVersion|ClientVersionAccepted|clientVersionAccepted|minimumClientVersion' \
+./.github/workflows/audit-v1-release.yml:41:              r'SCBL_MIN_CLIENT_VERSION', r'minimumClientVersion',
+./.github/workflows/audit-v1-release.yml:42:              r'clientVersionAccepted', r'updateRequired', r'requiredClientVersion',
+./server/install_public_server.sh:25:DEFAULT_SCBL_MIN_CLIENT_VERSION="0.6.0"
+./server/install_public_server.sh:839:  SCBL_MIN_CLIENT_VERSION="${SCBL_MIN_CLIENT_VERSION:-$DEFAULT_SCBL_MIN_CLIENT_VERSION}"
+./server/install_public_server.sh:881:SCBL_MIN_CLIENT_VERSION=$(quote "$SCBL_MIN_CLIENT_VERSION")
+./server/install_public_server.sh:1456:SCBL_MIN_CLIENT_VERSION="\${SCBL_MIN_CLIENT_VERSION:-0.6.0}"
+./server/install_public_server.sh:1481:printf '  最低客户端：v%s\n' "\$SCBL_MIN_CLIENT_VERSION"
+./server/install_public_server.sh:3388:  最低客户端版本：v$SCBL_MIN_CLIENT_VERSION
+./server/install_public_server.sh:3438:prompt_value SCBL_MIN_CLIENT_VERSION "控制平面允许的最低客户端版本" "$SCBL_MIN_CLIENT_VERSION"
+./server/install_public_server.sh:3505:  10. 最低客户端版本：$SCBL_MIN_CLIENT_VERSION
+./server/install_public_server.sh:3559:        prompt_keep SCBL_MIN_CLIENT_VERSION "新的最低客户端版本" "$SCBL_MIN_CLIENT_VERSION"
+./server/scbl_control_plane.py:34:MIN_CLIENT_VERSION = os.environ.get("SCBL_MIN_CLIENT_VERSION", "0.6.0").strip()
+./server/scbl_control_plane.py:689:                    "minimumClientVersion": MIN_CLIENT_VERSION,
+./server/scbl_control_plane.py:690:                    "clientVersionAccepted": version_tuple(client_version) >= version_tuple(MIN_CLIENT_VERSION),
+./client/ScblPublicLauncher/MainWindow.xaml.cs:1756:        if (!bootstrap.ClientVersionAccepted
+./client/ScblPublicLauncher/MainWindow.xaml.cs:1757:            || ControlPlaneService.IsVersionOlderThan(LauncherVersion, bootstrap.MinimumClientVersion))
+./client/ScblPublicLauncher/MainWindow.xaml.cs:1760:                $"当前客户端版本过低。服务器要求至少 v{bootstrap.MinimumClientVersion}，请先更新客户端。",
+./client/ScblPublicLauncher/MainWindow.xaml.cs:1761:                $"This client is too old. Server minimum is v{bootstrap.MinimumClientVersion}; update the client first."));
+./client/ScblPublicLauncher/MainWindow.xaml.cs:1778:        LogService.Info($"Control plane bootstrap: serverTool={bootstrap.ServerToolVersion}, minClient={bootstrap.MinimumClientVersion}, online={bootstrap.OnlineCount}, accountExists={bootstrap.AccountExists?.ToString() ?? "unknown"}, health={bootstrap.Health.Overall}.");
+./client/ScblPublicLauncher/Models/ControlPlaneModels.cs:44:    public string MinimumClientVersion { get; init; } = "";
+./client/ScblPublicLauncher/Models/ControlPlaneModels.cs:45:    public bool ClientVersionAccepted { get; init; } = true;
+./docs/_tmp_v1_release_audit.txt:125:00041:               r'SCBL_MIN_CLIENT_VERSION', r'minimumClientVersion',
+./docs/_tmp_v1_release_audit.txt:126:00042:               r'clientVersionAccepted', r'updateRequired', r'requiredClientVersion',
+./docs/_tmp_v1_release_audit.txt:450:00100:             "minimumClientVersion": "0.6.0",
+./docs/_tmp_v1_release_audit.txt:1063:01756:         if (!bootstrap.ClientVersionAccepted
+./docs/_tmp_v1_release_audit.txt:1064:01757:             || ControlPlaneService.IsVersionOlderThan(LauncherVersion, bootstrap.MinimumClientVersion))
+./docs/_tmp_v1_release_audit.txt:1067:01760:                 $"当前客户端版本过低。服务器要求至少 v{bootstrap.MinimumClientVersion}，请先更新客户端。",
+./docs/_tmp_v1_release_audit.txt:1068:01761:                 $"This client is too old. Server minimum is v{bootstrap.MinimumClientVersion}; update the client first."));
+./docs/_tmp_v1_release_audit.txt:1085:01778:         LogService.Info($"Control plane bootstrap: serverTool={bootstrap.ServerToolVersion}, minClient={bootstrap.MinimumClientVersion}, online={bootstrap.OnlineCount}, accountExists={bootstrap.AccountExists?.ToString() ?? "unknown"}, health={bootstrap.Health.Overall}.");
+./docs/_tmp_v1_release_audit.txt:1306:00044:     public string MinimumClientVersion { get; init; } = "";
+./docs/_tmp_v1_release_audit.txt:1307:00045:     public bool ClientVersionAccepted { get; init; } = true;
+./docs/_tmp_v1_release_audit.txt:2179:00025: DEFAULT_SCBL_MIN_CLIENT_VERSION="0.6.0"
+./docs/_tmp_v1_release_audit.txt:2215:00839:   SCBL_MIN_CLIENT_VERSION="${SCBL_MIN_CLIENT_VERSION:-$DEFAULT_SCBL_MIN_CLIENT_VERSION}"
+./docs/_tmp_v1_release_audit.txt:2234:00881: SCBL_MIN_CLIENT_VERSION=$(quote "$SCBL_MIN_CLIENT_VERSION")
+./docs/_tmp_v1_release_audit.txt:2253:01456: SCBL_MIN_CLIENT_VERSION="\${SCBL_MIN_CLIENT_VERSION:-0.6.0}"
+./docs/_tmp_v1_release_audit.txt:2272:01481: printf '  最低客户端：v%s\n' "\$SCBL_MIN_CLIENT_VERSION"
+./docs/_tmp_v1_release_audit.txt:2421:03388:   最低客户端版本：v$SCBL_MIN_CLIENT_VERSION
+./docs/_tmp_v1_release_audit.txt:2440:03438: prompt_value SCBL_MIN_CLIENT_VERSION "控制平面允许的最低客户端版本" "$SCBL_MIN_CLIENT_VERSION"
+./docs/_tmp_v1_release_audit.txt:2459:03505:   10. 最低客户端版本：$SCBL_MIN_CLIENT_VERSION
+./docs/_tmp_v1_release_audit.txt:2478:03559:         prompt_keep SCBL_MIN_CLIENT_VERSION "新的最低客户端版本" "$SCBL_MIN_CLIENT_VERSION"
+./docs/_tmp_v1_release_audit.txt:2500:00034: MIN_CLIENT_VERSION = os.environ.get("SCBL_MIN_CLIENT_VERSION", "0.6.0").strip()
+./docs/_tmp_v1_release_audit.txt:2519:00689:                     "minimumClientVersion": MIN_CLIENT_VERSION,
+./docs/_tmp_v1_release_audit.txt:2520:00690:                     "clientVersionAccepted": version_tuple(client_version) >= version_tuple(MIN_CLIENT_VERSION),
+
+## _lastBootstrapContext
+./.github/workflows/grep-v1-release.yml:27:              '_lastBootstrapContext' \
+./client/ScblPublicLauncher/MainWindow.xaml.cs:91:    private ControlPlaneBootstrapContext? _lastBootstrapContext;
+./client/ScblPublicLauncher/MainWindow.xaml.cs:1753:        _lastBootstrapContext = bootstrap;
+./docs/_tmp_v1_release_audit.txt:1060:01753:         _lastBootstrapContext = bootstrap;
+
+## ShowConfirmDialogAsync|ShowInfoDialogAsync
+./.github/workflows/grep-v1-release.yml:28:              'ShowConfirmDialogAsync|ShowInfoDialogAsync' \
+./client/ScblPublicLauncher/MainWindow.xaml.cs:590:                await ShowInfoDialogAsync(
+./client/ScblPublicLauncher/MainWindow.xaml.cs:606:                await ShowInfoDialogAsync(
+./client/ScblPublicLauncher/MainWindow.xaml.cs:638:            await ShowInfoDialogAsync(
+./client/ScblPublicLauncher/MainWindow.xaml.cs:811:        var result = await ShowConfirmDialogAsync(
+./client/ScblPublicLauncher/MainWindow.xaml.cs:914:                var result = await ShowConfirmDialogAsync(
+./client/ScblPublicLauncher/MainWindow.xaml.cs:925:                var result = await ShowConfirmDialogAsync(
+./client/ScblPublicLauncher/MainWindow.xaml.cs:1050:            await ShowInfoDialogAsync(L("存档已覆盖", "Saves Overwritten"), L("已写入启动器内置基础全解锁存档。\n\n原存档已备份到：\n", "Built-in saves have been deployed.\n\nBackup folder:\n") + backupDir);
+./client/ScblPublicLauncher/MainWindow.xaml.cs:1055:            await ShowInfoDialogAsync(L("存档检查失败", "Save Check Failed"), ex.Message);
+./client/ScblPublicLauncher/MainWindow.xaml.cs:1077:            var result = await ShowConfirmDialogAsync(
+./client/ScblPublicLauncher/MainWindow.xaml.cs:1122:            await ShowInfoDialogAsync(
+./client/ScblPublicLauncher/MainWindow.xaml.cs:1130:            await ShowInfoDialogAsync(
+./client/ScblPublicLauncher/MainWindow.xaml.cs:1580:                var result = await ShowConfirmDialogAsync(
+./client/ScblPublicLauncher/MainWindow.xaml.cs:2045:            var confirmRegister = await ShowConfirmDialogAsync(
+./client/ScblPublicLauncher/MainWindow.xaml.cs:2337:                            await Dispatcher.InvokeAsync(() => ShowInfoDialogAsync(L("联机组件未确认生效", "Online Hook Not Confirmed"), warning ?? ""));
+./client/ScblPublicLauncher/MainWindow.xaml.cs:2461:        var result = await ShowConfirmDialogAsync(
+./client/ScblPublicLauncher/MainWindow.xaml.cs:3732:        await ShowInfoDialogAsync(title, message + L("\n\n详细错误已写入日志。", "\n\nDetailed error has been written to the log."));
+./client/ScblPublicLauncher/MainWindow.xaml.cs:3774:    private async Task<MessageBoxResult> ShowInfoDialogAsync(string title, string message)
+./client/ScblPublicLauncher/MainWindow.xaml.cs:3779:    private async Task<MessageBoxResult> ShowInfoDialogAsync(string title, string message, string okText)
+./client/ScblPublicLauncher/MainWindow.xaml.cs:3784:    private async Task<MessageBoxResult> ShowConfirmDialogAsync(string title, string message, string yesText, string noText)
+
+## download_latest_client_release|update_server_tool|install_or_reinstall|write_package_watcher_files
+./.github/workflows/grep-v1-release.yml:29:              'download_latest_client_release|update_server_tool|install_or_reinstall|write_package_watcher_files' \
+./server/install_public_server.sh:1646:  write_package_watcher_files
+./server/install_public_server.sh:2608:download_latest_client_release() {
+./server/install_public_server.sh:2808:      1) download_latest_client_release; pause ;;
+./server/install_public_server.sh:2820:update_server_tool_online() {
+./server/install_public_server.sh:3052:      1) update_server_tool_online; pause ;;
+./server/install_public_server.sh:3326:write_package_watcher_files() {
+./server/install_public_server.sh:3408:install_or_reinstall() {
+./server/install_public_server.sh:3923:      1) install_or_reinstall; pause ;;
+./server/install_public_server.sh:3957:  install_or_reinstall
+
+## 原子
+./README.md:58:→ 原子投递到 /opt/scbl-public/incoming/client/
+./.github/workflows/grep-v1-release.yml:30:              '原子'; do
+./.github/workflows/audit-v1-release.yml:44:              r'StartGame', r'OnStartup', r'Application_Startup', r'原子',
+./server/install_public_server.sh:2702:  echo "客户端包已校验并原子投递：$target"
+./docs/_tmp_v1_release_audit.txt:128:00044:               r'StartGame', r'OnStartup', r'Application_Startup', r'原子',
+./docs/_tmp_v1_release_audit.txt:607:00058: → 原子投递到 /opt/scbl-public/incoming/client/
+./docs/_tmp_v1_release_audit.txt:2337:02702:   echo "客户端包已校验并原子投递：$target"

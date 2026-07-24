@@ -5,7 +5,6 @@ on:
     paths:
       - 'client/**'
       - 'THIRD_PARTY_LICENSES/**'
-      - 'VERSION'
       - 'VERSION_CLIENT'
       - '.github/workflows/build-client.yml'
       - '.github/workflows/client-release.yml'
@@ -48,11 +47,10 @@ jobs:
         shell: pwsh
         run: |
           $version = (Get-Content .\VERSION_CLIENT -Raw).Trim()
-          $compat = (Get-Content .\VERSION -Raw).Trim()
+          if ($version -notmatch '^\d+\.\d+\.\d+$') { throw 'VERSION_CLIENT is invalid.' }
           $props = Get-Content .\client\SCBL.Version.props -Raw
-          if ($version -ne $compat) { throw 'VERSION and VERSION_CLIENT do not match.' }
-          if ($props -notmatch "<ScblVersion>\s*$([regex]::Escape($version))\s*</ScblVersion>") {
-            throw 'VERSION_CLIENT and client/SCBL.Version.props do not match.'
+          if ($props -notmatch 'ReadAllText' -or $props -notmatch 'VERSION_CLIENT') {
+            throw 'Client projects must read VERSION_CLIENT through SCBL.Version.props.'
           }
 
       - name: Parse PowerShell build scripts

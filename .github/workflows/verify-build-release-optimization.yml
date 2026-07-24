@@ -77,5 +77,6 @@ jobs:
           mkdir -p "stage/$root"
           cp server/install_public_server.sh scripts/install-server.sh "stage/$root/"
           tar -C stage -czf /tmp/server-tool.tar.gz "$root"
-          tar -tzf /tmp/server-tool.tar.gz | grep -Fq "$root/install_public_server.sh"
-          tar -tzf /tmp/server-tool.tar.gz | grep -Fq "$root/install-server.sh"
+          tar -tzf /tmp/server-tool.tar.gz > /tmp/server-tool-files.txt
+          grep -Fxq "$root/install_public_server.sh" /tmp/server-tool-files.txt
+          grep -Fxq "$root/install-server.sh" /tmp/server-tool-files.txt

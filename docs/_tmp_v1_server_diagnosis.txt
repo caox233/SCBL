@@ -1,0 +1,657 @@
+run_id=30083642178
+{"conclusion":"failure","jobs":[{"completedAt":"2026-07-24T09:44:10Z","conclusion":"failure","databaseId":89450657138,"name":"apply","startedAt":"2026-07-24T09:44:06Z","status":"completed","steps":[{"completedAt":"2026-07-24T09:44:07Z","conclusion":"success","name":"Set up job","number":1,"startedAt":"2026-07-24T09:44:07Z","status":"completed"},{"completedAt":"2026-07-24T09:44:08Z","conclusion":"success","name":"Run actions/checkout@v4","number":2,"startedAt":"2026-07-24T09:44:07Z","status":"completed"},{"completedAt":"2026-07-24T09:44:08Z","conclusion":"failure","name":"Apply server changes","number":3,"startedAt":"2026-07-24T09:44:08Z","status":"completed"},{"completedAt":"2026-07-24T09:44:08Z","conclusion":"success","name":"Post Run actions/checkout@v4","number":6,"startedAt":"2026-07-24T09:44:08Z","status":"completed"},{"completedAt":"2026-07-24T09:44:08Z","conclusion":"success","name":"Complete job","number":7,"startedAt":"2026-07-24T09:44:08Z","status":"completed"}],"url":"https://github.com/caox233/SCBL/actions/runs/30083642178/job/89450657138"}],"status":"completed","url":"https://github.com/caox233/SCBL/actions/runs/30083642178"}
+--- failed log ---
+apply	Apply server changes	﻿2026-07-24T09:44:08.5165888Z ##[group]Run set -euo pipefail
+apply	Apply server changes	2026-07-24T09:44:08.5167553Z ^[[36;1mset -euo pipefail^[[0m
+apply	Apply server changes	2026-07-24T09:44:08.5168082Z ^[[36;1mpython3 - <<'PY'^[[0m
+apply	Apply server changes	2026-07-24T09:44:08.5168588Z ^[[36;1mfrom pathlib import Path^[[0m
+apply	Apply server changes	2026-07-24T09:44:08.5169382Z ^[[36;1mimport re^[[0m
+apply	Apply server changes	2026-07-24T09:44:08.5169842Z ^[[36;1mfrom textwrap import dedent^[[0m
+apply	Apply server changes	2026-07-24T09:44:08.5170361Z ^[[36;1m^[[0m
+apply	Apply server changes	2026-07-24T09:44:08.5170896Z ^[[36;1mmanager_path = Path('server/install_public_server.sh')^[[0m
+apply	Apply server changes	2026-07-24T09:44:08.5171671Z ^[[36;1mmanager = manager_path.read_text(encoding='utf-8')^[[0m
+apply	Apply server changes	2026-07-24T09:44:08.5172313Z ^[[36;1m^[[0m
+apply	Apply server changes	2026-07-24T09:44:08.5172859Z ^[[36;1mdef replace_function(text, name, next_name, replacement):^[[0m
+apply	Apply server changes	2026-07-24T09:44:08.5173748Z ^[[36;1m    pattern = rf'^{re.escape(name)}\(\) \{{.*?^\}}\n\n+(?={re.escape(next_name)}\(\))'^[[0m
+apply	Apply server changes	2026-07-24T09:44:08.5174866Z ^[[36;1m    updated, count = re.subn(pattern, dedent(replacement).strip() + '\n\n', text, count=1, flags=re.S | re.M)^[[0m
+apply	Apply server changes	2026-07-24T09:44:08.5175794Z ^[[36;1m    if count != 1:^[[0m
+apply	Apply server changes	2026-07-24T09:44:08.5176526Z ^[[36;1m        raise SystemExit(f'failed to replace function {name}, matches={count}')^[[0m
+apply	Apply server changes	2026-07-24T09:44:08.5177292Z ^[[36;1m    return updated^[[0m
+apply	Apply server changes	2026-07-24T09:44:08.5177761Z ^[[36;1m^[[0m
+apply	Apply server changes	2026-07-24T09:44:08.5178440Z ^[[36;1m# The installed package carries VERSION_SERVER_TOOL. The manager reads it instead of^[[0m
+apply	Apply server changes	2026-07-24T09:44:08.5179615Z ^[[36;1m# requiring a second hand-maintained version literal.^[[0m
+apply	Apply server changes	2026-07-24T09:44:08.5180471Z ^[[36;1mmanager = manager.replace('DEFAULT_SCBL_MIN_CLIENT_VERSION="0.6.0"\n', '')^[[0m
+apply	Apply server changes	2026-07-24T09:44:08.5181389Z ^[[36;1mmanager = manager.replace('SERVER_TOOL_VERSION="0.6.10"\n', '')^[[0m
+apply	Apply server changes	2026-07-24T09:44:08.5182351Z ^[[36;1mmanager = manager.replace('DEFAULT_CLIENT_RELEASE_TAG="client-stable-latest"\n', '')^[[0m
+apply	Apply server changes	2026-07-24T09:44:08.5183491Z ^[[36;1mmanager = manager.replace('DEFAULT_SERVER_TOOL_RELEASE_TAG="server-tool-stable-latest"\n', '')^[[0m
+apply	Apply server changes	2026-07-24T09:44:08.5184566Z ^[[36;1manchor = 'MANUAL_CLIENT_UPLOAD_DIR="$INCOMING_DIR/client-manual"\n'^[[0m
+apply	Apply server changes	2026-07-24T09:44:08.5185303Z ^[[36;1mversion_logic = dedent(r'''^[[0m
+apply	Apply server changes	2026-07-24T09:44:08.5185937Z ^[[36;1mMANUAL_CLIENT_UPLOAD_DIR="$INCOMING_DIR/client-manual"^[[0m
+apply	Apply server changes	2026-07-24T09:44:08.5186573Z ^[[36;1m^[[0m
+apply	Apply server changes	2026-07-24T09:44:08.5186980Z ^[[36;1mread_server_tool_version() {^[[0m
+apply	Apply server changes	2026-07-24T09:44:08.5187516Z ^[[36;1m  local candidate value=""^[[0m
+apply	Apply server changes	2026-07-24T09:44:08.5188037Z ^[[36;1m  for candidate in \^[[0m
+apply	Apply server changes	2026-07-24T09:44:08.5188554Z ^[[36;1m    "$SCRIPT_DIR/VERSION_SERVER_TOOL" \^[[0m
+apply	Apply server changes	2026-07-24T09:44:08.5189364Z ^[[36;1m    "$SCRIPT_DIR/../VERSION_SERVER_TOOL" \^[[0m
+apply	Apply server changes	2026-07-24T09:44:08.5189978Z ^[[36;1m    "$MANAGER_DIR/VERSION_SERVER_TOOL"; do^[[0m
+apply	Apply server changes	2026-07-24T09:44:08.5190577Z ^[[36;1m    [[ -f "$candidate" ]] || continue^[[0m
+apply	Apply server changes	2026-07-24T09:44:08.5191197Z ^[[36;1m    value="$(tr -d '[:space:]' < "$candidate")"^[[0m
+apply	Apply server changes	2026-07-24T09:44:08.5191935Z ^[[36;1m    if [[ "$value" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then^[[0m
+apply	Apply server changes	2026-07-24T09:44:08.5192534Z ^[[36;1m      printf '%s' "$value"^[[0m
+apply	Apply server changes	2026-07-24T09:44:08.5193041Z ^[[36;1m      return 0^[[0m
+apply	Apply server changes	2026-07-24T09:44:08.5193492Z ^[[36;1m    fi^[[0m
+apply	Apply server changes	2026-07-24T09:44:08.5193897Z ^[[36;1m  done^[[0m
+apply	Apply server changes	2026-07-24T09:44:08.5194315Z ^[[36;1m  printf '%s' "0.0.0"^[[0m
+apply	Apply server changes	2026-07-24T09:44:08.5194813Z ^[[36;1m}^[[0m
+apply	Apply server changes	2026-07-24T09:44:08.5195309Z ^[[36;1mSERVER_TOOL_VERSION="$(read_server_tool_version)"^[[0m
+apply	Apply server changes	2026-07-24T09:44:08.5195989Z ^[[36;1m''').strip() + '\n'^[[0m
+apply	Apply server changes	2026-07-24T09:44:08.5196483Z ^[[36;1mif manager.count(anchor) != 1:^[[0m
+apply	Apply server changes	2026-07-24T09:44:08.5197121Z ^[[36;1m    raise SystemExit('manager version anchor mismatch')^[[0m
+apply	Apply server changes	2026-07-24T09:44:08.5198094Z ^[[36;1mmanager = manager.replace(anchor, version_logic, 1)^[[0m
+apply	Apply server changes	2026-07-24T09:44:08.5198715Z ^[[36;1m^[[0m
+apply	Apply server changes	2026-07-24T09:44:08.5199578Z ^[[36;1m# Remove the old hand-managed minimum-version setting everywhere, including generated^[[0m
+apply	Apply server changes	2026-07-24T09:44:08.5200575Z ^[[36;1m# status scripts, summaries, environment files and install prompts.^[[0m
+apply	Apply server changes	2026-07-24T09:44:08.5201654Z ^[[36;1mmanager = '\n'.join(line for line in manager.splitlines() if 'SCBL_MIN_CLIENT_VERSION' not in line) + '\n'^[[0m
+apply	Apply server changes	2026-07-24T09:44:08.5203136Z ^[[36;1mmanager = re.sub(r'''\n      10\)\n        prompt_keep SCBL_MIN_CLIENT_VERSION.*?\n        ;;''', '', manager, count=1, flags=re.S)^[[0m
+apply	Apply server changes	2026-07-24T09:44:08.5204315Z ^[[36;1m^[[0m
+apply	Apply server changes	2026-07-24T09:44:08.5204794Z ^[[36;1mdefault_manifest_old = dedent('''^[[0m
+apply	Apply server changes	2026-07-24T09:44:08.5205540Z ^[[36;1m    cat > "$SCBL_ROOT/client-updates/client_update_manifest.json" <<JSONEOF^[[0m
+apply	Apply server changes	2026-07-24T09:44:08.5206266Z ^[[36;1m    {^[[0m
+apply	Apply server changes	2026-07-24T09:44:08.5206685Z ^[[36;1m      "version": "0.0.0",^[[0m
+apply	Apply server changes	2026-07-24T09:44:08.5207221Z ^[[36;1m      "updateMode": "file-delta",^[[0m
+apply	Apply server changes	2026-07-24T09:44:08.5207763Z ^[[36;1m      "filesBaseUrl": "",^[[0m
+apply	Apply server changes	2026-07-24T09:44:08.5208295Z ^[[36;1m      "fullPackage": "",^[[0m
+apply	Apply server changes	2026-07-24T09:44:08.5208791Z ^[[36;1m      "files": [],^[[0m
+apply	Apply server changes	2026-07-24T09:44:08.5209474Z ^[[36;1m      "delete": [],^[[0m
+apply	Apply server changes	2026-07-24T09:44:08.5210134Z ^[[36;1m      "keepLocal": ["logs/", "backup/", "updates/", "launcher_settings.json"],^[[0m
+apply	Apply server changes	2026-07-24T09:44:08.5210872Z ^[[36;1m      "release_notes": [],^[[0m
+apply	Apply server changes	2026-07-24T09:44:08.5211444Z ^[[36;1m      "updateAnnouncement": {"enabled": false}^[[0m
+apply	Apply server changes	2026-07-24T09:44:08.5212006Z ^[[36;1m    }^[[0m
+apply	Apply server changes	2026-07-24T09:44:08.5212412Z ^[[36;1m    JSONEOF^[[0m
+apply	Apply server changes	2026-07-24T09:44:08.5212839Z ^[[36;1m''').strip()^[[0m
+apply	Apply server changes	2026-07-24T09:44:08.5213304Z ^[[36;1mdefault_manifest_new = dedent('''^[[0m
+apply	Apply server changes	2026-07-24T09:44:08.5214033Z ^[[36;1m    cat > "$SCBL_ROOT/client-updates/client_update_manifest.json" <<JSONEOF^[[0m
+apply	Apply server changes	2026-07-24T09:44:08.5214737Z ^[[36;1m    {^[[0m
+apply	Apply server changes	2026-07-24T09:44:08.5215150Z ^[[36;1m      "version": "0.0.0",^[[0m
+apply	Apply server changes	2026-07-24T09:44:08.5215678Z ^[[36;1m      "updateMode": "full-package",^[[0m
+apply	Apply server changes	2026-07-24T09:44:08.5216229Z ^[[36;1m      "fullPackage": "",^[[0m
+apply	Apply server changes	2026-07-24T09:44:08.5216737Z ^[[36;1m      "fullPackageSha256": "",^[[0m
+apply	Apply server changes	2026-07-24T09:44:08.5217263Z ^[[36;1m      "release_notes": [],^[[0m
+apply	Apply server changes	2026-07-24T09:44:08.5217820Z ^[[36;1m      "updateAnnouncement": {"enabled": false}^[[0m
+apply	Apply server changes	2026-07-24T09:44:08.5218379Z ^[[36;1m    }^[[0m
+apply	Apply server changes	2026-07-24T09:44:08.5218784Z ^[[36;1m    JSONEOF^[[0m
+apply	Apply server changes	2026-07-24T09:44:08.5219464Z ^[[36;1m''').strip()^[[0m
+apply	Apply server changes	2026-07-24T09:44:08.5219966Z ^[[36;1mif manager.count(default_manifest_old) != 1:^[[0m
+apply	Apply server changes	2026-07-24T09:44:08.5220687Z ^[[36;1m    raise SystemExit('default client manifest block mismatch')^[[0m
+apply	Apply server changes	2026-07-24T09:44:08.5221583Z ^[[36;1mmanager = manager.replace(default_manifest_old, default_manifest_new, 1)^[[0m
+apply	Apply server changes	2026-07-24T09:44:08.5222315Z ^[[36;1m^[[0m
+apply	Apply server changes	2026-07-24T09:44:08.5223030Z ^[[36;1mmanager = replace_function(manager, 'publish_client_update_package', 'manifest_value', r'''^[[0m
+apply	Apply server changes	2026-07-24T09:44:08.5223928Z ^[[36;1mpublish_client_update_package() {^[[0m
+apply	Apply server changes	2026-07-24T09:44:08.5224498Z ^[[36;1m  load_env_if_exists; set_defaults^[[0m
+apply	Apply server changes	2026-07-24T09:44:08.5225062Z ^[[36;1m  local package="${1:-}" notes=""^[[0m
+apply	Apply server changes	2026-07-24T09:44:08.5225605Z ^[[36;1m  if [[ -z "$package" ]]; then^[[0m
+apply	Apply server changes	2026-07-24T09:44:08.5226214Z ^[[36;1m    read -e -r -p "请输入客户端完整 ZIP 路径: " package || true^[[0m
+apply	Apply server changes	2026-07-24T09:44:08.5226816Z ^[[36;1m  fi^[[0m
+apply	Apply server changes	2026-07-24T09:44:08.5227337Z ^[[36;1m  [[ -f "$package" ]] || { echo "客户端安装包不存在：$package"; return 1; }^[[0m
+apply	Apply server changes	2026-07-24T09:44:08.5228006Z ^[[36;1m  if is_interactive; then^[[0m
+apply	Apply server changes	2026-07-24T09:44:08.5228576Z ^[[36;1m    read -e -r -p "请输入更新内容摘要（可直接回车）: " notes || true^[[0m
+apply	Apply server changes	2026-07-24T09:44:08.5229540Z ^[[36;1m  fi^[[0m
+apply	Apply server changes	2026-07-24T09:44:08.5230271Z ^[[36;1m  publish_client_update_package_auto "$package" "" "${notes:-正式客户端更新}"^[[0m
+apply	Apply server changes	2026-07-24T09:44:08.5230983Z ^[[36;1m}^[[0m
+apply	Apply server changes	2026-07-24T09:44:08.5231367Z ^[[36;1m''')^[[0m
+apply	Apply server changes	2026-07-24T09:44:08.5231759Z ^[[36;1m^[[0m
+apply	Apply server changes	2026-07-24T09:44:08.5232558Z ^[[36;1mmanager = replace_function(manager, 'download_latest_client_release', 'queue_client_package_from_file', r'''^[[0m
+apply	Apply server changes	2026-07-24T09:44:08.5233712Z ^[[36;1mdownload_latest_client_release() {^[[0m
+apply	Apply server changes	2026-07-24T09:44:08.5234283Z ^[[36;1m  load_env_if_exists; set_defaults^[[0m
+apply	Apply server changes	2026-07-24T09:44:08.5235021Z ^[[36;1m  local repo="${SCBL_RELEASE_REPOSITORY:-$DEFAULT_SCBL_RELEASE_REPOSITORY}"^[[0m
+apply	Apply server changes	2026-07-24T09:44:08.5236174Z ^[[36;1m  local version_url="${SCBL_CLIENT_VERSION_URL:-https://raw.githubusercontent.com/${repo}/main/VERSION_CLIENT}"^[[0m
+apply	Apply server changes	2026-07-24T09:44:08.5237454Z ^[[36;1m  local version tag package base expected actual current cmp tmpdir staged^[[0m
+apply	Apply server changes	2026-07-24T09:44:08.5238176Z ^[[36;1m^[[0m
+apply	Apply server changes	2026-07-24T09:44:08.5238581Z ^[[36;1m  echo "正在检查 GitHub 正式客户端版本..."^[[0m
+apply	Apply server changes	2026-07-24T09:44:08.5239855Z ^[[36;1m  version="$(curl -fsSL --connect-timeout 10 --max-time 60 --retry 3 --retry-all-errors "$version_url" 2>/dev/null | tr -d '[:space:]' || true)"^[[0m
+apply	Apply server changes	2026-07-24T09:44:08.5240998Z ^[[36;1m  if [[ ! "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then^[[0m
+apply	Apply server changes	2026-07-24T09:44:08.5241615Z ^[[36;1m    echo "无法读取正式客户端版本。"^[[0m
+apply	Apply server changes	2026-07-24T09:44:08.5242092Z ^[[36;1m    return 1^[[0m
+apply	Apply server changes	2026-07-24T09:44:08.5242519Z ^[[36;1m  fi^[[0m
+apply	Apply server changes	2026-07-24T09:44:08.5242913Z ^[[36;1m^[[0m
+apply	Apply server changes	2026-07-24T09:44:08.5243312Z ^[[36;1m  tag="client-v${version}"^[[0m
+apply	Apply server changes	2026-07-24T09:44:08.5243891Z ^[[36;1m  package="SCBL-Client-v${version}-win-x86.zip"^[[0m
+apply	Apply server changes	2026-07-24T09:44:08.5244785Z ^[[36;1m  base="${SCBL_CLIENT_PACKAGE_BASE_URL:-https://github.com/${repo}/releases/download/${tag}}"^[[0m
+apply	Apply server changes	2026-07-24T09:44:08.5245906Z ^[[36;1m  expected="$(curl -fsSL --connect-timeout 10 --max-time 60 --retry 3 --retry-all-errors \^[[0m
+apply	Apply server changes	2026-07-24T09:44:08.5246953Z ^[[36;1m    "$base/${package}.sha256" 2>/dev/null | awk 'NF {print tolower($1); exit}' || true)"^[[0m
+apply	Apply server changes	2026-07-24T09:44:08.5247759Z ^[[36;1m  if [[ ! "$expected" =~ ^[0-9a-f]{64}$ ]]; then^[[0m
+apply	Apply server changes	2026-07-24T09:44:08.5248330Z ^[[36;1m    echo "客户端安装包校验信息读取失败。"^[[0m
+apply	Apply server changes	2026-07-24T09:44:08.5248822Z ^[[36;1m    return 1^[[0m
+apply	Apply server changes	2026-07-24T09:44:08.5249427Z ^[[36;1m  fi^[[0m
+apply	Apply server changes	2026-07-24T09:44:08.5249836Z ^[[36;1m^[[0m
+apply	Apply server changes	2026-07-24T09:44:08.5250297Z ^[[36;1m  current="$(current_published_client_version)"^[[0m
+apply	Apply server changes	2026-07-24T09:44:08.5250962Z ^[[36;1m  if [[ -n "$current" && "$current" != "0.0.0" ]]; then^[[0m
+apply	Apply server changes	2026-07-24T09:44:08.5251627Z ^[[36;1m    cmp="$(semver_compare "$current" "$version")"^[[0m
+apply	Apply server changes	2026-07-24T09:44:08.5252228Z ^[[36;1m    if [[ "$cmp" == "1" ]]; then^[[0m
+apply	Apply server changes	2026-07-24T09:44:08.5252900Z ^[[36;1m      echo "服务器当前客户端 v$current 高于 GitHub 正式版 v$version，本次保留现有版本。"^[[0m
+apply	Apply server changes	2026-07-24T09:44:08.5253576Z ^[[36;1m      return 0^[[0m
+apply	Apply server changes	2026-07-24T09:44:08.5254017Z ^[[36;1m    fi^[[0m
+apply	Apply server changes	2026-07-24T09:44:08.5254595Z ^[[36;1m    if [[ "$cmp" == "0" && -f "$SCBL_ROOT/client-updates/full/$package" ]]; then^[[0m
+apply	Apply server changes	2026-07-24T09:44:08.5255648Z ^[[36;1m      actual="$(sha256sum "$SCBL_ROOT/client-updates/full/$package" | awk '{print tolower($1)}')"^[[0m
+apply	Apply server changes	2026-07-24T09:44:08.5256540Z ^[[36;1m      if [[ "$actual" == "$expected" ]]; then^[[0m
+apply	Apply server changes	2026-07-24T09:44:08.5257146Z ^[[36;1m        echo "服务器客户端已经是正式版 v$version。"^[[0m
+apply	Apply server changes	2026-07-24T09:44:08.5257708Z ^[[36;1m        return 0^[[0m
+apply	Apply server changes	2026-07-24T09:44:08.5258154Z ^[[36;1m      fi^[[0m
+apply	Apply server changes	2026-07-24T09:44:08.5258559Z ^[[36;1m    fi^[[0m
+apply	Apply server changes	2026-07-24T09:44:08.5259170Z ^[[36;1m  fi^[[0m
+apply	Apply server changes	2026-07-24T09:44:08.5259572Z ^[[36;1m^[[0m
+apply	Apply server changes	2026-07-24T09:44:08.5260078Z ^[[36;1m  tmpdir="$(mktemp -d -t scbl-client-release.XXXXXX)"^[[0m
+apply	Apply server changes	2026-07-24T09:44:08.5260732Z ^[[36;1m  staged="$tmpdir/$package"^[[0m
+apply	Apply server changes	2026-07-24T09:44:08.5261268Z ^[[36;1m  echo "正在下载客户端 v$version 完整包..."^[[0m
+apply	Apply server changes	2026-07-24T09:44:08.5262037Z ^[[36;1m  if ! curl -fL --connect-timeout 10 --max-time 900 --retry 3 --retry-all-errors \^[[0m
+apply	Apply server changes	2026-07-24T09:44:08.5262867Z ^[[36;1m      "$base/$package" -o "$staged"; then^[[0m
+apply	Apply server changes	2026-07-24T09:44:08.5263432Z ^[[36;1m    rm -rf "$tmpdir"^[[0m
+apply	Apply server changes	2026-07-24T09:44:08.5263925Z ^[[36;1m    echo "客户端安装包下载失败，服务器现有版本没有改变。"^[[0m
+apply	Apply server changes	2026-07-24T09:44:08.5264453Z ^[[36;1m    return 1^[[0m
+apply	Apply server changes	2026-07-24T09:44:08.5264885Z ^[[36;1m  fi^[[0m
+apply	Apply server changes	2026-07-24T09:44:08.5265414Z ^[[36;1m  actual="$(sha256sum "$staged" | awk '{print tolower($1)}')"^[[0m
+apply	Apply server changes	2026-07-24T09:44:08.5266286Z ^[[36;1m  if [[ "$actual" != "$expected" ]]; then^[[0m
+apply	Apply server changes	2026-07-24T09:44:08.5266852Z ^[[36;1m    rm -rf "$tmpdir"^[[0m
+apply	Apply server changes	2026-07-24T09:44:08.5267337Z ^[[36;1m    echo "客户端安装包校验失败，请重新下载。"^[[0m
+apply	Apply server changes	2026-07-24T09:44:08.5267835Z ^[[36;1m    return 1^[[0m
+apply	Apply server changes	2026-07-24T09:44:08.5268264Z ^[[36;1m  fi^[[0m
+apply	Apply server changes	2026-07-24T09:44:08.5268771Z ^[[36;1m  if ! python3 - "$staged" <<'PYEOF_VALIDATE_CLIENT_ZIP'^[[0m
+apply	Apply server changes	2026-07-24T09:44:08.5269604Z ^[[36;1mimport sys, zipfile^[[0m
+apply	Apply server changes	2026-07-24T09:44:08.5270133Z ^[[36;1mfrom pathlib import PurePosixPath^[[0m
+apply	Apply server changes	2026-07-24T09:44:08.5270831Z ^[[36;1mpath = sys.argv[1]^[[0m
+apply	Apply server changes	2026-07-24T09:44:08.5271352Z ^[[36;1mwith zipfile.ZipFile(path) as archive:^[[0m
+apply	Apply server changes	2026-07-24T09:44:08.5271926Z ^[[36;1m    names = []^[[0m
+apply	Apply server changes	2026-07-24T09:44:08.5272403Z ^[[36;1m    for item in archive.infolist():^[[0m
+apply	Apply server changes	2026-07-24T09:44:08.5273055Z ^[[36;1m        p = PurePosixPath(item.filename.replace('\\', '/'))^[[0m
+apply	Apply server changes	2026-07-24T09:44:08.5273739Z ^[[36;1m        if p.is_absolute() or '..' in p.parts:^[[0m
+apply	Apply server changes	2026-07-24T09:44:08.5274478Z ^[[36;1m            raise SystemExit(f'unsafe client zip path: {item.filename}')^[[0m
+apply	Apply server changes	2026-07-24T09:44:08.5275230Z ^[[36;1m        names.append(str(p).rstrip('/'))^[[0m
+apply	Apply server changes	2026-07-24T09:44:08.5275951Z ^[[36;1m    required = {'SplinterCellCNLauncher.exe', 'SCBL.Updater.exe'}^[[0m
+apply	Apply server changes	2026-07-24T09:44:08.5276730Z ^[[36;1m    found = {name.rsplit('/', 1)[-1] for name in names}^[[0m
+apply	Apply server changes	2026-07-24T09:44:08.5277381Z ^[[36;1m    missing = sorted(required - found)^[[0m
+apply	Apply server changes	2026-07-24T09:44:08.5277940Z ^[[36;1m    if missing:^[[0m
+apply	Apply server changes	2026-07-24T09:44:08.5278587Z ^[[36;1m        raise SystemExit('client package missing: ' + ', '.join(missing))^[[0m
+apply	Apply server changes	2026-07-24T09:44:08.5279503Z ^[[36;1mPYEOF_VALIDATE_CLIENT_ZIP^[[0m
+apply	Apply server changes	2026-07-24T09:44:08.5280023Z ^[[36;1m  then^[[0m
+apply	Apply server changes	2026-07-24T09:44:08.5280441Z ^[[36;1m    rm -rf "$tmpdir"^[[0m
+apply	Apply server changes	2026-07-24T09:44:08.5280915Z ^[[36;1m    echo "客户端安装包内容检查失败。"^[[0m
+apply	Apply server changes	2026-07-24T09:44:08.5281401Z ^[[36;1m    return 1^[[0m
+apply	Apply server changes	2026-07-24T09:44:08.5281829Z ^[[36;1m  fi^[[0m
+apply	Apply server changes	2026-07-24T09:44:08.5282224Z ^[[36;1m^[[0m
+apply	Apply server changes	2026-07-24T09:44:08.5282883Z ^[[36;1m  if publish_client_update_package_auto "$staged" "$version" "正式客户端 v$version"; then^[[0m
+apply	Apply server changes	2026-07-24T09:44:08.5283700Z ^[[36;1m    rm -rf "$tmpdir"^[[0m
+apply	Apply server changes	2026-07-24T09:44:08.5284193Z ^[[36;1m    echo "服务器客户端已更新到 v$version。"^[[0m
+apply	Apply server changes	2026-07-24T09:44:08.5284710Z ^[[36;1m    return 0^[[0m
+apply	Apply server changes	2026-07-24T09:44:08.5285128Z ^[[36;1m  fi^[[0m
+apply	Apply server changes	2026-07-24T09:44:08.5285534Z ^[[36;1m  rm -rf "$tmpdir"^[[0m
+apply	Apply server changes	2026-07-24T09:44:08.5285995Z ^[[36;1m  return 1^[[0m
+apply	Apply server changes	2026-07-24T09:44:08.5286409Z ^[[36;1m}^[[0m
+apply	Apply server changes	2026-07-24T09:44:08.5286790Z ^[[36;1m''')^[[0m
+apply	Apply server changes	2026-07-24T09:44:08.5287194Z ^[[36;1m^[[0m
+apply	Apply server changes	2026-07-24T09:44:08.5287960Z ^[[36;1mmanager = replace_function(manager, 'update_server_tool_online', 'rollback_server_tool_latest', r'''^[[0m
+apply	Apply server changes	2026-07-24T09:44:08.5288868Z ^[[36;1mupdate_server_tool_online() {^[[0m
+apply	Apply server changes	2026-07-24T09:44:08.5289607Z ^[[36;1m  load_env_if_exists; set_defaults^[[0m
+apply	Apply server changes	2026-07-24T09:44:08.5290365Z ^[[36;1m  local repo="${SCBL_RELEASE_REPOSITORY:-$DEFAULT_SCBL_RELEASE_REPOSITORY}"^[[0m
+apply	Apply server changes	2026-07-24T09:44:08.5291590Z ^[[36;1m  local version_url="${SCBL_SERVER_TOOL_VERSION_URL:-https://raw.githubusercontent.com/${repo}/main/VERSION_SERVER_TOOL}"^[[0m
+apply	Apply server changes	2026-07-24T09:44:08.5292997Z ^[[36;1m  local version tag package base expected actual cmp tmpdir extract_root manager_new control_new version_new^[[0m
+apply	Apply server changes	2026-07-24T09:44:08.5294180Z ^[[36;1m  local backup_root control_changed=0 binary_check_new branch_new package_root^[[0m
+apply	Apply server changes	2026-07-24T09:44:08.5294936Z ^[[36;1m^[[0m
+apply	Apply server changes	2026-07-24T09:44:08.5295353Z ^[[36;1m  echo "正在检查 GitHub 正式服务端工具版本..."^[[0m
+apply	Apply server changes	2026-07-24T09:44:08.5296459Z ^[[36;1m  version="$(curl -fsSL --connect-timeout 10 --max-time 60 --retry 3 --retry-all-errors "$version_url" 2>/dev/null | tr -d '[:space:]' || true)"^[[0m
+apply	Apply server changes	2026-07-24T09:44:08.5297596Z ^[[36;1m  if [[ ! "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then^[[0m
+apply	Apply server changes	2026-07-24T09:44:08.5298194Z ^[[36;1m    echo "无法读取正式服务端工具版本。"^[[0m
+apply	Apply server changes	2026-07-24T09:44:08.5298684Z ^[[36;1m    return 1^[[0m
+apply	Apply server changes	2026-07-24T09:44:08.5299312Z ^[[36;1m  fi^[[0m
+apply	Apply server changes	2026-07-24T09:44:08.5299837Z ^[[36;1m  cmp="$(semver_compare "$SERVER_TOOL_VERSION" "$version")"^[[0m
+apply	Apply server changes	2026-07-24T09:44:08.5300652Z ^[[36;1m  if [[ "$cmp" == "0" ]]; then^[[0m
+apply	Apply server changes	2026-07-24T09:44:08.5301188Z ^[[36;1m    echo "当前服务端工具已经是 v$version。"^[[0m
+apply	Apply server changes	2026-07-24T09:44:08.5301903Z ^[[36;1m    download_latest_client_release || echo "警告：客户端正式版检查失败，服务器现有客户端继续使用。"^[[0m
+apply	Apply server changes	2026-07-24T09:44:08.5302605Z ^[[36;1m    return 0^[[0m
+apply	Apply server changes	2026-07-24T09:44:08.5303056Z ^[[36;1m  elif [[ "$cmp" == "1" ]]; then^[[0m
+apply	Apply server changes	2026-07-24T09:44:08.5303730Z ^[[36;1m    echo "当前服务端工具 v$SERVER_TOOL_VERSION 高于 GitHub 正式版 v$version，本次不降级。"^[[0m
+apply	Apply server changes	2026-07-24T09:44:08.5304527Z ^[[36;1m    return 0^[[0m
+apply	Apply server changes	2026-07-24T09:44:08.5304953Z ^[[36;1m  fi^[[0m
+apply	Apply server changes	2026-07-24T09:44:08.5305343Z ^[[36;1m^[[0m
+apply	Apply server changes	2026-07-24T09:44:08.5305751Z ^[[36;1m  tag="server-tool-v${version}"^[[0m
+apply	Apply server changes	2026-07-24T09:44:08.5306416Z ^[[36;1m  package="SCBL-Server-Tool-v${version}-linux-x86_64.tar.gz"^[[0m
+apply	Apply server changes	2026-07-24T09:44:08.5307408Z ^[[36;1m  base="${SCBL_SERVER_TOOL_PACKAGE_BASE_URL:-https://github.com/${repo}/releases/download/${tag}}"^[[0m
+apply	Apply server changes	2026-07-24T09:44:08.5308562Z ^[[36;1m  expected="$(curl -fsSL --connect-timeout 10 --max-time 60 --retry 3 --retry-all-errors \^[[0m
+apply	Apply server changes	2026-07-24T09:44:08.5309858Z ^[[36;1m    "$base/${package}.sha256" 2>/dev/null | awk 'NF {print tolower($1); exit}' || true)"^[[0m
+apply	Apply server changes	2026-07-24T09:44:08.5310769Z ^[[36;1m  [[ "$expected" =~ ^[0-9a-f]{64}$ ]] || { echo "服务端工具校验信息读取失败。"; return 1; }^[[0m
+apply	Apply server changes	2026-07-24T09:44:08.5311432Z ^[[36;1m^[[0m
+apply	Apply server changes	2026-07-24T09:44:08.5311918Z ^[[36;1m  tmpdir="$(mktemp -d -t scbl-server-tool.XXXXXX)"^[[0m
+apply	Apply server changes	2026-07-24T09:44:08.5312545Z ^[[36;1m  echo "正在下载服务端工具 v$version 完整包..."^[[0m
+apply	Apply server changes	2026-07-24T09:44:08.5313336Z ^[[36;1m  if ! curl -fL --connect-timeout 10 --max-time 600 --retry 3 --retry-all-errors \^[[0m
+apply	Apply server changes	2026-07-24T09:44:08.5314172Z ^[[36;1m      "$base/$package" -o "$tmpdir/$package"; then^[[0m
+apply	Apply server changes	2026-07-24T09:44:08.5314817Z ^[[36;1m    rm -rf "$tmpdir"; echo "服务端工具下载失败。"; return 1^[[0m
+apply	Apply server changes	2026-07-24T09:44:08.5315379Z ^[[36;1m  fi^[[0m
+apply	Apply server changes	2026-07-24T09:44:08.5315964Z ^[[36;1m  actual="$(sha256sum "$tmpdir/$package" | awk '{print tolower($1)}')"^[[0m
+apply	Apply server changes	2026-07-24T09:44:08.5316852Z ^[[36;1m  [[ "$actual" == "$expected" ]] || { rm -rf "$tmpdir"; echo "服务端工具文件校验失败。"; return 1; }^[[0m
+apply	Apply server changes	2026-07-24T09:44:08.5317563Z ^[[36;1m^[[0m
+apply	Apply server changes	2026-07-24T09:44:08.5388512Z ^[[36;1m  extract_root="$tmpdir/extract"^[[0m
+apply	Apply server changes	2026-07-24T09:44:08.5389751Z ^[[36;1m  mkdir -p "$extract_root"^[[0m
+apply	Apply server changes	2026-07-24T09:44:08.5391066Z ^[[36;1m  python3 - "$tmpdir/$package" "$extract_root" <<'PYEOF_SAFE_SERVER_EXTRACT'^[[0m
+apply	Apply server changes	2026-07-24T09:44:08.5392279Z ^[[36;1mimport sys, tarfile^[[0m
+apply	Apply server changes	2026-07-24T09:44:08.5393114Z ^[[36;1mfrom pathlib import Path, PurePosixPath^[[0m
+apply	Apply server changes	2026-07-24T09:44:08.5394333Z ^[[36;1marchive_path, target = sys.argv[1:3]^[[0m
+apply	Apply server changes	2026-07-24T09:44:08.5395271Z ^[[36;1mtarget_root = Path(target).resolve()^[[0m
+apply	Apply server changes	2026-07-24T09:44:08.5396319Z ^[[36;1mwith tarfile.open(archive_path, 'r:gz') as archive:^[[0m
+apply	Apply server changes	2026-07-24T09:44:08.5397387Z ^[[36;1m    members = archive.getmembers()^[[0m
+apply	Apply server changes	2026-07-24T09:44:08.5398284Z ^[[36;1m    for member in members:^[[0m
+apply	Apply server changes	2026-07-24T09:44:08.5399438Z ^[[36;1m        member_path = PurePosixPath(member.name)^[[0m
+apply	Apply server changes	2026-07-24T09:44:08.5400636Z ^[[36;1m        if member_path.is_absolute() or '..' in member_path.parts:^[[0m
+apply	Apply server changes	2026-07-24T09:44:08.5402043Z ^[[36;1m            raise SystemExit(f'unsafe tar member path: {member.name}')^[[0m
+apply	Apply server changes	2026-07-24T09:44:08.5403359Z ^[[36;1m        if member.issym() or member.islnk() or member.isdev():^[[0m
+apply	Apply server changes	2026-07-24T09:44:08.5404677Z ^[[36;1m            raise SystemExit(f'unsafe tar member type: {member.name}')^[[0m
+apply	Apply server changes	2026-07-24T09:44:08.5405991Z ^[[36;1m        destination = (target_root / Path(*member_path.parts)).resolve()^[[0m
+apply	Apply server changes	2026-07-24T09:44:08.5406979Z ^[[36;1m        if destination != target_root and target_root not in destination.parents:^[[0m
+apply	Apply server changes	2026-07-24T09:44:08.5407957Z ^[[36;1m            raise SystemExit(f'tar member escapes extraction root: {member.name}')^[[0m
+apply	Apply server changes	2026-07-24T09:44:08.5408793Z ^[[36;1m    archive.extractall(target_root, members=members)^[[0m
+apply	Apply server changes	2026-07-24T09:44:08.5409667Z ^[[36;1mPYEOF_SAFE_SERVER_EXTRACT^[[0m
+apply	Apply server changes	2026-07-24T09:44:08.5410162Z ^[[36;1m^[[0m
+apply	Apply server changes	2026-07-24T09:44:08.5411034Z ^[[36;1m  package_root="$(find "$extract_root" -mindepth 1 -maxdepth 1 -type d -name 'SCBL-Server-Tool-v*-linux-x86_64' -print -quit)"^[[0m
+apply	Apply server changes	2026-07-24T09:44:08.5412423Z ^[[36;1m  manager_new="${package_root}/install_public_server.sh"^[[0m
+apply	Apply server changes	2026-07-24T09:44:08.5413167Z ^[[36;1m  control_new="${package_root}/scbl_control_plane.py"^[[0m
+apply	Apply server changes	2026-07-24T09:44:08.5413872Z ^[[36;1m  version_new="${package_root}/VERSION_SERVER_TOOL"^[[0m
+apply	Apply server changes	2026-07-24T09:44:08.5414629Z ^[[36;1m  [[ -f "$manager_new" && -f "$control_new" && -f "$version_new" ]] || {^[[0m
+apply	Apply server changes	2026-07-24T09:44:08.5415508Z ^[[36;1m    rm -rf "$tmpdir"; echo "服务端工具包缺少必要文件。"; return 1;^[[0m
+apply	Apply server changes	2026-07-24T09:44:08.5416092Z ^[[36;1m  }^[[0m
+apply	Apply server changes	2026-07-24T09:44:08.5416594Z ^[[36;1m  [[ "$(tr -d '[:space:]' < "$version_new")" == "$version" ]] || {^[[0m
+apply	Apply server changes	2026-07-24T09:44:08.5417293Z ^[[36;1m    rm -rf "$tmpdir"; echo "服务端工具包版本信息不一致。"; return 1;^[[0m
+apply	Apply server changes	2026-07-24T09:44:08.5417869Z ^[[36;1m  }^[[0m
+apply	Apply server changes	2026-07-24T09:44:08.5418330Z ^[[36;1m  validate_manager_script_file "$manager_new"^[[0m
+apply	Apply server changes	2026-07-24T09:44:08.5419190Z ^[[36;1m  python3 -m py_compile "$control_new"^[[0m
+apply	Apply server changes	2026-07-24T09:44:08.5419747Z ^[[36;1m^[[0m
+apply	Apply server changes	2026-07-24T09:44:08.5420316Z ^[[36;1m  backup_root="$SCBL_ROOT/backups/server-tool/$(date +%Y%m%d_%H%M%S)"^[[0m
+apply	Apply server changes	2026-07-24T09:44:08.5421026Z ^[[36;1m  mkdir -p "$backup_root"^[[0m
+apply	Apply server changes	2026-07-24T09:44:08.5421791Z ^[[36;1m  [[ -f "$MANAGER_SCRIPT" ]] && cp -a "$MANAGER_SCRIPT" "$backup_root/install_public_server.sh"^[[0m
+apply	Apply server changes	2026-07-24T09:44:08.5422996Z ^[[36;1m  [[ -f "$MANAGER_DIR/VERSION_SERVER_TOOL" ]] && cp -a "$MANAGER_DIR/VERSION_SERVER_TOOL" "$backup_root/VERSION_SERVER_TOOL"^[[0m
+apply	Apply server changes	2026-07-24T09:44:08.5424462Z ^[[36;1m  [[ -f "$SCBL_ROOT/server/scbl_control_plane.py" ]] && cp -a "$SCBL_ROOT/server/scbl_control_plane.py" "$backup_root/scbl_control_plane.py"^[[0m
+apply	Apply server changes	2026-07-24T09:44:08.5426102Z ^[[36;1m  [[ -f "$SCBL_ROOT/server/check_scbl_binary_release.sh" ]] && cp -a "$SCBL_ROOT/server/check_scbl_binary_release.sh" "$backup_root/check_scbl_binary_release.sh"^[[0m
+apply	Apply server changes	2026-07-24T09:44:08.5427751Z ^[[36;1m  [[ -f "$SCBL_ROOT/server/5th-echelon_branch.txt" ]] && cp -a "$SCBL_ROOT/server/5th-echelon_branch.txt" "$backup_root/5th-echelon_branch.txt"^[[0m
+apply	Apply server changes	2026-07-24T09:44:08.5428782Z ^[[36;1m^[[0m
+apply	Apply server changes	2026-07-24T09:44:08.5429801Z ^[[36;1m  if [[ ! -f "$SCBL_ROOT/server/scbl_control_plane.py" ]] || ! cmp -s "$control_new" "$SCBL_ROOT/server/scbl_control_plane.py"; then^[[0m
+apply	Apply server changes	2026-07-24T09:44:08.5430768Z ^[[36;1m    control_changed=1^[[0m
+apply	Apply server changes	2026-07-24T09:44:08.5431231Z ^[[36;1m  fi^[[0m
+apply	Apply server changes	2026-07-24T09:44:08.5431612Z ^[[36;1m^[[0m
+apply	Apply server changes	2026-07-24T09:44:08.5431981Z ^[[36;1m  if ! {^[[0m
+apply	Apply server changes	2026-07-24T09:44:08.5432487Z ^[[36;1m    install -m 0755 "$manager_new" "$MANAGER_SCRIPT"^[[0m
+apply	Apply server changes	2026-07-24T09:44:08.5433238Z ^[[36;1m    install -m 0644 "$version_new" "$MANAGER_DIR/VERSION_SERVER_TOOL"^[[0m
+apply	Apply server changes	2026-07-24T09:44:08.5433957Z ^[[36;1m    install -d -m 0755 "$SCBL_ROOT/server"^[[0m
+apply	Apply server changes	2026-07-24T09:44:08.5434699Z ^[[36;1m    install -m 0644 "$control_new" "$SCBL_ROOT/server/scbl_control_plane.py"^[[0m
+apply	Apply server changes	2026-07-24T09:44:08.5435743Z ^[[36;1m    binary_check_new="$(find "$package_root" -type f -name check_scbl_binary_release.sh -print -quit)"^[[0m
+apply	Apply server changes	2026-07-24T09:44:08.5436857Z ^[[36;1m    branch_new="$(find "$package_root" -type f -name 5th-echelon_branch.txt -print -quit)"^[[0m
+apply	Apply server changes	2026-07-24T09:44:08.5438018Z ^[[36;1m    [[ -z "$binary_check_new" ]] || install -m 0755 "$binary_check_new" "$SCBL_ROOT/server/check_scbl_binary_release.sh"^[[0m
+apply	Apply server changes	2026-07-24T09:44:08.5439364Z ^[[36;1m    [[ -z "$branch_new" ]] || install -m 0644 "$branch_new" "$SCBL_ROOT/server/5th-echelon_branch.txt"^[[0m
+apply	Apply server changes	2026-07-24T09:44:08.5440535Z ^[[36;1m    python3 - "$SCBL_ROOT/server-tool-version.json" "$version" "$tag" "$actual" <<'PYEOF_SERVER_TOOL_STATE'^[[0m
+apply	Apply server changes	2026-07-24T09:44:08.5441421Z ^[[36;1mimport json, sys^[[0m
+apply	Apply server changes	2026-07-24T09:44:08.5441928Z ^[[36;1mfrom datetime import datetime, timezone^[[0m
+apply	Apply server changes	2026-07-24T09:44:08.5442553Z ^[[36;1mpath, version, tag, digest = sys.argv[1:5]^[[0m
+apply	Apply server changes	2026-07-24T09:44:08.5443212Z ^[[36;1mwith open(path, 'w', encoding='utf-8') as handle:^[[0m
+apply	Apply server changes	2026-07-24T09:44:08.5444664Z ^[[36;1m    json.dump({'version': version, 'releaseTag': tag, 'installedAt': datetime.now(timezone.utc).isoformat(), 'source': 'github-release', 'packageSha256': digest}, handle, ensure_ascii=False, indent=2)^[[0m
+apply	Apply server changes	2026-07-24T09:44:08.5446217Z ^[[36;1mPYEOF_SERVER_TOOL_STATE^[[0m
+apply	Apply server changes	2026-07-24T09:44:08.5446753Z ^[[36;1m    if [[ "$control_changed" == "1" ]]; then^[[0m
+apply	Apply server changes	2026-07-24T09:44:08.5447382Z ^[[36;1m      systemctl restart scbl-control-plane.service^[[0m
+apply	Apply server changes	2026-07-24T09:44:08.5447963Z ^[[36;1m      sleep 2^[[0m
+apply	Apply server changes	2026-07-24T09:44:08.5448552Z ^[[36;1m      systemctl is-active --quiet scbl-control-plane.service^[[0m
+apply	Apply server changes	2026-07-24T09:44:08.5449497Z ^[[36;1m    fi^[[0m
+apply	Apply server changes	2026-07-24T09:44:08.5449891Z ^[[36;1m  }; then^[[0m
+apply	Apply server changes	2026-07-24T09:44:08.5450310Z ^[[36;1m    echo "升级失败，正在恢复服务端工具..."^[[0m
+apply	Apply server changes	2026-07-24T09:44:08.5451278Z ^[[36;1m    [[ -f "$backup_root/install_public_server.sh" ]] && install -m 0755 "$backup_root/install_public_server.sh" "$MANAGER_SCRIPT"^[[0m
+apply	Apply server changes	2026-07-24T09:44:08.5452854Z ^[[36;1m    [[ -f "$backup_root/VERSION_SERVER_TOOL" ]] && install -m 0644 "$backup_root/VERSION_SERVER_TOOL" "$MANAGER_DIR/VERSION_SERVER_TOOL"^[[0m
+apply	Apply server changes	2026-07-24T09:44:08.5454400Z ^[[36;1m    [[ -f "$backup_root/scbl_control_plane.py" ]] && install -m 0644 "$backup_root/scbl_control_plane.py" "$SCBL_ROOT/server/scbl_control_plane.py"^[[0m
+apply	Apply server changes	2026-07-24T09:44:08.5455648Z ^[[36;1m    systemctl restart scbl-control-plane.service 2>/dev/null || true^[[0m
+apply	Apply server changes	2026-07-24T09:44:08.5456362Z ^[[36;1m    rm -rf "$tmpdir"^[[0m
+apply	Apply server changes	2026-07-24T09:44:08.5456818Z ^[[36;1m    return 1^[[0m
+apply	Apply server changes	2026-07-24T09:44:08.5457234Z ^[[36;1m  fi^[[0m
+apply	Apply server changes	2026-07-24T09:44:08.5457620Z ^[[36;1m^[[0m
+apply	Apply server changes	2026-07-24T09:44:08.5458397Z ^[[36;1m  find "$SCBL_ROOT/backups/server-tool" -mindepth 1 -maxdepth 1 -type d -printf '%T@ %p\n' 2>/dev/null |^[[0m
+apply	Apply server changes	2026-07-24T09:44:08.5459600Z ^[[36;1m    sort -nr | awk 'NR>5 {sub(/^[^ ]+ /, ""); print}' | xargs -r rm -rf^[[0m
+apply	Apply server changes	2026-07-24T09:44:08.5460263Z ^[[36;1m  rm -rf "$tmpdir"^[[0m
+apply	Apply server changes	2026-07-24T09:44:08.5460767Z ^[[36;1m  echo "SCBL 服务端工具已升级到 v$version。"^[[0m
+apply	Apply server changes	2026-07-24T09:44:08.5461341Z ^[[36;1m  echo "现有配置、数据库、客户端更新数据和 DDNS-GO 配置均已保留。"^[[0m
+apply	Apply server changes	2026-07-24T09:44:08.5462071Z ^[[36;1m  download_latest_client_release || echo "警告：客户端正式版检查失败，服务器现有客户端继续使用。"^[[0m
+apply	Apply server changes	2026-07-24T09:44:08.5462768Z ^[[36;1m}^[[0m
+apply	Apply server changes	2026-07-24T09:44:08.5463148Z ^[[36;1m''')^[[0m
+apply	Apply server changes	2026-07-24T09:44:08.5463527Z ^[[36;1m^[[0m
+apply	Apply server changes	2026-07-24T09:44:08.5464335Z ^[[36;1mmanager = replace_function(manager, 'publish_client_update_package_auto', 'write_package_watcher_files', r'''^[[0m
+apply	Apply server changes	2026-07-24T09:44:08.5465327Z ^[[36;1mpublish_client_update_package_auto() {^[[0m
+apply	Apply server changes	2026-07-24T09:44:08.5465911Z ^[[36;1m  load_env_if_exists; set_defaults^[[0m
+apply	Apply server changes	2026-07-24T09:44:08.5466532Z ^[[36;1m  local package="$1" version notes updates_root^[[0m
+apply	Apply server changes	2026-07-24T09:44:08.5467438Z ^[[36;1m  version="${2:-$(infer_version_from_name "$package")}"; version="${version#v}"; version="${version#V}"^[[0m
+apply	Apply server changes	2026-07-24T09:44:08.5468268Z ^[[36;1m  notes="${3:-正式客户端更新}"^[[0m
+apply	Apply server changes	2026-07-24T09:44:08.5468862Z ^[[36;1m  [[ -f "$package" ]] || { echo "客户端安装包不存在：$package"; return 1; }^[[0m
+apply	Apply server changes	2026-07-24T09:44:08.5469785Z ^[[36;1m  if [[ ! "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then^[[0m
+apply	Apply server changes	2026-07-24T09:44:08.5470502Z ^[[36;1m    echo "无法从文件名识别客户端版本，请使用 SCBL-Client-vX.Y.Z-win-x86.zip。"^[[0m
+apply	Apply server changes	2026-07-24T09:44:08.5471146Z ^[[36;1m    return 1^[[0m
+apply	Apply server changes	2026-07-24T09:44:08.5471565Z ^[[36;1m  fi^[[0m
+apply	Apply server changes	2026-07-24T09:44:08.5471948Z ^[[36;1m^[[0m
+apply	Apply server changes	2026-07-24T09:44:08.5472396Z ^[[36;1m  updates_root="$SCBL_ROOT/client-updates"^[[0m
+apply	Apply server changes	2026-07-24T09:44:08.5472986Z ^[[36;1m  mkdir -p "$updates_root/full"^[[0m
+apply	Apply server changes	2026-07-24T09:44:08.5473732Z ^[[36;1m  python3 - "$package" "$version" "$updates_root" "$notes" <<'PYEOF_AUTO_CLIENT'^[[0m
+apply	Apply server changes	2026-07-24T09:44:08.5474561Z ^[[36;1mimport hashlib, json, re, shutil, sys, zipfile^[[0m
+apply	Apply server changes	2026-07-24T09:44:08.5475201Z ^[[36;1mfrom pathlib import Path, PurePosixPath^[[0m
+apply	Apply server changes	2026-07-24T09:44:08.5475747Z ^[[36;1m^[[0m
+apply	Apply server changes	2026-07-24T09:44:08.5476167Z ^[[36;1mpackage = Path(sys.argv[1]).resolve()^[[0m
+apply	Apply server changes	2026-07-24T09:44:08.5476770Z ^[[36;1mversion = sys.argv[2].strip().lstrip('vV')^[[0m
+apply	Apply server changes	2026-07-24T09:44:08.5477394Z ^[[36;1mupdates_root = Path(sys.argv[3]).resolve()^[[0m
+apply	Apply server changes	2026-07-24T09:44:08.5477965Z ^[[36;1mnotes = sys.argv[4].strip()^[[0m
+apply	Apply server changes	2026-07-24T09:44:08.5478729Z ^[[36;1mif not re.fullmatch(r'[0-9]+\.[0-9]+\.[0-9]+', version):^[[0m
+apply	Apply server changes	2026-07-24T09:44:08.5479597Z ^[[36;1m    raise SystemExit('invalid client version')^[[0m
+apply	Apply server changes	2026-07-24T09:44:08.5480293Z ^[[36;1mexpected_name = f'SCBL-Client-v{version}-win-x86.zip'^[[0m
+apply	Apply server changes	2026-07-24T09:44:08.5480948Z ^[[36;1mif package.name != expected_name:^[[0m
+apply	Apply server changes	2026-07-24T09:44:08.5481671Z ^[[36;1m    raise SystemExit(f'client package filename must be {expected_name}')^[[0m
+apply	Apply server changes	2026-07-24T09:44:08.5482371Z ^[[36;1m^[[0m
+apply	Apply server changes	2026-07-24T09:44:08.5482955Z ^[[36;1mdef sha256_file(path: Path) -> str:^[[0m
+apply	Apply server changes	2026-07-24T09:44:08.5483503Z ^[[36;1m    h = hashlib.sha256()^[[0m
+apply	Apply server changes	2026-07-24T09:44:08.5484014Z ^[[36;1m    with path.open('rb') as handle:^[[0m
+apply	Apply server changes	2026-07-24T09:44:08.5484664Z ^[[36;1m        for chunk in iter(lambda: handle.read(1024 * 1024), b''):^[[0m
+apply	Apply server changes	2026-07-24T09:44:08.5485309Z ^[[36;1m            h.update(chunk)^[[0m
+apply	Apply server changes	2026-07-24T09:44:08.5485808Z ^[[36;1m    return h.hexdigest()^[[0m
+apply	Apply server changes	2026-07-24T09:44:08.5486274Z ^[[36;1m^[[0m
+apply	Apply server changes	2026-07-24T09:44:08.5486717Z ^[[36;1mwith zipfile.ZipFile(package) as archive:^[[0m
+apply	Apply server changes	2026-07-24T09:44:08.5487289Z ^[[36;1m    names = []^[[0m
+apply	Apply server changes	2026-07-24T09:44:08.5487761Z ^[[36;1m    for item in archive.infolist():^[[0m
+apply	Apply server changes	2026-07-24T09:44:08.5488419Z ^[[36;1m        path = PurePosixPath(item.filename.replace('\\', '/'))^[[0m
+apply	Apply server changes	2026-07-24T09:44:08.5489311Z ^[[36;1m        if path.is_absolute() or '..' in path.parts:^[[0m
+apply	Apply server changes	2026-07-24T09:44:08.5490066Z ^[[36;1m            raise SystemExit(f'unsafe client zip path: {item.filename}')^[[0m
+apply	Apply server changes	2026-07-24T09:44:08.5490808Z ^[[36;1m        names.append(str(path).rstrip('/'))^[[0m
+apply	Apply server changes	2026-07-24T09:44:08.5491457Z ^[[36;1m    found = {name.rsplit('/', 1)[-1] for name in names}^[[0m
+apply	Apply server changes	2026-07-24T09:44:08.5492219Z ^[[36;1m    required = {'SplinterCellCNLauncher.exe', 'SCBL.Updater.exe'}^[[0m
+apply	Apply server changes	2026-07-24T09:44:08.5492933Z ^[[36;1m    missing = sorted(required - found)^[[0m
+apply	Apply server changes	2026-07-24T09:44:08.5493505Z ^[[36;1m    if missing:^[[0m
+apply	Apply server changes	2026-07-24T09:44:08.5494130Z ^[[36;1m        raise SystemExit('client package missing: ' + ', '.join(missing))^[[0m
+apply	Apply server changes	2026-07-24T09:44:08.5494822Z ^[[36;1m^[[0m
+apply	Apply server changes	2026-07-24T09:44:08.5495221Z ^[[36;1mfull_dir = updates_root / 'full'^[[0m
+apply	Apply server changes	2026-07-24T09:44:08.5495808Z ^[[36;1mfull_dir.mkdir(parents=True, exist_ok=True)^[[0m
+apply	Apply server changes	2026-07-24T09:44:08.5496420Z ^[[36;1mdestination = full_dir / expected_name^[[0m
+apply	Apply server changes	2026-07-24T09:44:08.5497114Z ^[[36;1mtemp = destination.with_suffix(destination.suffix + '.tmp')^[[0m
+apply	Apply server changes	2026-07-24T09:44:08.5497791Z ^[[36;1mshutil.copy2(package, temp)^[[0m
+apply	Apply server changes	2026-07-24T09:44:08.5498309Z ^[[36;1mtemp.replace(destination)^[[0m
+apply	Apply server changes	2026-07-24T09:44:08.5498837Z ^[[36;1mdigest = sha256_file(destination)^[[0m
+apply	Apply server changes	2026-07-24T09:44:08.5499554Z ^[[36;1m^[[0m
+apply	Apply server changes	2026-07-24T09:44:08.5500095Z ^[[36;1mannouncement_path = updates_root / 'update_announcement.json'^[[0m
+apply	Apply server changes	2026-07-24T09:44:08.5500767Z ^[[36;1mtry:^[[0m
+apply	Apply server changes	2026-07-24T09:44:08.5501380Z ^[[36;1m    announcement = json.loads(announcement_path.read_text(encoding='utf-8'))^[[0m
+apply	Apply server changes	2026-07-24T09:44:08.5502120Z ^[[36;1mexcept Exception:^[[0m
+apply	Apply server changes	2026-07-24T09:44:08.5502608Z ^[[36;1m    announcement = {'enabled': False}^[[0m
+apply	Apply server changes	2026-07-24T09:44:08.5503356Z ^[[36;1mconfigured = str(announcement.get('version', '')).strip().lstrip('vV')^[[0m
+apply	Apply server changes	2026-07-24T09:44:08.5504335Z ^[[36;1mif not announcement.get('enabled', False) or (configured and configured != version):^[[0m
+apply	Apply server changes	2026-07-24T09:44:08.5505139Z ^[[36;1m    announcement = {'enabled': False}^[[0m
+apply	Apply server changes	2026-07-24T09:44:08.5505675Z ^[[36;1melif not configured:^[[0m
+apply	Apply server changes	2026-07-24T09:44:08.5506161Z ^[[36;1m    announcement['version'] = version^[[0m
+apply	Apply server changes	2026-07-24T09:44:08.5507093Z ^[[36;1m    announcement_path.write_text(json.dumps(announcement, ensure_ascii=False, indent=2), encoding='utf-8')^[[0m
+apply	Apply server changes	2026-07-24T09:44:08.5507993Z ^[[36;1m^[[0m
+apply	Apply server changes	2026-07-24T09:44:08.5508417Z ^[[36;1mrelease_notes = [notes] if notes else []^[[0m
+apply	Apply server changes	2026-07-24T09:44:08.5509198Z ^[[36;1mif announcement.get('enabled', False):^[[0m
+apply	Apply server changes	2026-07-24T09:44:08.5509843Z ^[[36;1m    title = str(announcement.get('title', '')).strip()^[[0m
+apply	Apply server changes	2026-07-24T09:44:08.5510528Z ^[[36;1m    body = str(announcement.get('body', '')).strip()^[[0m
+apply	Apply server changes	2026-07-24T09:44:08.5511455Z ^[[36;1m    release_notes = ([title] if title else []) + [line.strip() for line in body.splitlines() if line.strip()]^[[0m
+apply	Apply server changes	2026-07-24T09:44:08.5512457Z ^[[36;1m^[[0m
+apply	Apply server changes	2026-07-24T09:44:08.5512993Z ^[[36;1mmanifest_path = updates_root / 'client_update_manifest.json'^[[0m
+apply	Apply server changes	2026-07-24T09:44:08.5513841Z ^[[36;1mprevious = updates_root / 'client_update_manifest.previous.json'^[[0m
+apply	Apply server changes	2026-07-24T09:44:08.5514540Z ^[[36;1mif manifest_path.exists():^[[0m
+apply	Apply server changes	2026-07-24T09:44:08.5515094Z ^[[36;1m    shutil.copy2(manifest_path, previous)^[[0m
+apply	Apply server changes	2026-07-24T09:44:08.5515777Z ^[[36;1mmanifest = {^[[0m
+apply	Apply server changes	2026-07-24T09:44:08.5516219Z ^[[36;1m    'version': version,^[[0m
+apply	Apply server changes	2026-07-24T09:44:08.5516730Z ^[[36;1m    'updateMode': 'full-package',^[[0m
+apply	Apply server changes	2026-07-24T09:44:08.5517311Z ^[[36;1m    'fullPackage': f'full/{expected_name}',^[[0m
+apply	Apply server changes	2026-07-24T09:44:08.5517900Z ^[[36;1m    'fullPackageSha256': digest,^[[0m
+apply	Apply server changes	2026-07-24T09:44:08.5518444Z ^[[36;1m    'release_notes': release_notes,^[[0m
+apply	Apply server changes	2026-07-24T09:44:08.5519195Z ^[[36;1m    'updateAnnouncement': announcement,^[[0m
+apply	Apply server changes	2026-07-24T09:44:08.5519748Z ^[[36;1m}^[[0m
+apply	Apply server changes	2026-07-24T09:44:08.5520245Z ^[[36;1mmanifest_tmp = manifest_path.with_suffix('.json.tmp')^[[0m
+apply	Apply server changes	2026-07-24T09:44:08.5521204Z ^[[36;1mmanifest_tmp.write_text(json.dumps(manifest, ensure_ascii=False, indent=2), encoding='utf-8')^[[0m
+apply	Apply server changes	2026-07-24T09:44:08.5522086Z ^[[36;1mmanifest_tmp.replace(manifest_path)^[[0m
+apply	Apply server changes	2026-07-24T09:44:08.5522601Z ^[[36;1m^[[0m
+apply	Apply server changes	2026-07-24T09:44:08.5522976Z ^[[36;1mpackages = []^[[0m
+apply	Apply server changes	2026-07-24T09:44:08.5523594Z ^[[36;1mpattern = re.compile(r'^SCBL-Client-v(\d+\.\d+\.\d+)-win-x86\.zip$')^[[0m
+apply	Apply server changes	2026-07-24T09:44:08.5524311Z ^[[36;1mfor item in full_dir.iterdir():^[[0m
+apply	Apply server changes	2026-07-24T09:44:08.5524869Z ^[[36;1m    match = pattern.fullmatch(item.name)^[[0m
+apply	Apply server changes	2026-07-24T09:44:08.5525435Z ^[[36;1m    if item.is_file() and match:^[[0m
+apply	Apply server changes	2026-07-24T09:44:08.5526143Z ^[[36;1m        packages.append((tuple(map(int, match.group(1).split('.'))), item))^[[0m
+apply	Apply server changes	2026-07-24T09:44:08.5526939Z ^[[36;1mfor _, old in sorted(packages, reverse=True)[2:]:^[[0m
+apply	Apply server changes	2026-07-24T09:44:08.5527524Z ^[[36;1m    old.unlink()^[[0m
+apply	Apply server changes	2026-07-24T09:44:08.5528003Z ^[[36;1mfiles_dir = updates_root / 'files'^[[0m
+apply	Apply server changes	2026-07-24T09:44:08.5528538Z ^[[36;1mif files_dir.exists():^[[0m
+apply	Apply server changes	2026-07-24T09:44:08.5529187Z ^[[36;1m    shutil.rmtree(files_dir)^[[0m
+apply	Apply server changes	2026-07-24T09:44:08.5529679Z ^[[36;1m^[[0m
+apply	Apply server changes	2026-07-24T09:44:08.5530075Z ^[[36;1mprint(f'客户端更新包已发布：v{version}')^[[0m
+apply	Apply server changes	2026-07-24T09:44:08.5530599Z ^[[36;1mprint(f'完整包：{destination}')^[[0m
+apply	Apply server changes	2026-07-24T09:44:08.5531114Z ^[[36;1mprint(f'SHA256：{digest}')^[[0m
+apply	Apply server changes	2026-07-24T09:44:08.5531607Z ^[[36;1mPYEOF_AUTO_CLIENT^[[0m
+apply	Apply server changes	2026-07-24T09:44:08.5532058Z ^[[36;1m^[[0m
+apply	Apply server changes	2026-07-24T09:44:08.5532478Z ^[[36;1m  chmod -R a+rX "$updates_root" || true^[[0m
+apply	Apply server changes	2026-07-24T09:44:08.5533040Z ^[[36;1m  write_update_server_files^[[0m
+apply	Apply server changes	2026-07-24T09:44:08.5533542Z ^[[36;1m  systemctl daemon-reload^[[0m
+apply	Apply server changes	2026-07-24T09:44:08.5534182Z ^[[36;1m  systemctl enable scbl-update.service >/dev/null 2>&1 || true^[[0m
+apply	Apply server changes	2026-07-24T09:44:08.5534923Z ^[[36;1m  systemctl restart scbl-update.service || true^[[0m
+apply	Apply server changes	2026-07-24T09:44:08.5535604Z ^[[36;1m  systemctl restart scbl-package-watch.timer || true^[[0m
+apply	Apply server changes	2026-07-24T09:44:08.5536208Z ^[[36;1m}^[[0m
+apply	Apply server changes	2026-07-24T09:44:08.5536596Z ^[[36;1m''')^[[0m
+apply	Apply server changes	2026-07-24T09:44:08.5536971Z ^[[36;1m^[[0m
+apply	Apply server changes	2026-07-24T09:44:08.5537467Z ^[[36;1m# Update status output for the full-package-only format.^[[0m
+apply	Apply server changes	2026-07-24T09:44:08.5538229Z ^[[36;1mstatus_old = '''print(f"  更新模式：{data.get('updateMode', '未知')}")^[[0m
+apply	Apply server changes	2026-07-24T09:44:08.5539125Z ^[[36;1mprint(f"  文件数量：{len(data.get('files', []))}")^[[0m
+apply	Apply server changes	2026-07-24T09:44:08.5539756Z ^[[36;1mprint(f"  删除清单：{len(data.get('delete', []))}")^[[0m
+apply	Apply server changes	2026-07-24T09:44:08.5540446Z ^[[36;1mprint(f"  完整包：{data.get('fullPackage', '未知')}")'''^[[0m
+apply	Apply server changes	2026-07-24T09:44:08.5541066Z ^[[36;1mstatus_new = '''print(f"  更新方式：完整包")^[[0m
+apply	Apply server changes	2026-07-24T09:44:08.5541663Z ^[[36;1mprint(f"  完整包：{data.get('fullPackage', '未知')}")^[[0m
+apply	Apply server changes	2026-07-24T09:44:08.5542348Z ^[[36;1mdigest = str(data.get('fullPackageSha256', '')).strip()^[[0m
+apply	Apply server changes	2026-07-24T09:44:08.5543001Z ^[[36;1mprint(f"  文件校验：{digest or '未知'}")'''^[[0m
+apply	Apply server changes	2026-07-24T09:44:08.5543554Z ^[[36;1mif manager.count(status_old) != 1:^[[0m
+apply	Apply server changes	2026-07-24T09:44:08.5544366Z ^[[36;1m    raise SystemExit('client status output block mismatch')^[[0m
+apply	Apply server changes	2026-07-24T09:44:08.5545124Z ^[[36;1mmanager = manager.replace(status_old, status_new, 1)^[[0m
+apply	Apply server changes	2026-07-24T09:44:08.5545993Z ^[[36;1mmanager = manager.replace('echo "客户端包已校验并原子投递：$target"', 'echo "客户端安装包已加入发布队列：$target"')^[[0m
+apply	Apply server changes	2026-07-24T09:44:08.5546983Z ^[[36;1mmanager = manager.replace('echo "已投递：$target"', 'echo "客户端安装包已加入发布队列：$target"')^[[0m
+apply	Apply server changes	2026-07-24T09:44:08.5547768Z ^[[36;1mmanager = manager.replace('文件级差量', '客户端')^[[0m
+apply	Apply server changes	2026-07-24T09:44:08.5548645Z ^[[36;1mmanager = manager.replace('manifest 对比 SHA256，只下载缺失或变化的文件', '完整包方式检查并更新')^[[0m
+apply	Apply server changes	2026-07-24T09:44:08.5549729Z ^[[36;1m^[[0m
+apply	Apply server changes	2026-07-24T09:44:08.5550410Z ^[[36;1m# Automatically make a formal client package available during first installation.^[[0m
+apply	Apply server changes	2026-07-24T09:44:08.5551227Z ^[[36;1minstall_anchor = '''  backup_env^[[0m
+apply	Apply server changes	2026-07-24T09:44:08.5551748Z ^[[36;1m  write_env^[[0m
+apply	Apply server changes	2026-07-24T09:44:08.5552169Z ^[[36;1m  echo^[[0m
+apply	Apply server changes	2026-07-24T09:44:08.5552576Z ^[[36;1m  echo "部署完成。"^[[0m
+apply	Apply server changes	2026-07-24T09:44:08.5553031Z ^[[36;1m'''^[[0m
+apply	Apply server changes	2026-07-24T09:44:08.5553470Z ^[[36;1minstall_replacement = '''  backup_env^[[0m
+apply	Apply server changes	2026-07-24T09:44:08.5554010Z ^[[36;1m  write_env^[[0m
+apply	Apply server changes	2026-07-24T09:44:08.5554422Z ^[[36;1m^[[0m
+apply	Apply server changes	2026-07-24T09:44:08.5554807Z ^[[36;1m  stage "检查客户端正式版本"^[[0m
+apply	Apply server changes	2026-07-24T09:44:08.5555319Z ^[[36;1m  if ! download_latest_client_release; then^[[0m
+apply	Apply server changes	2026-07-24T09:44:08.5555995Z ^[[36;1m    current_client="$(current_published_client_version)"^[[0m
+apply	Apply server changes	2026-07-24T09:44:08.5556788Z ^[[36;1m    if [[ -z "$current_client" || "$current_client" == "0.0.0" ]]; then^[[0m
+apply	Apply server changes	2026-07-24T09:44:08.5557512Z ^[[36;1m      echo "部署未完成：没有可用的客户端安装包，请检查服务器到 GitHub 的网络连接后重试。"^[[0m
+apply	Apply server changes	2026-07-24T09:44:08.5558091Z ^[[36;1m      return 1^[[0m
+apply	Apply server changes	2026-07-24T09:44:08.5558520Z ^[[36;1m    fi^[[0m
+apply	Apply server changes	2026-07-24T09:44:08.5559171Z ^[[36;1m    echo "警告：正式客户端检查失败，继续使用服务器现有客户端 v$current_client。"^[[0m
+apply	Apply server changes	2026-07-24T09:44:08.5559750Z ^[[36;1m  fi^[[0m
+apply	Apply server changes	2026-07-24T09:44:08.5560138Z ^[[36;1m  echo^[[0m
+apply	Apply server changes	2026-07-24T09:44:08.5560535Z ^[[36;1m  echo "部署完成。"^[[0m
+apply	Apply server changes	2026-07-24T09:44:08.5561087Z ^[[36;1m'''^[[0m
+apply	Apply server changes	2026-07-24T09:44:08.5561647Z ^[[36;1mif manager.count(install_anchor) != 1:^[[0m
+apply	Apply server changes	2026-07-24T09:44:08.5562719Z ^[[36;1m    raise SystemExit('install client sync anchor mismatch')^[[0m
+apply	Apply server changes	2026-07-24T09:44:08.5563564Z ^[[36;1mmanager = manager.replace(install_anchor, install_replacement, 1)^[[0m
+apply	Apply server changes	2026-07-24T09:44:08.5564263Z ^[[36;1m^[[0m
+apply	Apply server changes	2026-07-24T09:44:08.5564756Z ^[[36;1mmanager_path.write_text(manager, encoding='utf-8')^[[0m
+apply	Apply server changes	2026-07-24T09:44:08.5565354Z ^[[36;1m^[[0m
+apply	Apply server changes	2026-07-24T09:44:08.5566052Z ^[[36;1m# Control plane reads the currently published client version. It is not a manual setting.^[[0m
+apply	Apply server changes	2026-07-24T09:44:08.5567009Z ^[[36;1mcontrol_path = Path('server/scbl_control_plane.py')^[[0m
+apply	Apply server changes	2026-07-24T09:44:08.5567713Z ^[[36;1mcontrol = control_path.read_text(encoding='utf-8')^[[0m
+apply	Apply server changes	2026-07-24T09:44:08.5568736Z ^[[36;1mcontrol = control.replace('MIN_CLIENT_VERSION = os.environ.get("SCBL_MIN_CLIENT_VERSION", "0.6.0").strip()\n', '')^[[0m
+apply	Apply server changes	2026-07-24T09:44:08.5570661Z ^[[36;1mcontrol = control.replace('SERVER_TOOL_VERSION = os.environ.get("SCBL_SERVER_TOOL_VERSION", "0.6.10").strip()', 'SERVER_TOOL_VERSION = os.environ.get("SCBL_SERVER_TOOL_VERSION", "0.0.0").strip()')^[[0m
+apply	Apply server changes	2026-07-24T09:44:08.5572370Z ^[[36;1mhelper_anchor = 'def version_tuple(value: str) -> tuple[int, int, int]:\n'^[[0m
+apply	Apply server changes	2026-07-24T09:44:08.5573116Z ^[[36;1mhelper = dedent('''^[[0m
+apply	Apply server changes	2026-07-24T09:44:08.5573623Z ^[[36;1mdef required_client_version() -> str:^[[0m
+apply	Apply server changes	2026-07-24T09:44:08.5574374Z ^[[36;1m    manifest = SCBL_ROOT / "client-updates" / "client_update_manifest.json"^[[0m
+apply	Apply server changes	2026-07-24T09:44:08.5575224Z ^[[36;1m    try:^[[0m
+apply	Apply server changes	2026-07-24T09:44:08.5575781Z ^[[36;1m        data = json.loads(manifest.read_text(encoding="utf-8-sig"))^[[0m
+apply	Apply server changes	2026-07-24T09:44:08.5576565Z ^[[36;1m        value = clean_text(data.get("version"), 32).lstrip("vV")^[[0m
+apply	Apply server changes	2026-07-24T09:44:08.5577218Z ^[[36;1m    except Exception:^[[0m
+apply	Apply server changes	2026-07-24T09:44:08.5577690Z ^[[36;1m        return ""^[[0m
+apply	Apply server changes	2026-07-24T09:44:08.5578371Z ^[[36;1m    return value if re.fullmatch(r"\\d+\\.\\d+\\.\\d+", value) and value != "0.0.0" else ""^[[0m
+apply	Apply server changes	2026-07-24T09:44:08.5579340Z ^[[36;1m^[[0m
+apply	Apply server changes	2026-07-24T09:44:08.5579714Z ^[[36;1m^[[0m
+apply	Apply server changes	2026-07-24T09:44:08.5580082Z ^[[36;1m''')^[[0m
+apply	Apply server changes	2026-07-24T09:44:08.5580517Z ^[[36;1mif control.count(helper_anchor) != 1:^[[0m
+apply	Apply server changes	2026-07-24T09:44:08.5581234Z ^[[36;1m    raise SystemExit('control plane version helper anchor mismatch')^[[0m
+apply	Apply server changes	2026-07-24T09:44:08.5582114Z ^[[36;1mcontrol = control.replace(helper_anchor, helper + helper_anchor, 1)^[[0m
+apply	Apply server changes	2026-07-24T09:44:08.5582874Z ^[[36;1mold_payload = '''            self.send_json(^[[0m
+apply	Apply server changes	2026-07-24T09:44:08.5583465Z ^[[36;1m                HTTPStatus.OK,^[[0m
+apply	Apply server changes	2026-07-24T09:44:08.5583972Z ^[[36;1m                {^[[0m
+apply	Apply server changes	2026-07-24T09:44:08.5584504Z ^[[36;1m                    "serverToolVersion": SERVER_TOOL_VERSION,^[[0m
+apply	Apply server changes	2026-07-24T09:44:08.5585193Z ^[[36;1m                    "minimumClientVersion": MIN_CLIENT_VERSION,^[[0m
+apply	Apply server changes	2026-07-24T09:44:08.5586163Z ^[[36;1m                    "clientVersionAccepted": version_tuple(client_version) >= version_tuple(MIN_CLIENT_VERSION),^[[0m
+apply	Apply server changes	2026-07-24T09:44:08.5587113Z ^[[36;1m                    "maintenance": MAINTENANCE,^[[0m
+apply	Apply server changes	2026-07-24T09:44:08.5587653Z ^[[36;1m'''^[[0m
+apply	Apply server changes	2026-07-24T09:44:08.5588212Z ^[[36;1mnew_payload = '''            required_version = required_client_version()^[[0m
+apply	Apply server changes	2026-07-24T09:44:08.5589476Z ^[[36;1m            accepted = bool(required_version) and version_tuple(client_version) == version_tuple(required_version)^[[0m
+apply	Apply server changes	2026-07-24T09:44:08.5590388Z ^[[36;1m            self.send_json(^[[0m
+apply	Apply server changes	2026-07-24T09:44:08.5590904Z ^[[36;1m                HTTPStatus.OK,^[[0m
+apply	Apply server changes	2026-07-24T09:44:08.5591407Z ^[[36;1m                {^[[0m
+apply	Apply server changes	2026-07-24T09:44:08.5591938Z ^[[36;1m                    "serverToolVersion": SERVER_TOOL_VERSION,^[[0m
+apply	Apply server changes	2026-07-24T09:44:08.5592612Z ^[[36;1m                    "requiredClientVersion": required_version,^[[0m
+apply	Apply server changes	2026-07-24T09:44:08.5593277Z ^[[36;1m                    "clientVersionAccepted": accepted,^[[0m
+apply	Apply server changes	2026-07-24T09:44:08.5593940Z ^[[36;1m                    "updateRequired": not accepted,^[[0m
+apply	Apply server changes	2026-07-24T09:44:08.5594560Z ^[[36;1m                    "maintenance": MAINTENANCE,^[[0m
+apply	Apply server changes	2026-07-24T09:44:08.5595107Z ^[[36;1m'''^[[0m
+apply	Apply server changes	2026-07-24T09:44:08.5595529Z ^[[36;1mif control.count(old_payload) != 1:^[[0m
+apply	Apply server changes	2026-07-24T09:44:08.5596224Z ^[[36;1m    raise SystemExit('control plane bootstrap payload mismatch')^[[0m
+apply	Apply server changes	2026-07-24T09:44:08.5597016Z ^[[36;1mcontrol = control.replace(old_payload, new_payload, 1)^[[0m
+apply	Apply server changes	2026-07-24T09:44:08.5597744Z ^[[36;1mcontrol_path.write_text(control, encoding='utf-8')^[[0m
+apply	Apply server changes	2026-07-24T09:44:08.5598343Z ^[[36;1m^[[0m
+apply	Apply server changes	2026-07-24T09:44:08.5598785Z ^[[36;1m# Direct full-package bootstrap installer.^[[0m
+apply	Apply server changes	2026-07-24T09:44:08.5599756Z ^[[36;1mPath('scripts/install-server.sh').write_text(dedent(r'''#!/usr/bin/env bash^[[0m
+apply	Apply server changes	2026-07-24T09:44:08.5600522Z ^[[36;1mset -euo pipefail^[[0m
+apply	Apply server changes	2026-07-24T09:44:08.5600971Z ^[[36;1m^[[0m
+apply	Apply server changes	2026-07-24T09:44:08.5601402Z ^[[36;1mREPO="${SCBL_GITHUB_REPO:-caox233/SCBL}"^[[0m
+apply	Apply server changes	2026-07-24T09:44:08.5602405Z ^[[36;1mVERSION_URL="${SCBL_SERVER_TOOL_VERSION_URL:-https://raw.githubusercontent.com/${REPO}/main/VERSION_SERVER_TOOL}"^[[0m
+apply	Apply server changes	2026-07-24T09:44:08.5603638Z ^[[36;1mTMP="$(mktemp -d -t scbl-server-install.XXXXXX)"^[[0m
+apply	Apply server changes	2026-07-24T09:44:08.5604289Z ^[[36;1mMANAGER_DIR="/usr/local/lib/scbl-public"^[[0m
+apply	Apply server changes	2026-07-24T09:44:08.5604967Z ^[[36;1mMANAGER_TARGET="${MANAGER_DIR}/install_public_server.sh"^[[0m
+apply	Apply server changes	2026-07-24T09:44:08.5605613Z ^[[36;1mcleanup() { rm -rf "$TMP"; }^[[0m
+apply	Apply server changes	2026-07-24T09:44:08.5606124Z ^[[36;1mtrap cleanup EXIT^[[0m
+apply	Apply server changes	2026-07-24T09:44:08.5606570Z ^[[36;1m^[[0m
+apply	Apply server changes	2026-07-24T09:44:08.5606980Z ^[[36;1mif [[ ${EUID:-$(id -u)} -ne 0 ]]; then^[[0m
+apply	Apply server changes	2026-07-24T09:44:08.5607645Z ^[[36;1m  echo "请使用 root 运行。" >&2^[[0m
+apply	Apply server changes	2026-07-24T09:44:08.5608124Z ^[[36;1m  exit 1^[[0m
+apply	Apply server changes	2026-07-24T09:44:08.5608515Z ^[[36;1mfi^[[0m
+apply	Apply server changes	2026-07-24T09:44:08.5609175Z ^[[36;1mfor cmd in curl sha256sum python3 timeout install; do^[[0m
+apply	Apply server changes	2026-07-24T09:44:08.5609964Z ^[[36;1m  command -v "$cmd" >/dev/null 2>&1 || { echo "缺少必要命令：$cmd" >&2; exit 1; }^[[0m
+apply	Apply server changes	2026-07-24T09:44:08.5610635Z ^[[36;1mdone^[[0m
+apply	Apply server changes	2026-07-24T09:44:08.5611265Z ^[[36;1mcase "$(uname -m)" in x86_64|amd64) ;; *) echo "当前安装包仅支持 Linux x86_64。" >&2; exit 1 ;; esac^[[0m
+apply	Apply server changes	2026-07-24T09:44:08.5611999Z ^[[36;1m^[[0m
+apply	Apply server changes	2026-07-24T09:44:08.5612397Z ^[[36;1mecho "[SCBL] 正在检查正式版本..."^[[0m
+apply	Apply server changes	2026-07-24T09:44:08.5613350Z ^[[36;1mversion="$(curl -fsSL --retry 3 --retry-all-errors --connect-timeout 10 --max-time 60 "$VERSION_URL" | tr -d '[:space:]')"^[[0m
+apply	Apply server changes	2026-07-24T09:44:08.5614450Z ^[[36;1m[[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || { echo "无法读取正式版本。" >&2; exit 1; }^[[0m
+apply	Apply server changes	2026-07-24T09:44:08.5615128Z ^[[36;1mtag="server-tool-v${version}"^[[0m
+apply	Apply server changes	2026-07-24T09:44:08.5615800Z ^[[36;1mpackage="SCBL-Server-Tool-v${version}-linux-x86_64.tar.gz"^[[0m
+apply	Apply server changes	2026-07-24T09:44:08.5616787Z ^[[36;1mbase="${SCBL_SERVER_TOOL_PACKAGE_BASE_URL:-https://github.com/${REPO}/releases/download/${tag}}"^[[0m
+apply	Apply server changes	2026-07-24T09:44:08.5617617Z ^[[36;1m^[[0m
+apply	Apply server changes	2026-07-24T09:44:08.5618029Z ^[[36;1mecho "[SCBL] 正在下载服务端工具 v${version}..."^[[0m
+apply	Apply server changes	2026-07-24T09:44:08.5619303Z ^[[36;1mtimeout --foreground 600s curl -fL --retry 3 --retry-all-errors --connect-timeout 10 --max-time 600 "$base/$package" -o "$TMP/$package"^[[0m
+apply	Apply server changes	2026-07-24T09:44:08.5621069Z ^[[36;1mexpected="$(timeout --foreground 60s curl -fsSL --retry 3 --retry-all-errors --connect-timeout 10 --max-time 60 "$base/${package}.sha256" | awk 'NF {print tolower($1); exit}')"^[[0m
+apply	Apply server changes	2026-07-24T09:44:08.5622489Z ^[[36;1mactual="$(sha256sum "$TMP/$package" | awk '{print tolower($1)}')"^[[0m
+apply	Apply server changes	2026-07-24T09:44:08.5623512Z ^[[36;1m[[ "$expected" =~ ^[0-9a-f]{64}$ && "$actual" == "$expected" ]] || { echo "服务端工具文件校验失败。" >&2; exit 1; }^[[0m
+apply	Apply server changes	2026-07-24T09:44:08.5624271Z ^[[36;1m^[[0m
+apply	Apply server changes	2026-07-24T09:44:08.5624664Z ^[[36;1mmkdir -p "$TMP/extract"^[[0m
+apply	Apply server changes	2026-07-24T09:44:08.5625353Z ^[[36;1mpython3 - "$TMP/$package" "$TMP/extract" <<'PYEOF_SAFE_BOOTSTRAP_EXTRACT'^[[0m
+apply	Apply server changes	2026-07-24T09:44:08.5626068Z ^[[36;1mimport sys, tarfile^[[0m
+apply	Apply server changes	2026-07-24T09:44:08.5626588Z ^[[36;1mfrom pathlib import Path, PurePosixPath^[[0m
+apply	Apply server changes	2026-07-24T09:44:08.5627185Z ^[[36;1marchive_path, target = sys.argv[1:3]^[[0m
+apply	Apply server changes	2026-07-24T09:44:08.5627762Z ^[[36;1mtarget_root = Path(target).resolve()^[[0m
+apply	Apply server changes	2026-07-24T09:44:08.5628403Z ^[[36;1mwith tarfile.open(archive_path, 'r:gz') as archive:^[[0m
+apply	Apply server changes	2026-07-24T09:44:08.5629246Z ^[[36;1m    members = archive.getmembers()^[[0m
+apply	Apply server changes	2026-07-24T09:44:08.5629808Z ^[[36;1m    for member in members:^[[0m
+apply	Apply server changes	2026-07-24T09:44:08.5630349Z ^[[36;1m        p = PurePosixPath(member.name)^[[0m
+apply	Apply server changes	2026-07-24T09:44:08.5631129Z ^[[36;1m        if p.is_absolute() or '..' in p.parts or not (member.isfile() or member.isdir()):^[[0m
+apply	Apply server changes	2026-07-24T09:44:08.5632005Z ^[[36;1m            raise SystemExit(f'unsafe archive entry: {member.name}')^[[0m
+apply	Apply server changes	2026-07-24T09:44:08.5632801Z ^[[36;1m        destination = (target_root / Path(*p.parts)).resolve()^[[0m
+apply	Apply server changes	2026-07-24T09:44:08.5633655Z ^[[36;1m        if destination != target_root and target_root not in destination.parents:^[[0m
+apply	Apply server changes	2026-07-24T09:44:08.5634568Z ^[[36;1m            raise SystemExit(f'archive entry escapes target: {member.name}')^[[0m
+apply	Apply server changes	2026-07-24T09:44:08.5635361Z ^[[36;1m    archive.extractall(target_root, members=members)^[[0m
+apply	Apply server changes	2026-07-24T09:44:08.5635978Z ^[[36;1mPYEOF_SAFE_BOOTSTRAP_EXTRACT^[[0m
+apply	Apply server changes	2026-07-24T09:44:08.5636643Z ^[[36;1m^[[0m
+apply	Apply server changes	2026-07-24T09:44:08.5637496Z ^[[36;1mpackage_root="$(find "$TMP/extract" -mindepth 1 -maxdepth 1 -type d -name 'SCBL-Server-Tool-v*-linux-x86_64' -print -quit)"^[[0m
+apply	Apply server changes	2026-07-24T09:44:08.5638575Z ^[[36;1m[[ -n "$package_root" ]] || { echo "服务端工具包目录不正确。" >&2; exit 1; }^[[0m
+apply	Apply server changes	2026-07-24T09:44:08.5639527Z ^[[36;1minstaller="$package_root/install_public_server.sh"^[[0m
+apply	Apply server changes	2026-07-24T09:44:08.5640219Z ^[[36;1mversion_file="$package_root/VERSION_SERVER_TOOL"^[[0m
+apply	Apply server changes	2026-07-24T09:44:08.5641151Z ^[[36;1m[[ -f "$installer" && -f "$version_file" ]] || { echo "服务端工具包缺少必要文件。" >&2; exit 1; }^[[0m
+apply	Apply server changes	2026-07-24T09:44:08.5642104Z ^[[36;1m[[ "$(tr -d '[:space:]' < "$version_file")" == "$version" ]] || { echo "服务端工具包版本不一致。" >&2; exit 1; }^[[0m
+apply	Apply server changes	2026-07-24T09:44:08.5642856Z ^[[36;1mbash -n "$installer"^[[0m
+apply	Apply server changes	2026-07-24T09:44:08.5643453Z ^[[36;1mpython3 - "$installer" <<'PYEOF_VALIDATE_BOOTSTRAP_MANAGER'^[[0m
+apply	Apply server changes	2026-07-24T09:44:08.5644109Z ^[[36;1mfrom pathlib import Path^[[0m
+apply	Apply server changes	2026-07-24T09:44:08.5644610Z ^[[36;1mimport re, sys^[[0m
+apply	Apply server changes	2026-07-24T09:44:08.5645146Z ^[[36;1mtext = Path(sys.argv[1]).read_text(encoding='utf-8')^[[0m
+apply	Apply server changes	2026-07-24T09:44:08.5645931Z ^[[36;1mblocks = re.findall(r"<<'?(PYEOF_[A-Za-z0-9_]+)'?\n(.*?)\n\1", text, re.S)^[[0m
+apply	Apply server changes	2026-07-24T09:44:08.5646623Z ^[[36;1mif not blocks:^[[0m
+apply	Apply server changes	2026-07-24T09:44:08.5647242Z ^[[36;1m    raise SystemExit('manager script has no embedded Python blocks')^[[0m
+apply	Apply server changes	2026-07-24T09:44:08.5647936Z ^[[36;1mfor marker, block in blocks:^[[0m
+apply	Apply server changes	2026-07-24T09:44:08.5648476Z ^[[36;1m    compile(block, marker, 'exec')^[[0m
+apply	Apply server changes	2026-07-24T09:44:08.5649141Z ^[[36;1mPYEOF_VALIDATE_BOOTSTRAP_MANAGER^[[0m
+apply	Apply server changes	2026-07-24T09:44:08.5649649Z ^[[36;1m^[[0m
+apply	Apply server changes	2026-07-24T09:44:08.5650081Z ^[[36;1minstall -d -m 0755 "$MANAGER_DIR"^[[0m
+apply	Apply server changes	2026-07-24T09:44:08.5650668Z ^[[36;1minstall -m 0755 "$installer" "$MANAGER_TARGET"^[[0m
+apply	Apply server changes	2026-07-24T09:44:08.5651401Z ^[[36;1minstall -m 0644 "$version_file" "$MANAGER_DIR/VERSION_SERVER_TOOL"^[[0m
+apply	Apply server changes	2026-07-24T09:44:08.5652365Z ^[[36;1mfor asset in scbl_control_plane.py check_scbl_binary_release.sh 5th-echelon_branch.txt; do^[[0m
+apply	Apply server changes	2026-07-24T09:44:08.5653238Z ^[[36;1m  [[ -f "$package_root/$asset" ]] || continue^[[0m
+apply	Apply server changes	2026-07-24T09:44:08.5653890Z ^[[36;1m  case "$asset" in *.sh) mode=0755 ;; *) mode=0644 ;; esac^[[0m
+apply	Apply server changes	2026-07-24T09:44:08.5654632Z ^[[36;1m  install -m "$mode" "$package_root/$asset" "$MANAGER_DIR/$asset"^[[0m
+apply	Apply server changes	2026-07-24T09:44:08.5655267Z ^[[36;1mdone^[[0m
+apply	Apply server changes	2026-07-24T09:44:08.5655653Z ^[[36;1m^[[0m
+apply	Apply server changes	2026-07-24T09:44:08.5656084Z ^[[36;1mcat > /usr/local/bin/SCBL <<'SCBL_COMMAND'^[[0m
+apply	Apply server changes	2026-07-24T09:44:08.5656651Z ^[[36;1m#!/usr/bin/env bash^[[0m
+apply	Apply server changes	2026-07-24T09:44:08.5657106Z ^[[36;1mset -e^[[0m
+apply	Apply server changes	2026-07-24T09:44:08.5657666Z ^[[36;1mMANAGER="/usr/local/lib/scbl-public/install_public_server.sh"^[[0m
+apply	Apply server changes	2026-07-24T09:44:08.5658494Z ^[[36;1mif [[ ! -f "$MANAGER" ]]; then echo "SCBL 管理脚本不存在：$MANAGER" >&2; exit 1; fi^[[0m
+apply	Apply server changes	2026-07-24T09:44:08.5659398Z ^[[36;1mif [[ ${EUID:-$(id -u)} -eq 0 ]]; then exec bash "$MANAGER" "$@"; fi^[[0m
+apply	Apply server changes	2026-07-24T09:44:08.5660232Z ^[[36;1mif command -v sudo >/dev/null 2>&1; then exec sudo bash "$MANAGER" "$@"; fi^[[0m
+apply	Apply server changes	2026-07-24T09:44:08.5661041Z ^[[36;1mecho "请使用 root 登录，或安装 sudo 后再执行 SCBL。" >&2^[[0m
+apply	Apply server changes	2026-07-24T09:44:08.5661593Z ^[[36;1mexit 1^[[0m
+apply	Apply server changes	2026-07-24T09:44:08.5662000Z ^[[36;1mSCBL_COMMAND^[[0m
+apply	Apply server changes	2026-07-24T09:44:08.5662452Z ^[[36;1mchmod 0755 /usr/local/bin/SCBL^[[0m
+apply	Apply server changes	2026-07-24T09:44:08.5663038Z ^[[36;1mln -sfn /usr/local/bin/SCBL /usr/local/bin/scbl^[[0m
+apply	Apply server changes	2026-07-24T09:44:08.5663607Z ^[[36;1m^[[0m
+apply	Apply server changes	2026-07-24T09:44:08.5664025Z ^[[36;1mecho "[SCBL] 服务端管理工具 v${version} 已安装。"^[[0m
+apply	Apply server changes	2026-07-24T09:44:08.5664591Z ^[[36;1mif [[ -t 0 && -t 1 ]]; then^[[0m
+apply	Apply server changes	2026-07-24T09:44:08.5665100Z ^[[36;1m  exec bash "$MANAGER_TARGET"^[[0m
+apply	Apply server changes	2026-07-24T09:44:08.5665597Z ^[[36;1mfi^[[0m
+apply	Apply server changes	2026-07-24T09:44:08.5665992Z ^[[36;1mecho "请继续执行：SCBL"^[[0m
+apply	Apply server changes	2026-07-24T09:44:08.5666454Z ^[[36;1m'''), encoding='utf-8')^[[0m
+apply	Apply server changes	2026-07-24T09:44:08.5666930Z ^[[36;1m^[[0m
+apply	Apply server changes	2026-07-24T09:44:08.5667438Z ^[[36;1m# User-facing output should avoid implementation jargon.^[[0m
+apply	Apply server changes	2026-07-24T09:44:08.5668218Z ^[[36;1mfor path in [manager_path, Path('scripts/install-server.sh')]:^[[0m
+apply	Apply server changes	2026-07-24T09:44:08.5669388Z ^[[36;1m    text = path.read_text(encoding='utf-8').replace('原子', '').replace('immutable', '正式')^[[0m
+apply	Apply server changes	2026-07-24T09:44:08.5670224Z ^[[36;1m    path.write_text(text, encoding='utf-8')^[[0m
+apply	Apply server changes	2026-07-24T09:44:08.5670772Z ^[[36;1m^[[0m
+apply	Apply server changes	2026-07-24T09:44:08.5671164Z ^[[36;1m# Static source checks.^[[0m
+apply	Apply server changes	2026-07-24T09:44:08.5671737Z ^[[36;1msource = manager_path.read_text(encoding='utf-8')^[[0m
+apply	Apply server changes	2026-07-24T09:44:08.5672924Z ^[[36;1mfor forbidden in ['SCBL_MIN_CLIENT_VERSION', 'client-stable-latest', 'server-tool-stable-latest', '请输入客户端版本号', 'file-delta', 'filesBaseUrl']:^[[0m
+apply	Apply server changes	2026-07-24T09:44:08.5674152Z ^[[36;1m    if forbidden in source:^[[0m
+apply	Apply server changes	2026-07-24T09:44:08.5674809Z ^[[36;1m        raise SystemExit(f'old server marker remains: {forbidden}')^[[0m
+apply	Apply server changes	2026-07-24T09:44:08.5676108Z ^[[36;1mfor required in ['VERSION_CLIENT', 'VERSION_SERVER_TOOL', "'updateMode': 'full-package'", "'fullPackageSha256': digest", 'download_latest_client_release']:^[[0m
+apply	Apply server changes	2026-07-24T09:44:08.5677262Z ^[[36;1m    if required not in source:^[[0m
+apply	Apply server changes	2026-07-24T09:44:08.5677899Z ^[[36;1m        raise SystemExit(f'missing server marker: {required}')^[[0m
+apply	Apply server changes	2026-07-24T09:44:08.5678521Z ^[[36;1mPY^[[0m
+apply	Apply server changes	2026-07-24T09:44:08.5678894Z ^[[36;1m^[[0m
+apply	Apply server changes	2026-07-24T09:44:08.5679430Z ^[[36;1mbash -n server/install_public_server.sh^[[0m
+apply	Apply server changes	2026-07-24T09:44:08.5680025Z ^[[36;1mbash -n scripts/install-server.sh^[[0m
+apply	Apply server changes	2026-07-24T09:44:08.5680659Z ^[[36;1mpython3 -m py_compile server/scbl_control_plane.py^[[0m
+apply	Apply server changes	2026-07-24T09:44:08.5681273Z ^[[36;1mpython3 - <<'PY'^[[0m
+apply	Apply server changes	2026-07-24T09:44:08.5681755Z ^[[36;1mfrom pathlib import Path^[[0m
+apply	Apply server changes	2026-07-24T09:44:08.5682240Z ^[[36;1mimport re^[[0m
+apply	Apply server changes	2026-07-24T09:44:08.5682886Z ^[[36;1mfor name in ['server/install_public_server.sh', 'scripts/install-server.sh']:^[[0m
+apply	Apply server changes	2026-07-24T09:44:08.5683707Z ^[[36;1m    text = Path(name).read_text(encoding='utf-8')^[[0m
+apply	Apply server changes	2026-07-24T09:44:08.5684536Z ^[[36;1m    for marker, block in re.findall(r"<<'?(PYEOF_[A-Za-z0-9_]+)'?\n(.*?)\n\1", text, re.S):^[[0m
+apply	Apply server changes	2026-07-24T09:44:08.5685364Z ^[[36;1m        compile(block, f'{name}:{marker}', 'exec')^[[0m
+apply	Apply server changes	2026-07-24T09:44:08.5686011Z ^[[36;1mprint('embedded Python validation passed')^[[0m
+apply	Apply server changes	2026-07-24T09:44:08.5686565Z ^[[36;1mPY^[[0m
+apply	Apply server changes	2026-07-24T09:44:08.5686948Z ^[[36;1m^[[0m
+apply	Apply server changes	2026-07-24T09:44:08.5687364Z ^[[36;1mgit config user.name github-actions^[[0m
+apply	Apply server changes	2026-07-24T09:44:08.5687988Z ^[[36;1mgit config user.email github-actions@github.com^[[0m
+apply	Apply server changes	2026-07-24T09:44:08.5688581Z ^[[36;1mgit add server scripts^[[0m
+apply	Apply server changes	2026-07-24T09:44:08.5689329Z ^[[36;1mgit commit -m 'simplify server version and full-package updates'^[[0m
+apply	Apply server changes	2026-07-24T09:44:08.5690021Z ^[[36;1mgit push^[[0m
+apply	Apply server changes	2026-07-24T09:44:08.5744258Z shell: /usr/bin/bash --noprofile --norc -e -o pipefail {0}
+apply	Apply server changes	2026-07-24T09:44:08.5744952Z ##[endgroup]
+apply	Apply server changes	2026-07-24T09:44:08.6092981Z manager version anchor mismatch
+apply	Apply server changes	2026-07-24T09:44:08.6148497Z ##[error]Process completed with exit code 1.

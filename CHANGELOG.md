@@ -1,5 +1,13 @@
 # 更新记录
 
+## Server Tool v0.6.9
+
+- DDNS-GO 改为官方原生配置：A / AAAA、DNS 服务商、域名、网卡和 IPv6 匹配规则全部由官方 Web 页面管理。
+- 删除 SCBL 自建 IPv4 / IPv6 取址命令、模式强制器和配置监视服务；升级时只迁移引用这些旧命令的配置项，并先生成备份。
+- Web 管理自动绑定服务器局域网私有 IPv4 的 9876 端口；没有私有 IPv4 时回退到 127.0.0.1，拒绝 0.0.0.0、公共 IPv4 和 IPv6 监听。
+- DDNS-GO 菜单仅保留安装、更新、启动、状态、密码重置和保留配置的卸载。
+- Server Tool v0.6.8 已在真实 Ubuntu 26 Server 上完成原地升级验证，Windows 客户端 v0.6.3 可进入线上模式；客户端和 Hooks 保持不变。
+
 ## Server Tool v0.6.8
 
 - 修复全新服务器缺少 `service.toml.template` 时，dedicated_server 自动配置把 `SandboxUrl`、`SandboxUrlWS`、`secure_server_addr` 和 `storage_host` 保留为 `127.0.0.1`，导致客户端账号登录成功但游戏无法进入线上模式的问题。

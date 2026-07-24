@@ -32,12 +32,11 @@ DEFAULT_DEDICATED_URL="https://github.com/caox233/5th-echelon/releases/download/
 DEFAULT_DEDICATED_SHA256_URL="https://github.com/caox233/5th-echelon/releases/download/${DEFAULT_DEDICATED_RELEASE_TAG}/dedicated_server-linux-x86_64.sha256"
 DEFAULT_UPSTREAM_DEDICATED_URL="https://github.com/unixoide/5th-echelon/releases/latest/download/dedicated_server-linux-x86_64"
 DEFAULT_DDNS_GO_INSTALL="y"
-DEFAULT_DDNS_GO_MODE="ipv6"
-DEFAULT_DDNS_GO_LISTEN="127.0.0.1:9876"
+DEFAULT_DDNS_GO_LISTEN=""
 DEFAULT_DDNS_GO_INTERVAL="300"
 DEFAULT_DDNS_GO_CONFIG="/opt/ddns-go/.ddns_go_config.yaml"
 DEFAULT_DDNS_GO_VERSION="latest"
-SERVER_TOOL_VERSION="0.6.8"
+SERVER_TOOL_VERSION="0.6.9"
 DEFAULT_SCBL_RELEASE_REPOSITORY="caox233/SCBL"
 DEFAULT_CLIENT_RELEASE_TAG="client-stable-latest"
 DEFAULT_SERVER_TOOL_RELEASE_TAG="server-tool-stable-latest"
@@ -336,210 +335,15 @@ prompt_secret_value() {
   printf -v "$var_name" '%s' "$value"
 }
 
-split_domain_for_aliyun() {
-  local fqdn="$1" labels count rr root
-  IFS='.' read -ra labels <<< "$fqdn"
-  count="${#labels[@]}"
-  if (( count < 2 )); then
-    echo "|$fqdn"
-    return 0
-  fi
-  root="${labels[count-2]}.${labels[count-1]}"
-  if (( count == 2 )); then
-    rr="@"
-  else
-    rr="$(IFS='.'; echo "${labels[*]:0:count-2}")"
-  fi
-  echo "$rr|$root"
-}
-
-write_aliyun_ddns_runtime() {
-  mkdir -p "$SCBL_ROOT/bin"
-  cat > "$SCBL_ROOT/bin/scbl-aliyun-ddns.py" <<'PYDDNS'
-#!/usr/bin/env python3
-import base64, hashlib, hmac, json, os, sys, time, urllib.parse, urllib.request, uuid
-
-API = 'https://alidns.aliyuncs.com/'
-
-def env(name, default=''):
-    return os.environ.get(name, default).strip()
-
-def pct(s):
-    return urllib.parse.quote(str(s), safe='~-._')
-
-def call(action, extra):
-    access_id = env('ALIYUN_ACCESS_KEY_ID')
-    access_secret = env('ALIYUN_ACCESS_KEY_SECRET')
-    if not access_id or not access_secret:
-        raise SystemExit('missing Aliyun AccessKey')
-    params = {
-        'Format':'JSON','Version':'2015-01-09','AccessKeyId':access_id,
-        'SignatureMethod':'HMAC-SHA1','Timestamp':time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime()),
-        'SignatureVersion':'1.0','SignatureNonce':str(uuid.uuid4()),'Action':action,
-    }
-    params.update(extra)
-    query = '&'.join(f'{pct(k)}={pct(params[k])}' for k in sorted(params))
-    string_to_sign = 'GET&%2F&' + pct(query)
-    sig = base64.b64encode(hmac.new((access_secret+'&').encode(), string_to_sign.encode(), hashlib.sha1).digest()).decode()
-    url = API + '?' + query + '&Signature=' + pct(sig)
-    with urllib.request.urlopen(url, timeout=15) as r:
-        data = r.read().decode()
-    return json.loads(data)
-
-def public_ip():
-    for url in ['https://api.ipify.org','https://ifconfig.me/ip']:
-        try:
-            with urllib.request.urlopen(url, timeout=8) as r:
-                ip = r.read().decode().strip()
-            if ip and ip.count('.') == 3:
-                return ip
-        except Exception:
-            pass
-    raise SystemExit('cannot detect public IPv4')
-
-def main():
-    domain = env('ALIYUN_DOMAIN_NAME')
-    rr = env('ALIYUN_RR') or '@'
-    record_type = env('ALIYUN_RECORD_TYPE', 'A')
-    ip = public_ip()
-    desc = call('DescribeDomainRecords', {
-        'DomainName': domain,
-        'RRKeyWord': rr,
-        'Type': record_type,
-    })
-    records = desc.get('DomainRecords', {}).get('Record', [])
-    target = None
-    for r in records:
-        if r.get('RR') == rr and r.get('Type') == record_type:
-            target = r
-            break
-    if target:
-        if target.get('Value') == ip:
-            print(f'unchanged {rr}.{domain} -> {ip}')
-            return
-        call('UpdateDomainRecord', {
-            'RecordId': target['RecordId'], 'RR': rr, 'Type': record_type, 'Value': ip,
-        })
-        print(f'updated {rr}.{domain} -> {ip}')
-    else:
-        call('AddDomainRecord', {
-            'DomainName': domain, 'RR': rr, 'Type': record_type, 'Value': ip,
-        })
-        print(f'created {rr}.{domain} -> {ip}')
-
-if __name__ == '__main__':
-    main()
-PYDDNS
-  chmod +x "$SCBL_ROOT/bin/scbl-aliyun-ddns.py"
-
-  cat > /etc/systemd/system/scbl-ddns.service <<UNITEOF
-[Unit]
-Description=SCBL Aliyun DDNS Updater
-After=network-online.target
-Wants=network-online.target
-StartLimitIntervalSec=30
-StartLimitBurst=5
-
-[Service]
-Type=oneshot
-EnvironmentFile=$SCBL_ROOT/scbl-ddns.env
-ExecStart=$SCBL_ROOT/bin/scbl-aliyun-ddns.py
-UNITEOF
-
-  cat > /etc/systemd/system/scbl-ddns.timer <<UNITEOF
-[Unit]
-Description=Run SCBL Aliyun DDNS periodically
-
-[Timer]
-OnBootSec=30
-OnUnitActiveSec=300
-Unit=scbl-ddns.service
-
-[Install]
-WantedBy=timers.target
-UNITEOF
-  systemctl daemon-reload
-  systemctl enable --now scbl-ddns.timer >/dev/null 2>&1 || true
-}
-
-configure_aliyun_ddns_inline() {
-  local fqdn split rr root akid aksec interval
-  prompt_value fqdn "请输入 DDNS 完整域名，例如 sc6.elonline.top" "${SCBL_PUBLIC_HOST:-sc6.elonline.top}"
-  split="$(split_domain_for_aliyun "$fqdn")"
-  rr="${split%%|*}"; root="${split#*|}"
-  prompt_value root "阿里云主域名 DomainName" "$root"
-  prompt_value rr "阿里云主机记录 RR" "$rr"
-  prompt_value interval "更新间隔秒" "300"
-  prompt_value akid "阿里云 AccessKey ID" ""
-  prompt_secret_value aksec "阿里云 AccessKey Secret（输入时不显示）"
-  if [[ -z "$akid" || -z "$aksec" ]]; then
-    echo "AccessKey 为空，已取消自动 DDNS 配置。"
-    return 1
-  fi
-  mkdir -p "$SCBL_ROOT"
-  cat > "$SCBL_ROOT/scbl-ddns.env" <<EOFDDNS
-ALIYUN_ACCESS_KEY_ID="$akid"
-ALIYUN_ACCESS_KEY_SECRET="$aksec"
-ALIYUN_DOMAIN_NAME="$root"
-ALIYUN_RR="$rr"
-ALIYUN_RECORD_TYPE="A"
-EOFDDNS
-  chmod 0600 "$SCBL_ROOT/scbl-ddns.env"
-  write_aliyun_ddns_runtime
-  systemctl start scbl-ddns.service || true
-  SCBL_PUBLIC_HOST="$fqdn"
-  echo "已配置脚本内置阿里云 DDNS：$fqdn"
-  echo "后续由 scbl-ddns.timer 每 ${interval:-300} 秒自动检查公网 IP。"
-}
-
-
-scbl_inline_ddns_env_file() {
-  echo "$SCBL_ROOT/scbl-ddns.env"
-}
-
-scbl_inline_ddns_config_exists() {
-  [[ -f "$(scbl_inline_ddns_env_file)" ]]
-}
-
-detect_inline_ddns_domain() {
-  local env_file rr root fqdn
-  env_file="$(scbl_inline_ddns_env_file)"
-  [[ -f "$env_file" ]] || return 1
-  rr="$(grep -E '^ALIYUN_RR=' "$env_file" 2>/dev/null | tail -n 1 | cut -d= -f2- | tr -d '"' | tr -d "'" | xargs 2>/dev/null || true)"
-  root="$(grep -E '^ALIYUN_DOMAIN_NAME=' "$env_file" 2>/dev/null | tail -n 1 | cut -d= -f2- | tr -d '"' | tr -d "'" | xargs 2>/dev/null || true)"
-  [[ -n "$root" ]] || return 1
-  if [[ -z "$rr" || "$rr" == "@" ]]; then
-    fqdn="$root"
-  else
-    fqdn="$rr.$root"
-  fi
-  if is_valid_ddns_domain_candidate "$fqdn" >/dev/null 2>&1; then
-    echo "$fqdn"
-    return 0
-  fi
-  return 1
-}
-
 detect_existing_ddns_domain() {
-  local candidate=""
-  candidate="$(detect_inline_ddns_domain 2>/dev/null || true)"
-  if [[ -n "$candidate" ]]; then
-    echo "$candidate"
-    return 0
-  fi
-  candidate="$(detect_ddns_go_domain 2>/dev/null || true)"
-  if [[ -n "$candidate" ]]; then
-    echo "$candidate"
-    return 0
-  fi
-  return 1
+  detect_ddns_go_domain 2>/dev/null || true
 }
 
 reuse_existing_ddns_if_requested() {
   local existing="$1" answer="Y"
   [[ -n "$existing" ]] || return 1
   echo
-  echo "检测到当前已有动态域名配置：$existing"
+  echo "检测到当前 DDNS-GO 已配置动态域名：$existing"
   if is_interactive; then
     read -e -r -p "是否复用这个动态域名作为公网入口？[Y/n]: " answer || true
     answer="${answer:-Y}"
@@ -547,15 +351,11 @@ reuse_existing_ddns_if_requested() {
   case "$answer" in
     y|Y|yes|YES|Yes|"")
       SCBL_PUBLIC_HOST="$existing"
-      if scbl_inline_ddns_config_exists; then
-        write_aliyun_ddns_runtime
-        systemctl start scbl-ddns.service >/dev/null 2>&1 || true
-      fi
       echo "已复用公网入口：$SCBL_PUBLIC_HOST"
       return 0
       ;;
     *)
-      echo "不复用已有动态域名配置，继续按正常流程重新配置。"
+      echo "不复用已有动态域名配置，继续按正常流程配置公网入口。"
       return 1
       ;;
   esac
@@ -592,117 +392,153 @@ resolve_public_host_for_install() {
   prompt_value SCBL_PUBLIC_HOST "公网入口 IP 或域名" "$manual_default"
 }
 
-normalize_ddns_go_mode() {
-  case "${1,,}" in
-    ipv6|v6|ipv6-only|6) echo "ipv6" ;;
-    ipv4|v4|ipv4-only|4) echo "ipv4" ;;
-    dual|both|46|ipv4+ipv6) echo "dual" ;;
-    manual|none|0) echo "manual" ;;
-    *) echo "ipv6" ;;
-  esac
-}
-
-ddns_go_mode_label() {
-  case "$(normalize_ddns_go_mode "${1:-ipv6}")" in
-    ipv6) echo "仅更新 IPv6 AAAA 记录" ;;
-    ipv4) echo "仅更新 IPv4 A 记录" ;;
-    dual) echo "同时更新 IPv4 A 与 IPv6 AAAA 记录" ;;
-    manual) echo "完全由 DDNS-GO Web 页面手动配置" ;;
-  esac
-}
-
-prompt_ddns_go_mode() {
-  local current="$(normalize_ddns_go_mode "${DDNS_GO_MODE:-ipv6}")" choice=""
-  echo
-  echo "DDNS-GO 地址记录模式："
-  echo "1. 仅 IPv6（推荐用于：OpenWrt 管 A，Ubuntu 管 AAAA）"
-  echo "2. IPv4 + IPv6 双栈"
-  echo "3. 仅 IPv4"
-  echo "4. 手动模式（脚本不强制修改 IPv4/IPv6 开关）"
-  case "$current" in ipv6) choice=1;; dual) choice=2;; ipv4) choice=3;; manual) choice=4;; esac
-  if is_interactive; then
-    read -e -r -p "请选择 [$choice]: " answer || true
-    choice="${answer:-$choice}"
+detect_ddns_go_lan_ipv4() {
+  local iface="${SCBL_WAN_IFACE:-}" candidate=""
+  if [[ -z "$iface" ]]; then
+    iface="$(ip -o -4 route show to default 2>/dev/null | awk '{print $5; exit}' || true)"
   fi
-  case "$choice" in
-    1) DDNS_GO_MODE="ipv6" ;;
-    2) DDNS_GO_MODE="dual" ;;
-    3) DDNS_GO_MODE="ipv4" ;;
-    4) DDNS_GO_MODE="manual" ;;
-    *) DDNS_GO_MODE="$current" ;;
-  esac
-  echo "已选择：$(ddns_go_mode_label "$DDNS_GO_MODE")"
+  if [[ -n "$iface" ]]; then
+    candidate="$(ip -4 -o addr show dev "$iface" scope global 2>/dev/null | awk '{split($4,a,"/"); print a[1]}' | \
+      python3 -c 'import ipaddress,sys
+for line in sys.stdin:
+    value=line.strip()
+    try:
+        ip=ipaddress.ip_address(value)
+    except ValueError:
+        continue
+    if ip.version == 4 and (ip in ipaddress.ip_network("10.0.0.0/8") or ip in ipaddress.ip_network("172.16.0.0/12") or ip in ipaddress.ip_network("192.168.0.0/16")):
+        print(ip)
+        break' || true)"
+  fi
+  if [[ -z "$candidate" ]]; then
+    candidate="$(ip -4 -o addr show scope global 2>/dev/null | awk '{split($4,a,"/"); print a[1]}' | \
+      python3 -c 'import ipaddress,sys
+for line in sys.stdin:
+    value=line.strip()
+    try:
+        ip=ipaddress.ip_address(value)
+    except ValueError:
+        continue
+    if ip.version == 4 and (ip in ipaddress.ip_network("10.0.0.0/8") or ip in ipaddress.ip_network("172.16.0.0/12") or ip in ipaddress.ip_network("192.168.0.0/16")):
+        print(ip)
+        break' || true)"
+  fi
+  printf '%s' "$candidate"
 }
 
-write_ddns_go_ip_helpers() {
-  install -d -m 0755 /usr/local/sbin
+normalize_ddns_go_listen() {
+  local requested="${1:-}" lan_ip=""
+  lan_ip="$(detect_ddns_go_lan_ipv4 || true)"
+  if [[ -n "$requested" ]]; then
+    if python3 - "$requested" <<'PYEOF_VALIDATE_DDNS_LISTEN'
+import ipaddress
+import sys
 
-  cat > /usr/local/sbin/scbl-public-ipv4 <<'IPV4EOF'
-#!/bin/sh
-set -eu
-for url in https://api.ipify.org https://4.ipw.cn; do
-  ip="$(curl -4 -fsS --max-time 5 "$url" 2>/dev/null || true)"
-  case "$ip" in
-    *.*.*.*) printf '%s\n' "$ip"; exit 0 ;;
-  esac
-done
-ip -4 route get 1.1.1.1 2>/dev/null | awk '{for(i=1;i<=NF;i++) if($i=="src") {print $(i+1); exit}}'
-IPV4EOF
+value = sys.argv[1].strip()
+host, sep, port = value.rpartition(":")
+if not sep or port != "9876":
+    raise SystemExit(1)
+try:
+    ip = ipaddress.ip_address(host)
+except ValueError:
+    raise SystemExit(1)
+allowed = (
+    ip == ipaddress.ip_address("127.0.0.1")
+    or ip in ipaddress.ip_network("10.0.0.0/8")
+    or ip in ipaddress.ip_network("172.16.0.0/12")
+    or ip in ipaddress.ip_network("192.168.0.0/16")
+)
+raise SystemExit(0 if allowed and ip.version == 4 else 1)
+PYEOF_VALIDATE_DDNS_LISTEN
+    then
+      if [[ "$requested" != "127.0.0.1:9876" || -z "$lan_ip" ]]; then
+        printf '%s' "$requested"
+        return 0
+      fi
+    fi
+  fi
+  if [[ -n "$lan_ip" ]]; then
+    printf '%s:9876' "$lan_ip"
+  else
+    printf '%s' "127.0.0.1:9876"
+  fi
+}
 
-  cat > /usr/local/sbin/scbl-public-ipv6 <<'IPV6EOF'
-#!/bin/sh
-set -eu
-iface="${1:-}"
-if [ -z "$iface" ]; then
-  iface="$(ip -6 route show default 2>/dev/null | awk '{for(i=1;i<=NF;i++) if($i=="dev") {print $(i+1); exit}}')"
-fi
-[ -n "$iface" ] || exit 1
-ip -6 -o addr show dev "$iface" scope global 2>/dev/null |
-awk '
-  /temporary|deprecated|tentative|dadfailed/ { next }
-  {
-    split($4, a, "/")
-    ip=tolower(a[1])
-    if (ip ~ /^fe80:/ || ip ~ /^f[cd]/) next
-    if (ip ~ /^[23]/) { print a[1]; exit }
+cleanup_legacy_ddns_go_management() {
+  local legacy_env="$SCBL_ROOT/scbl-ddns.env" stamp backup
+  stamp="$(date +%Y%m%d_%H%M%S)"
+  if [[ -f "$legacy_env" ]] && {
+      [[ -f /etc/systemd/system/scbl-ddns.service ]] ||
+      [[ -f /etc/systemd/system/scbl-ddns.timer ]] ||
+      [[ -f "$SCBL_ROOT/bin/scbl-aliyun-ddns.py" ]];
+    }; then
+    install -d -m 0700 /opt/ddns-go/legacy-backups
+    backup="/opt/ddns-go/legacy-backups/scbl-ddns.env.${stamp}.bak"
+    install -m 0600 "$legacy_env" "$backup"
+    echo "旧版 SCBL DDNS 凭据已只读备份：$backup"
+  fi
+
+  systemctl disable --now \
+    scbl-ddns-go-mode.path \
+    scbl-ddns-go-mode.service \
+    scbl-ddns.timer \
+    scbl-ddns.service >/dev/null 2>&1 || true
+
+  rm -f \
+    /etc/systemd/system/scbl-ddns-go-mode.path \
+    /etc/systemd/system/scbl-ddns-go-mode.service \
+    /etc/systemd/system/scbl-ddns.timer \
+    /etc/systemd/system/scbl-ddns.service \
+    /usr/local/sbin/scbl-ddns-go-apply-mode \
+    /usr/local/sbin/scbl-public-ipv4 \
+    /usr/local/sbin/scbl-public-ipv6 \
+    /etc/scbl-public/ddns-go-mode \
+    "$SCBL_ROOT/bin/scbl-aliyun-ddns.py"
+
+  systemctl daemon-reload
+}
+
+migrate_ddns_go_config_to_native_interface() {
+  local config="${DDNS_GO_CONFIG:-/opt/ddns-go/.ddns_go_config.yaml}"
+  local iface="${SCBL_WAN_IFACE:-}"
+  [[ -f "$config" ]] || return 0
+  if [[ -z "$iface" ]]; then
+    iface="$(ip -o -4 route show to default 2>/dev/null | awk '{print $5; exit}' || true)"
+  fi
+  [[ -n "$iface" ]] || {
+    echo "未检测到默认网卡，保留现有 DDNS-GO 取址配置，请在官方 Web 页面手动选择网卡。"
+    return 0
   }
-'
-IPV6EOF
-  chmod 0755 /usr/local/sbin/scbl-public-ipv4 /usr/local/sbin/scbl-public-ipv6
-}
 
-write_ddns_go_mode_enforcer() {
-  install -d -m 0755 /etc/scbl-public /usr/local/sbin /opt/ddns-go
-  printf '%s\n' "$(normalize_ddns_go_mode "${DDNS_GO_MODE:-ipv6}")" > /etc/scbl-public/ddns-go-mode
-  chmod 0644 /etc/scbl-public/ddns-go-mode
-
-  cat > /usr/local/sbin/scbl-ddns-go-apply-mode <<'APPLYEOF'
-#!/usr/bin/env python3
+  python3 - "$config" "$iface" <<'PYEOF_MIGRATE_DDNS_NATIVE'
 import copy
 import datetime
 import os
 import shutil
-import subprocess
 import sys
 from pathlib import Path
 
 try:
     import yaml
 except Exception as exc:
-    print(f"python3-yaml 不可用: {exc}", file=sys.stderr)
-    sys.exit(1)
+    print(f"python3-yaml 不可用，跳过 DDNS-GO 配置迁移: {exc}", file=sys.stderr)
+    raise SystemExit(0)
 
-CONFIG = Path(os.environ.get("DDNS_GO_CONFIG", "/opt/ddns-go/.ddns_go_config.yaml"))
-MODE_FILE = Path("/etc/scbl-public/ddns-go-mode")
-MODE = MODE_FILE.read_text(encoding="utf-8").strip().lower() if MODE_FILE.exists() else "manual"
-if MODE not in {"ipv6", "ipv4", "dual", "manual"}:
-    MODE = "manual"
-if MODE == "manual" or not CONFIG.exists():
-    sys.exit(0)
+path = Path(sys.argv[1])
+iface = sys.argv[2].strip()
+try:
+    data = yaml.safe_load(path.read_text(encoding="utf-8"))
+except Exception as exc:
+    print(f"读取 DDNS-GO 配置失败，保持原文件不变: {exc}", file=sys.stderr)
+    raise SystemExit(0)
+if not isinstance(data, dict):
+    raise SystemExit(0)
+
+before = copy.deepcopy(data)
 
 
 def find_key(mapping, wanted):
-    for key in mapping.keys():
+    for key in mapping:
         if str(key).lower() == wanted.lower():
             return key
     return wanted.lower()
@@ -711,133 +547,135 @@ def find_key(mapping, wanted):
 def get_map(mapping, wanted):
     key = find_key(mapping, wanted)
     value = mapping.get(key)
-    if not isinstance(value, dict):
-        value = {}
-        mapping[key] = value
-    return value
+    return value if isinstance(value, dict) else None
 
 
-def get_list(mapping, wanted):
+def get_value(mapping, wanted, default=""):
     key = find_key(mapping, wanted)
-    value = mapping.get(key)
-    return value if isinstance(value, list) else []
+    return mapping.get(key, default)
 
 
 def set_value(mapping, wanted, value):
     mapping[find_key(mapping, wanted)] = value
 
 
-try:
-    data = yaml.safe_load(CONFIG.read_text(encoding="utf-8"))
-except Exception as exc:
-    print(f"读取 DDNS-GO 配置失败: {exc}", file=sys.stderr)
-    sys.exit(1)
-if not isinstance(data, dict):
-    sys.exit(0)
+dnsconf = get_value(data, "dnsconf", [])
+if isinstance(dnsconf, list):
+    for item in dnsconf:
+        if not isinstance(item, dict):
+            continue
+        for family, helper in (
+            ("ipv4", "/usr/local/sbin/scbl-public-ipv4"),
+            ("ipv6", "/usr/local/sbin/scbl-public-ipv6"),
+        ):
+            section = get_map(item, family)
+            if section is None:
+                continue
+            gettype = str(get_value(section, "gettype", "") or "").strip().lower()
+            cmd = str(get_value(section, "cmd", "") or "").strip()
+            if gettype == "cmd" and helper in cmd:
+                set_value(section, "gettype", "netInterface")
+                set_value(section, "netinterface", iface)
+                set_value(section, "cmd", "")
 
-before = copy.deepcopy(data)
-dnsconf = get_list(data, "dnsconf")
-for item in dnsconf:
-    if not isinstance(item, dict):
-        continue
-    ipv4 = get_map(item, "ipv4")
-    ipv6 = get_map(item, "ipv6")
-    domains4 = get_list(ipv4, "domains")
-    domains6 = get_list(ipv6, "domains")
-
-    enable4 = MODE in {"ipv4", "dual"}
-    enable6 = MODE in {"ipv6", "dual"}
-    set_value(ipv4, "enable", enable4)
-    set_value(ipv6, "enable", enable6)
-
-    if enable4:
-        set_value(ipv4, "gettype", "cmd")
-        set_value(ipv4, "cmd", "/usr/local/sbin/scbl-public-ipv4")
-        if not domains4 and domains6:
-            set_value(ipv4, "domains", list(domains6))
-    if enable6:
-        set_value(ipv6, "gettype", "cmd")
-        set_value(ipv6, "cmd", "/usr/local/sbin/scbl-public-ipv6")
-        if not domains6 and domains4:
-            set_value(ipv6, "domains", list(domains4))
-
-set_value(data, "notallowwanaccess", True)
 if data == before:
-    sys.exit(0)
+    print("DDNS-GO 官方配置无需迁移。")
+    raise SystemExit(0)
 
 stamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
-backup = CONFIG.with_name(CONFIG.name + f".{stamp}.bak")
-shutil.copy2(CONFIG, backup)
-tmp = CONFIG.with_suffix(CONFIG.suffix + ".tmp")
+backup = path.with_name(path.name + f".{stamp}.scbl-native-migration.bak")
+shutil.copy2(path, backup)
+tmp = path.with_suffix(path.suffix + ".tmp")
 tmp.write_text(yaml.safe_dump(data, allow_unicode=True, sort_keys=False), encoding="utf-8")
 os.chmod(tmp, 0o600)
-os.replace(tmp, CONFIG)
-print(f"已应用 SCBL DDNS-GO 模式 {MODE}，备份：{backup}")
-try:
-    subprocess.run(["systemctl", "try-restart", "ddns-go.service"], check=False, timeout=15)
-except Exception:
-    pass
-APPLYEOF
-  chmod 0755 /usr/local/sbin/scbl-ddns-go-apply-mode
+os.replace(tmp, path)
+print(f"已把 SCBL 自建命令取址迁移为 DDNS-GO 原生网卡取址，原配置备份：{backup}")
+PYEOF_MIGRATE_DDNS_NATIVE
+}
 
-  cat > /etc/systemd/system/scbl-ddns-go-mode.service <<UNITEOF
-[Unit]
-Description=Apply SCBL IPv4/IPv6 mode to DDNS-GO configuration
-After=ddns-go.service
-
-[Service]
-Type=oneshot
-Environment=DDNS_GO_CONFIG=${DDNS_GO_CONFIG:-/opt/ddns-go/.ddns_go_config.yaml}
-ExecStart=/usr/local/sbin/scbl-ddns-go-apply-mode
-UNITEOF
-
-  cat > /etc/systemd/system/scbl-ddns-go-mode.path <<UNITEOF
-[Unit]
-Description=Watch DDNS-GO configuration and enforce the selected SCBL address mode
-
-[Path]
-PathChanged=${DDNS_GO_CONFIG:-/opt/ddns-go/.ddns_go_config.yaml}
-Unit=scbl-ddns-go-mode.service
-
-[Install]
-WantedBy=multi-user.target
-UNITEOF
+write_ddns_go_service() {
+  DDNS_GO_LISTEN="$(normalize_ddns_go_listen "${DDNS_GO_LISTEN:-$DEFAULT_DDNS_GO_LISTEN}")"
+  write_ddns_go_service
   systemctl daemon-reload
-  systemctl enable --now scbl-ddns-go-mode.path >/dev/null 2>&1 || true
-  /usr/local/sbin/scbl-ddns-go-apply-mode || true
+}
+
+run_server_tool_migrations() {
+  local marker="$SCBL_ROOT/.migrations/server-tool-v0.6.9-ddns-go-native"
+  ddns_go_installed || return 0
+  [[ -f "$marker" ]] && return 0
+
+  echo "正在执行 Server Tool v0.6.9 DDNS-GO 原生化迁移..."
+  cleanup_legacy_ddns_go_management
+  migrate_ddns_go_config_to_native_interface
+  write_ddns_go_service
+  write_ddns_go_guide
+  systemctl enable --now ddns-go.service >/dev/null 2>&1 || true
+  systemctl restart ddns-go.service 2>/dev/null || true
+  backup_env
+  write_env
+  install -d -m 0755 "$(dirname "$marker")"
+  printf 'completed_at=%s
+listen=%s
+' "$(date -u +'%Y-%m-%dT%H:%M:%SZ')" "$DDNS_GO_LISTEN" > "$marker"
+  chmod 0644 "$marker"
+  echo "DDNS-GO 原生化迁移完成，Web 管理地址：http://${DDNS_GO_LISTEN%:9876}:9876"
 }
 
 write_ddns_go_guide() {
-  local mode_label iface ipv4 ipv6
-  mode_label="$(ddns_go_mode_label "${DDNS_GO_MODE:-ipv6}")"
-  iface="$(ip -6 route show default 2>/dev/null | awk '{for(i=1;i<=NF;i++) if($i=="dev") {print $(i+1); exit}}' || true)"
-  ipv4="$(/usr/local/sbin/scbl-public-ipv4 2>/dev/null || true)"
-  ipv6="$(/usr/local/sbin/scbl-public-ipv6 2>/dev/null || true)"
+  local listen_host="${DDNS_GO_LISTEN%:9876}"
   cat > /opt/ddns-go/SCBL_DDNS_GO_SETUP.txt <<EOF
 SCBL DDNS-GO 配置说明
 
-当前模式：$mode_label
-管理监听：${DDNS_GO_LISTEN:-127.0.0.1:9876}
+Web 管理监听：$DDNS_GO_LISTEN
 配置文件：${DDNS_GO_CONFIG:-/opt/ddns-go/.ddns_go_config.yaml}
-公网网卡：${iface:-未检测到}
-检测到 IPv4：${ipv4:-未检测到}
-检测到 IPv6：${ipv6:-未检测到}
+推荐公网网卡：${SCBL_WAN_IFACE:-未检测到}
 
-安全访问方式（在管理电脑运行）：
-ssh -L 9876:127.0.0.1:9876 <Ubuntu用户名>@服务器IP
-随后浏览器打开：http://127.0.0.1:9876
+浏览器访问：http://${listen_host}:9876
 
-首次进入页面：
-1. 选择你的 DNS 服务商并填写密钥。
-2. 填写需要更新的域名。
-3. 保持“禁止从公网访问”开启。
-4. 保存。脚本会自动按照当前模式启用/禁用 A、AAAA，并将取址方式改为：
-   IPv4：/usr/local/sbin/scbl-public-ipv4
-   IPv6：/usr/local/sbin/scbl-public-ipv6
+请完全使用 DDNS-GO 官方 Web 页面配置：
+1. 选择 DNS 服务商并填写密钥。
+2. 配置 A / AAAA 记录和域名。
+3. 为 IPv4、IPv6 分别选择“网卡”取址，并选择实际公网网卡。
+4. 多个 IPv6 地址时，在官方页面使用 IPv6 匹配规则明确选择稳定地址。
+5. 保持“禁止从公网访问”开启。
 
-修改模式：重新运行 install_public_server.sh，进入“动态域名 DDNS-GO 管理”。
+SCBL 仅管理 DDNS-GO 的安装、更新、启动、状态、密码重置和卸载；
+不会再强制 IPv4 / IPv6 模式，也不会改写你在官方页面保存的服务商和域名配置。
 EOF
   chmod 0600 /opt/ddns-go/SCBL_DDNS_GO_SETUP.txt
+}
+
+reset_ddns_go_password() {
+  local first="" second=""
+  [[ -x /opt/ddns-go/ddns-go ]] || {
+    echo "DDNS-GO 尚未安装。"
+    return 1
+  }
+  if ! is_interactive; then
+    echo "密码重置需要交互式终端。"
+    return 1
+  fi
+  read -r -s -p "请输入 DDNS-GO 新密码: " first || true
+  echo
+  read -r -s -p "请再次输入新密码: " second || true
+  echo
+  [[ -n "$first" ]] || {
+    echo "密码不能为空。"
+    return 1
+  }
+  [[ "$first" == "$second" ]] || {
+    echo "两次密码不一致。"
+    return 1
+  }
+  systemctl stop ddns-go.service 2>/dev/null || true
+  if /opt/ddns-go/ddns-go -resetPassword "$first" -c "${DDNS_GO_CONFIG:-/opt/ddns-go/.ddns_go_config.yaml}"; then
+    systemctl start ddns-go.service 2>/dev/null || true
+    echo "DDNS-GO 密码已重置。"
+  else
+    systemctl start ddns-go.service 2>/dev/null || true
+    echo "DDNS-GO 密码重置失败。"
+    return 1
+  fi
 }
 
 install_or_configure_ddns_go_menu() {
@@ -845,61 +683,54 @@ install_or_configure_ddns_go_menu() {
   set_defaults
   while true; do
     echo
-    echo "DDNS-GO 管理"
+    echo "DDNS-GO 官方管理"
     echo "当前安装状态：$(ddns_go_installed && echo 已安装 || echo 未安装)"
-    echo "当前记录模式：$(ddns_go_mode_label "${DDNS_GO_MODE:-ipv6}")"
+    echo "Web 管理地址：http://${DDNS_GO_LISTEN%:9876}:9876"
     echo "1. 安装 / 更新 DDNS-GO"
-    echo "2. 修改 IPv4 / IPv6 记录模式"
-    echo "3. 立即应用模式并重启 DDNS-GO"
-    echo "4. 查看状态与最近日志"
-    echo "5. 显示 Web 管理访问方法"
-    echo "6. 查看当前服务器公网 IPv4 / IPv6"
-    echo "7. 旧版内置阿里云 A 记录配置（兼容项）"
-    echo "8. 卸载 DDNS-GO（不删除配置备份）"
+    echo "2. 启动 / 重启 DDNS-GO"
+    echo "3. 查看状态与最近日志"
+    echo "4. 显示 Web 管理地址和配置说明"
+    echo "5. 重置 Web 登录密码"
+    echo "6. 卸载 DDNS-GO（保留配置和备份）"
     echo "0. 返回"
     read -e -r -p "请选择: " c || true
     case "$c" in
       1)
-        prompt_ddns_go_mode
         DDNS_GO_INSTALL="y"
         install_ddns_go_best_effort
-        backup_env; write_env
+        backup_env
+        write_env
         ;;
       2)
-        prompt_ddns_go_mode
-        write_ddns_go_mode_enforcer
+        cleanup_legacy_ddns_go_management
+        migrate_ddns_go_config_to_native_interface
+        write_ddns_go_service
         write_ddns_go_guide
-        backup_env; write_env
-        ;;
-      3)
-        write_ddns_go_mode_enforcer
+        systemctl enable --now ddns-go.service 2>/dev/null || true
         systemctl restart ddns-go.service 2>/dev/null || true
         ;;
-      4)
+      3)
         systemctl --no-pager --full status ddns-go.service 2>/dev/null || true
         journalctl -u ddns-go.service -n 80 --no-pager 2>/dev/null || true
         ;;
-      5)
-        echo "在管理电脑执行：ssh -L 9876:127.0.0.1:9876 <Ubuntu用户名>@服务器IP"
-        echo "浏览器打开：http://127.0.0.1:9876"
+      4)
+        echo "浏览器打开：http://${DDNS_GO_LISTEN%:9876}:9876"
         echo "说明文件：/opt/ddns-go/SCBL_DDNS_GO_SETUP.txt"
         ;;
+      5)
+        reset_ddns_go_password || true
+        ;;
       6)
-        echo "IPv4：$(/usr/local/sbin/scbl-public-ipv4 2>/dev/null || echo 未检测到)"
-        echo "IPv6：$(/usr/local/sbin/scbl-public-ipv6 2>/dev/null || echo 未检测到)"
-        ;;
-      7)
-        configure_aliyun_ddns_inline || true
-        ;;
-      8)
-        systemctl disable --now ddns-go.service scbl-ddns-go-mode.path 2>/dev/null || true
-        rm -f /etc/systemd/system/ddns-go.service /etc/systemd/system/scbl-ddns-go-mode.service /etc/systemd/system/scbl-ddns-go-mode.path
+        cleanup_legacy_ddns_go_management
+        systemctl disable --now ddns-go.service 2>/dev/null || true
+        rm -f /etc/systemd/system/ddns-go.service
         systemctl daemon-reload
         if [[ -f "${DDNS_GO_CONFIG:-/opt/ddns-go/.ddns_go_config.yaml}" ]]; then
-          cp -a "${DDNS_GO_CONFIG:-/opt/ddns-go/.ddns_go_config.yaml}" "${DDNS_GO_CONFIG:-/opt/ddns-go/.ddns_go_config.yaml}.$(date +%Y%m%d_%H%M%S).uninstall.bak"
+          cp -a "${DDNS_GO_CONFIG:-/opt/ddns-go/.ddns_go_config.yaml}" \
+            "${DDNS_GO_CONFIG:-/opt/ddns-go/.ddns_go_config.yaml}.$(date +%Y%m%d_%H%M%S).uninstall.bak"
         fi
         rm -f /opt/ddns-go/ddns-go
-        echo "已卸载 DDNS-GO 程序；配置与备份仍保留在 /opt/ddns-go。"
+        echo "已卸载 DDNS-GO 程序；官方配置与备份仍保留在 /opt/ddns-go。"
         ;;
       0) return 0 ;;
       *) echo "无效选择。" ;;
@@ -986,8 +817,7 @@ SCBL_5TH_REPOSITORY="${SCBL_5TH_REPOSITORY:-$DEFAULT_5TH_REPOSITORY}"
   SCBL_MIN_CLIENT_VERSION="${SCBL_MIN_CLIENT_VERSION:-$DEFAULT_SCBL_MIN_CLIENT_VERSION}"
   SCBL_HEARTBEAT_TTL="${SCBL_HEARTBEAT_TTL:-$DEFAULT_SCBL_HEARTBEAT_TTL}"
   DDNS_GO_INSTALL="${DDNS_GO_INSTALL:-$DEFAULT_DDNS_GO_INSTALL}"
-  DDNS_GO_MODE="$(normalize_ddns_go_mode "${DDNS_GO_MODE:-$DEFAULT_DDNS_GO_MODE}")"
-  DDNS_GO_LISTEN="${DDNS_GO_LISTEN:-$DEFAULT_DDNS_GO_LISTEN}"
+  DDNS_GO_LISTEN="$(normalize_ddns_go_listen "${DDNS_GO_LISTEN:-$DEFAULT_DDNS_GO_LISTEN}")"
   DDNS_GO_INTERVAL="${DDNS_GO_INTERVAL:-$DEFAULT_DDNS_GO_INTERVAL}"
   DDNS_GO_CONFIG="${DDNS_GO_CONFIG:-$DEFAULT_DDNS_GO_CONFIG}"
   DDNS_GO_VERSION="${DDNS_GO_VERSION:-$DEFAULT_DDNS_GO_VERSION}"
@@ -1036,7 +866,6 @@ SCBL_5TH_SOURCE_MODE=$(quote "$SCBL_5TH_SOURCE_MODE")
 DEDICATED_URL=$(quote "$DEDICATED_URL")
 DEDICATED_SHA256_URL=$(quote "$DEDICATED_SHA256_URL")
 DDNS_GO_INSTALL=$(quote "${DDNS_GO_INSTALL:-n}")
-DDNS_GO_MODE=$(quote "${DDNS_GO_MODE:-ipv6}")
 DDNS_GO_LISTEN=$(quote "${DDNS_GO_LISTEN:-127.0.0.1:9876}")
 DDNS_GO_INTERVAL=$(quote "${DDNS_GO_INTERVAL:-300}")
 DDNS_GO_CONFIG=$(quote "${DDNS_GO_CONFIG:-/opt/ddns-go/.ddns_go_config.yaml}")
@@ -1091,7 +920,7 @@ install_ddns_go_best_effort() {
   DDNS_GO_CONFIG="${DDNS_GO_CONFIG:-$DEFAULT_DDNS_GO_CONFIG}"
   DDNS_GO_LISTEN="${DDNS_GO_LISTEN:-$DEFAULT_DDNS_GO_LISTEN}"
   DDNS_GO_INTERVAL="${DDNS_GO_INTERVAL:-$DEFAULT_DDNS_GO_INTERVAL}"
-  DDNS_GO_MODE="$(normalize_ddns_go_mode "${DDNS_GO_MODE:-$DEFAULT_DDNS_GO_MODE}")"
+  DDNS_GO_LISTEN="$(normalize_ddns_go_listen "${DDNS_GO_LISTEN:-$DEFAULT_DDNS_GO_LISTEN}")"
 
   for candidate in "${DDNS_GO_CONFIG}" /root/.ddns_go_config.yaml /etc/ddns-go/config.yaml /opt/ddns-go/config.yaml; do
     if [[ -f "$candidate" ]]; then old_config="$candidate"; break; fi
@@ -1142,8 +971,8 @@ install_ddns_go_best_effort() {
     echo "已迁移原DDNS-GO配置：$old_config → $DDNS_GO_CONFIG"
   fi
 
-  write_ddns_go_ip_helpers
-
+  cleanup_legacy_ddns_go_management
+  migrate_ddns_go_config_to_native_interface
   cat > /etc/systemd/system/ddns-go.service <<UNITEOF
 [Unit]
 Description=DDNS-GO for SCBL Public Server
@@ -1165,7 +994,6 @@ ProtectHome=true
 WantedBy=multi-user.target
 UNITEOF
 
-  write_ddns_go_mode_enforcer
   systemctl daemon-reload
   systemctl enable --now ddns-go.service >/dev/null 2>&1 || true
   systemctl restart ddns-go.service || true
@@ -1173,11 +1001,9 @@ UNITEOF
   DDNS_GO_INSTALL="y"
 
   echo "DDNS-GO 已安装/启动。"
-  echo "记录模式：$(ddns_go_mode_label "$DDNS_GO_MODE")"
-  echo "Web 管理仅监听：$DDNS_GO_LISTEN（未向公网开放9876端口）"
-  echo "管理电脑执行：ssh -L 9876:127.0.0.1:9876 <Ubuntu用户名>@服务器IP"
-  echo "浏览器打开：http://127.0.0.1:9876"
-  echo "首次保存DNS服务商配置后，脚本会自动应用所选IPv4/IPv6模式。"
+  echo "Web 管理仅监听：$DDNS_GO_LISTEN"
+  echo "浏览器打开：http://${DDNS_GO_LISTEN%:9876}:9876"
+  echo "A / AAAA、网卡和 IPv6 匹配规则请完全在 DDNS-GO 官方页面配置。"
 }
 
 installed_easytier_matches() {
@@ -3517,7 +3343,7 @@ print_summary() {
   SCBL 控制平面：http://$SCBL_SERVER_IP:$SCBL_CONTROL_PORT（仅虚拟网访问）
   最低客户端版本：v$SCBL_MIN_CLIENT_VERSION
   客户端心跳有效期：${SCBL_HEARTBEAT_TTL}秒
-  DDNS-GO：$(ddns_go_installed && echo "已安装，$(ddns_go_mode_label "${DDNS_GO_MODE:-ipv6}")，仅本机9876管理" || echo "未安装")
+  DDNS-GO：$(ddns_go_installed && echo "已安装，Web http://${DDNS_GO_LISTEN%:9876}:9876" || echo "未安装")
 
 客户端配置样例：$SCBL_ROOT/client_launcher_settings.json
 客户端更新目录：$SCBL_ROOT/client-updates
@@ -3604,12 +3430,11 @@ prompt_value SCBL_MIN_CLIENT_VERSION "控制平面允许的最低客户端版本
   echo
   if ddns_go_installed; then
     DDNS_GO_INSTALL="y"
-    echo "检测到DDNS-GO已安装，将保留配置并规范化为安全本机监听。"
+    echo "检测到 DDNS-GO 已安装，将保留官方配置并绑定到安全的局域网私有 IPv4。"
     install_ddns_go_best_effort || echo "警告：DDNS-GO更新失败，现有SCBL服务不受影响。"
   else
     prompt_yes_no DDNS_GO_INSTALL "是否同时安装 DDNS-GO 动态域名服务" "${DDNS_GO_INSTALL:-y}"
     if [[ "$DDNS_GO_INSTALL" == "y" ]]; then
-      prompt_ddns_go_mode
       install_ddns_go_best_effort || echo "警告：DDNS-GO安装失败，不影响SCBL服务端运行。"
     fi
   fi
@@ -4039,7 +3864,7 @@ main_menu() {
 4. 重启服务
 5. 查看日志
 6. 修复防火墙和转发规则
-7. 动态域名 DDNS-GO 管理（可选IPv6 / IPv4 / 双栈）
+7. 动态域名 DDNS-GO 官方管理
 8. 卸载服务端
 9. 更新 SCBL 专用 5th Echelon 游戏服务端
 10. 数据库备份 / 恢复 / 检查
@@ -4072,6 +3897,12 @@ MENU
 }
 
 install_management_command
+
+if [[ "${1:-}" != "--auto-publish-client" ]]; then
+  load_env_if_exists
+  set_defaults
+  run_server_tool_migrations || true
+fi
 
 if [[ "${1:-}" == "--auto-publish-client" ]]; then
   publish_client_update_package_auto "${2:-}"

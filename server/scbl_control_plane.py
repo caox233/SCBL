@@ -601,7 +601,7 @@ def _metrics_loop() -> None:
 
 
 class Handler(BaseHTTPRequestHandler):
-    server_version = "SCBLControlPlane/0.6.10"
+    server_version = f"SCBLControlPlane/{SERVER_TOOL_VERSION}"
     protocol_version = "HTTP/1.1"
 
     def log_message(self, fmt: str, *args: Any) -> None:

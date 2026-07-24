@@ -1,0 +1,118 @@
+name: Validate Windows client changes
+
+on:
+  pull_request:
+    paths:
+      - 'client/**'
+      - 'THIRD_PARTY_LICENSES/**'
+      - 'VERSION_CLIENT'
+      - '.github/workflows/build-client.yml'
+      - '.github/workflows/client-release.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: scbl-client-validate-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  validate:
+    runs-on: windows-2022
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 2
+
+      - name: Detect changed components
+        id: changes
+        shell: pwsh
+        run: |
+          $base = '${{ github.event.pull_request.base.sha }}'
+          if ([string]::IsNullOrWhiteSpace($base)) { $base = 'HEAD~1' }
+          $files = @(git diff --name-only $base HEAD | ForEach-Object { $_.Replace('\','/') })
+          $launcher = [bool]($files | Where-Object { $_ -match '^client/ScblPublicLauncher/' -or $_ -eq 'client/SCBL.Version.props' })
+          $updater = [bool]($files | Where-Object { $_ -match '^client/SCBL\.Updater/' -or $_ -eq 'client/SCBL.Version.props' })
+          $router = [bool]($files | Where-Object { $_ -match '^client/scbl-process-router/' -or $_ -eq 'client/SCBL.Version.props' })
+          $scripts = [bool]($files | Where-Object { $_ -match '\.(ps1|yml|yaml)$' })
+          "launcher=$($launcher.ToString().ToLowerInvariant())" >> $env:GITHUB_OUTPUT
+          "updater=$($updater.ToString().ToLowerInvariant())" >> $env:GITHUB_OUTPUT
+          "router=$($router.ToString().ToLowerInvariant())" >> $env:GITHUB_OUTPUT
+          "scripts=$($scripts.ToString().ToLowerInvariant())" >> $env:GITHUB_OUTPUT
+          $files | ForEach-Object { Write-Host "changed: $_" }
+
+      - name: Verify source versions
+        shell: pwsh
+        run: |
+          $version = (Get-Content .\VERSION_CLIENT -Raw).Trim()
+          if ($version -notmatch '^\d+\.\d+\.\d+$') { throw 'VERSION_CLIENT is invalid.' }
+          $props = Get-Content .\client\SCBL.Version.props -Raw
+          if ($props -notmatch 'ReadAllText' -or $props -notmatch 'VERSION_CLIENT') {
+            throw 'Client projects must read VERSION_CLIENT through SCBL.Version.props.'
+          }
+
+      - name: Parse PowerShell build scripts
+        if: steps.changes.outputs.scripts == 'true' || github.event_name == 'workflow_dispatch'
+        shell: pwsh
+        run: |
+          $scripts = @(
+            '.\client\build_all_windows.ps1',
+            '.\client\create_client_full_package.ps1',
+            '.\client\easytier\download_easytier_windows.ps1',
+            '.\client\scbl-process-router\build_windows.ps1',
+            '.\client\ScblPublicLauncher\build_publish.ps1',
+            '.\client\SCBL.Updater\build_windows.ps1'
+          )
+          foreach ($script in $scripts) {
+            $tokens = $null; $errors = $null
+            [void][System.Management.Automation.Language.Parser]::ParseFile((Resolve-Path $script), [ref]$tokens, [ref]$errors)
+            if ($errors.Count -gt 0) { throw "$script parse error: $($errors[0].Message)" }
+          }
+
+      - uses: actions/setup-dotnet@v4
+        if: steps.changes.outputs.launcher == 'true' || steps.changes.outputs.updater == 'true' || github.event_name == 'workflow_dispatch'
+        with:
+          dotnet-version: '8.0.x'
+
+      - name: Cache NuGet packages
+        if: steps.changes.outputs.launcher == 'true' || steps.changes.outputs.updater == 'true' || github.event_name == 'workflow_dispatch'
+        uses: actions/cache@v4
+        with:
+          path: ~/.nuget/packages
+          key: nuget-${{ runner.os }}-${{ hashFiles('client/**/*.csproj', 'client/**/*.props', 'client/**/*.targets') }}
+          restore-keys: nuget-${{ runner.os }}-
+
+      - name: Build launcher without packaging
+        if: steps.changes.outputs.launcher == 'true' || github.event_name == 'workflow_dispatch'
+        shell: pwsh
+        run: |
+          dotnet restore .\client\ScblPublicLauncher\SplinterCellCNLauncher.csproj --runtime win-x86
+          dotnet build .\client\ScblPublicLauncher\SplinterCellCNLauncher.csproj -c Release -r win-x86 --no-restore --nologo
+
+      - name: Build updater without packaging
+        if: steps.changes.outputs.updater == 'true' || github.event_name == 'workflow_dispatch'
+        shell: pwsh
+        run: |
+          dotnet restore .\client\SCBL.Updater\SCBL.Updater.csproj --runtime win-x86
+          dotnet build .\client\SCBL.Updater\SCBL.Updater.csproj -c Release -r win-x86 --no-restore --nologo
+
+      - uses: actions/setup-go@v5
+        if: steps.changes.outputs.router == 'true' || github.event_name == 'workflow_dispatch'
+        with:
+          go-version: '1.23.2'
+          cache: true
+          cache-dependency-path: client/scbl-process-router/go.sum
+
+      - name: Test Route Guard without client packaging
+        if: steps.changes.outputs.router == 'true' || github.event_name == 'workflow_dispatch'
+        working-directory: client/scbl-process-router
+        shell: pwsh
+        run: |
+          go mod download
+          if ((gofmt -l .).Length -gt 0) { throw 'gofmt found unformatted files.' }
+          $env:GOOS = 'windows'; $env:GOARCH = 'amd64'
+          go vet .
+          go test .
+          go build -mod=readonly -trimpath -o "$env:RUNNER_TEMP\scbl-process-router.exe" .

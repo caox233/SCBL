@@ -1,0 +1,119 @@
+name: Validate source
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: scbl-validate-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  linux-validation:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 2
+
+      - name: Detect Route Guard changes
+        id: changes
+        shell: bash
+        run: |
+          set -euo pipefail
+          base='${{ github.event.pull_request.base.sha }}'
+          [[ -n "$base" ]] || base='${{ github.event.before }}'
+          if [[ -z "$base" || "$base" =~ ^0+$ ]] || ! git cat-file -e "$base^{commit}" 2>/dev/null; then
+            echo 'router=true' >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          if git diff --name-only "$base" "$GITHUB_SHA" | grep -Eq '^(client/scbl-process-router/|\.github/workflows/validate\.yml$)'; then
+            echo 'router=true' >> "$GITHUB_OUTPUT"
+          else
+            echo 'router=false' >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Validate independent component versions
+        shell: bash
+        run: |
+          set -euo pipefail
+          client_version="$(tr -d '\r\n ' < VERSION_CLIENT)"
+          server_version="$(tr -d '\r\n ' < VERSION_SERVER_TOOL)"
+          [[ "$client_version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]
+          [[ "$server_version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]
+          grep -Fq 'VERSION_CLIENT' client/SCBL.Version.props
+          grep -Fq "routerVersion         = \"${client_version}\"" client/scbl-process-router/main.go
+          grep -Fq 'read_server_tool_version' server/install_public_server.sh
+          grep -Fq 'SCBLControlPlane/{SERVER_TOOL_VERSION}' server/scbl_control_plane.py
+          python3 - "$client_version" "$server_version" <<'PY'
+          import json, sys
+          client_version, server_version = sys.argv[1:3]
+          data = json.load(open('COMPONENT_VERSIONS.json', encoding='utf-8'))
+          assert data['clientVersion'] == client_version
+          assert data['serverToolVersion'] == server_version
+          assert data['controlApiVersion'] == 1
+          assert data['dedicatedServer']['repository'] == 'caox233/5th-echelon'
+          assert data['dedicatedServer']['releaseTag'] == 'scbl-public-stable-latest'
+          PY
+          ! grep -RIl $'\r' server .github docs scripts --include='*.sh' --include='*.py' --include='*.yml' --include='*.yaml'
+
+      - name: Validate external Hooks ownership and embedded files
+        shell: bash
+        run: |
+          set -euo pipefail
+          test ! -e client/hooks-source
+          test ! -f client/ScblPublicLauncher/EmbeddedFiles/uplay_r1_loader.dll
+          manifest=client/ScblPublicLauncher/EmbeddedFiles/SCBL_EMBEDDED_SHA256.txt
+          test -f "$manifest"
+          grep -Eq '^[0-9a-fA-F]{64}[[:space:]]+\*?uplay_r1_loader\.dll$' "$manifest"
+          grep -Ev 'uplay_r1_loader\.dll$' "$manifest" | (cd client/ScblPublicLauncher/EmbeddedFiles && sha256sum -c -)
+
+      - name: Validate server shell, Python and release routing
+        shell: bash
+        run: |
+          set -euo pipefail
+          bash -n server/install_public_server.sh
+          bash -n scripts/install-server.sh
+          bash -n scripts/maintenance/prune_component_releases.sh
+          python3 - <<'PY'
+          from pathlib import Path
+          import re
+          manager = Path('server/install_public_server.sh')
+          for path in (manager, Path('scripts/install-server.sh')):
+              text = path.read_text(encoding='utf-8')
+              blocks = re.findall(r"<<'?(PYEOF_[A-Za-z0-9_]+)'?\n(.*?)\n\1", text, re.S)
+              if path == manager and not blocks:
+                  raise SystemExit(f'{path}: no embedded Python heredocs found')
+              for marker, source in blocks:
+                  compile(source, f'{path}:{marker}', 'exec')
+          PY
+          python3 -m py_compile server/scbl_control_plane.py server/test_control_plane.py server/test_ddns_go_native.py server/test_release_manifest_routing.py
+          python3 server/test_control_plane.py
+          python3 server/test_ddns_go_native.py
+          python3 server/test_release_manifest_routing.py
+
+      - name: Set up Go
+        if: steps.changes.outputs.router == 'true'
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.23.2'
+          cache: true
+          cache-dependency-path: client/scbl-process-router/go.sum
+
+      - name: Validate Go Route Guard
+        if: steps.changes.outputs.router == 'true'
+        working-directory: client/scbl-process-router
+        shell: bash
+        run: |
+          set -euo pipefail
+          go mod download
+          test -z "$(gofmt -l .)"
+          GOOS=windows GOARCH=amd64 go vet .
+          GOOS=windows GOARCH=amd64 go test .
+          GOOS=windows GOARCH=amd64 go build -mod=readonly -trimpath -o /tmp/scbl-process-router.exe .
+          test -s /tmp/scbl-process-router.exe

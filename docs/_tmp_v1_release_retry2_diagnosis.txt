@@ -1,0 +1,31 @@
+run_id=30084310062
+{"conclusion":"failure","jobs":[{"completedAt":"2026-07-24T09:55:11Z","conclusion":"failure","databaseId":89452799405,"name":"apply","startedAt":"2026-07-24T09:55:05Z","status":"completed","steps":[{"completedAt":"2026-07-24T09:55:07Z","conclusion":"success","name":"Set up job","number":1,"startedAt":"2026-07-24T09:55:06Z","status":"completed"},{"completedAt":"2026-07-24T09:55:08Z","conclusion":"success","name":"Run actions/checkout@v4","number":2,"startedAt":"2026-07-24T09:55:07Z","status":"completed"},{"completedAt":"2026-07-24T09:55:09Z","conclusion":"failure","name":"Run corrected formal release patch","number":3,"startedAt":"2026-07-24T09:55:08Z","status":"completed"},{"completedAt":"2026-07-24T09:55:09Z","conclusion":"success","name":"Post Run actions/checkout@v4","number":6,"startedAt":"2026-07-24T09:55:09Z","status":"completed"},{"completedAt":"2026-07-24T09:55:09Z","conclusion":"success","name":"Complete job","number":7,"startedAt":"2026-07-24T09:55:09Z","status":"completed"}],"url":"https://github.com/caox233/SCBL/actions/runs/30084310062/job/89452799405"}],"status":"completed","url":"https://github.com/caox233/SCBL/actions/runs/30084310062"}
+--- failed log ---
+apply	Run corrected formal release patch	﻿2026-07-24T09:55:08.0377277Z ##[group]Run set -euo pipefail
+apply	Run corrected formal release patch	2026-07-24T09:55:08.0378013Z ^[[36;1mset -euo pipefail^[[0m
+apply	Run corrected formal release patch	2026-07-24T09:55:08.0378557Z ^[[36;1mpython3 - <<'PY'^[[0m
+apply	Run corrected formal release patch	2026-07-24T09:55:08.0379476Z ^[[36;1mfrom pathlib import Path^[[0m
+apply	Run corrected formal release patch	2026-07-24T09:55:08.0380394Z ^[[36;1mtext = Path('.github/workflows/apply-v1-release.yml').read_text(encoding='utf-8')^[[0m
+apply	Run corrected formal release patch	2026-07-24T09:55:08.0381605Z ^[[36;1mmarker = '      - name: Apply formal v1 release changes\n        shell: bash\n        run: |\n'^[[0m
+apply	Run corrected formal release patch	2026-07-24T09:55:08.0382557Z ^[[36;1mstart = text.index(marker) + len(marker)^[[0m
+apply	Run corrected formal release patch	2026-07-24T09:55:08.0383261Z ^[[36;1mlines = text[start:].splitlines()^[[0m
+apply	Run corrected formal release patch	2026-07-24T09:55:08.0384183Z ^[[36;1mscript = '\n'.join(line[10:] if line.startswith('          ') else line for line in lines) + '\n'^[[0m
+apply	Run corrected formal release patch	2026-07-24T09:55:08.0385515Z ^[[36;1mscript = script.replace("write('server/test_ddns_go_native.py', '''", "write('server/test_ddns_go_native.py', r'''", 1)^[[0m
+apply	Run corrected formal release patch	2026-07-24T09:55:08.0386765Z ^[[36;1mPath('/tmp/apply-v1-release.sh').write_text(script, encoding='utf-8')^[[0m
+apply	Run corrected formal release patch	2026-07-24T09:55:08.0387587Z ^[[36;1mPY^[[0m
+apply	Run corrected formal release patch	2026-07-24T09:55:08.0388051Z ^[[36;1mbash /tmp/apply-v1-release.sh^[[0m
+apply	Run corrected formal release patch	2026-07-24T09:55:08.0436923Z shell: /usr/bin/bash -e {0}
+apply	Run corrected formal release patch	2026-07-24T09:55:08.0437520Z ##[endgroup]
+apply	Run corrected formal release patch	2026-07-24T09:55:08.0967101Z <stdin>:86: SyntaxWarning: invalid escape sequence '\c'
+apply	Run corrected formal release patch	2026-07-24T09:55:08.4343090Z control-plane authoritative snapshot tests passed
+apply	Run corrected formal release patch	2026-07-24T09:55:08.4672538Z DDNS-GO native management source checks passed
+apply	Run corrected formal release patch	2026-07-24T09:55:08.4923069Z direct formal release routing checks passed
+apply	Run corrected formal release patch	2026-07-24T09:55:08.5175809Z v1 release static checks passed
+apply	Run corrected formal release patch	2026-07-24T09:55:08.5534036Z [agent/release-v1.0.0 025f1ac] prepare SCBL client and server tool v1.0.0 formal releases
+apply	Run corrected formal release patch	2026-07-24T09:55:08.5536415Z  20 files changed, 178 insertions(+), 253 deletions(-)
+apply	Run corrected formal release patch	2026-07-24T09:55:08.5537698Z  create mode 100644 docs/releases/CLIENT_v1.0.0.md
+apply	Run corrected formal release patch	2026-07-24T09:55:08.5539445Z  create mode 100644 docs/releases/SERVER_TOOL_v1.0.0.md
+apply	Run corrected formal release patch	2026-07-24T09:55:09.4734012Z To https://github.com/caox233/SCBL
+apply	Run corrected formal release patch	2026-07-24T09:55:09.4757062Z  ! [remote rejected] agent/release-v1.0.0 -> agent/release-v1.0.0 (refusing to allow a GitHub App to create or update workflow `.github/workflows/build-client.yml` without `workflows` permission)
+apply	Run corrected formal release patch	2026-07-24T09:55:09.4758100Z error: failed to push some refs to 'https://github.com/caox233/SCBL'
+apply	Run corrected formal release patch	2026-07-24T09:55:09.4770083Z ##[error]Process completed with exit code 1.

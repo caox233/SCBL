@@ -213,11 +213,12 @@ public sealed class LauncherSettingsService
         // copied settings cannot accidentally force duplicate virtual addresses.
         settings.EasyTierPinnedVirtualIp = string.Empty;
 
-        // v0.5.14 production topology: the public server is always an anchor/fallback,
-        // while all clients proactively establish P2P and may relay this SCBL network.
+        // Production topology: clients proactively establish direct P2P links, do not
+        // become third-party data relays, and use the fixed server only when direct P2P fails.
+        // Force the policy during load so settings migrated from v1.0.0 are corrected automatically.
         settings.EasyTierStableRelayMode = false;
         settings.EasyTierEnableP2P = true;
-        settings.EasyTierLatencyFirst = true;
+        settings.EasyTierLatencyFirst = false;
         if (settings.EasyTierWssPort is <= 0 or > 65535)
             settings.EasyTierWssPort = PublicTunnelConfig.DefaultWssPort;
         if (settings.PublicUpdatePort is <= 0 or > 65535)

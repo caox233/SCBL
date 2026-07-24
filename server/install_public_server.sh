@@ -1537,12 +1537,15 @@ enable_encryption = true
 # The game overlay has no assigned virtual IPv6 address; IPv6 underlay/P2P/listeners remain enabled.
 enable_ipv6 = true
 mtu = {int(mtu)}
-latency_first = true
+# Prefer stable one-hop routes instead of changing to a longer path for tiny latency differences.
+latency_first = false
 disable_p2p = false
 p2p_only = false
 lazy_p2p = false
-need_p2p = false
+# Clients should proactively establish a direct path to the fixed server.
+need_p2p = true
 relay_all_peer_rpc = true
+# The server remains the only data-relay fallback when player-to-player P2P fails.
 disable_relay_data = false
 disable_udp_hole_punching = false
 disable_tcp_hole_punching = false

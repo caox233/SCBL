@@ -51,7 +51,6 @@ jobs:
 
           mapfile -t keep_tags < <(
             {
-              printf '%s\n' client-stable-latest server-tool-stable-latest
               gh release list --limit 200 --json tagName --jq '.[].tagName' |
                 grep -E '^(client|server-tool)-v[0-9]+\.[0-9]+\.[0-9]+$' || true
             } | sort -u
@@ -87,7 +86,7 @@ jobs:
             echo '# SCBL Repository Maintenance Status'
             echo
             echo "- Completed UTC: \`$(date -u +'%Y-%m-%dT%H:%M:%SZ')\`"
-            echo '- Retention: only `main`, two immutable releases per component, and rolling stable tags.'
+            echo '- Retention: only `main` and the newest two formal releases per component.'
             echo
             echo '## Branches'
             echo

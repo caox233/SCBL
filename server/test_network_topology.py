@@ -4,19 +4,36 @@ from pathlib import Path
 settings = Path("client/ScblPublicLauncher/Models/LauncherSettings.cs").read_text(encoding="utf-8")
 settings_service = Path("client/ScblPublicLauncher/Services/LauncherSettingsService.cs").read_text(encoding="utf-8")
 tunnel = Path("client/ScblPublicLauncher/Services/PublicTunnelService.cs").read_text(encoding="utf-8")
+tunnel_config = Path("client/ScblPublicLauncher/Services/PublicTunnelConfig.cs").read_text(encoding="utf-8")
 window = Path("client/ScblPublicLauncher/MainWindow.xaml.cs").read_text(encoding="utf-8")
 server = Path("server/install_public_server.sh").read_text(encoding="utf-8")
+control = Path("server/scbl_control_plane.py").read_text(encoding="utf-8")
+update = Path("server/scbl_update_server.py").read_text(encoding="utf-8")
 
 assert "EasyTierLatencyFirst { get; set; } = false" in settings
 assert "settings.EasyTierLatencyFirst = false;" in settings_service
-assert "private const int RuntimeProfileRevision = 7;" in tunnel
-assert "latency_first = {options.LatencyFirst.ToString().ToLowerInvariant()}" in tunnel
-assert "need_p2p = false" in tunnel
+assert "settings.EasyTierWssPort == 10443" in settings_service
+assert "private const int RuntimeProfileRevision = 8;" in tunnel
+assert 'uris.Add("udp://" + tunnelEndpoint);' in tunnel
+assert 'uris.Add("wss://" + wssEndpoint);' in tunnel
+assert 'uris.Add("tcp://" + tunnelEndpoint);' not in tunnel
+assert 'listeners = ["udp://0.0.0.0:0", "tcp://0.0.0.0:0"' in tunnel
+assert "disable_tcp_hole_punching = {disableHolePunching" in tunnel
 assert "disable_relay_data = true" in tunnel
-assert "client-direct-p2p-server-fallback" in tunnel
-assert "latency_first = false" in server
+assert "public const int DefaultWssPort = DefaultTunnelPort;" in tunnel_config
+assert 'f"tcp://0.0.0.0:{port}"' not in server
+assert 'f"tcp://[::]:{port}"' not in server
+assert 'f"udp://0.0.0.0:{port}"' in server
+assert 'f"wss://0.0.0.0:{wss_port}"' in server
 assert "need_p2p = true" in server
 assert "disable_relay_data = false" in server
+assert "scbl_update_server.py" in server
+assert "SESSION_REFRESH_SECONDS = 2.0" in control
+assert "request_queue_size = 128" in control
+assert "ScblThreadingHTTPServer" in control
+assert "ScblUpdateServerV6" in update
+assert "IPV6_V6ONLY" in update
+assert "request_queue_size = 128" in update
 assert "与房主连接 {_lastGameLatencyMs.Value}ms 延时" in window
 assert "到房主{hostLabel}" not in window
-print("SCBL P2P/server-fallback topology checks passed")
+print("SCBL UDP/WSS, P2P and dual-stack topology checks passed")

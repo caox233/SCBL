@@ -15,7 +15,7 @@ public static class PublicTunnelConfig
     public const string ClientIpPrefix = "10.66.0.";
     public const int DefaultTunnelPort = 11010;
     public const int DefaultPublicUpdatePort = 18080;
-    public const int DefaultWssPort = 10443;
+    public const int DefaultWssPort = DefaultTunnelPort;
     public const int EasyTierRpcPort = 15966;
     public const string EasyTierVersion = "2.6.4";
     public const int ControlPlanePort = 19080;

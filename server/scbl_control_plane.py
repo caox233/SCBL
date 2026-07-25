@@ -37,7 +37,7 @@ MAX_BODY_BYTES = 32 * 1024
 MAX_CLOCK_SKEW_SECONDS = 90
 OVERLAY = ipaddress.ip_network("10.66.0.0/24")
 ALLOW_LOOPBACK = os.environ.get("SCBL_ALLOW_LOOPBACK", "n").strip().lower() in {"1", "y", "yes", "true", "on"}
-SESSION_REFRESH_SECONDS = 0.75
+SESSION_REFRESH_SECONDS = 2.0
 HEALTH_REFRESH_SECONDS = 5.0
 
 
@@ -535,8 +535,9 @@ def capabilities() -> dict[str, Any]:
         "serverVirtualIp": SERVER_IP,
         "mtu": int(os.environ.get("SCBL_MTU", "1380")),
         "udpPort": int(os.environ.get("SCBL_PORT", "11010")),
-        "tcpPort": int(os.environ.get("SCBL_PORT", "11010")),
-        "wssPort": int(os.environ.get("SCBL_WSS_PORT", "10443")),
+        "tcpPort": None,
+        "tcpEnabled": False,
+        "wssPort": int(os.environ.get("SCBL_WSS_PORT", "11010")),
         "ipv4Enabled": True,
         "ipv6Enabled": os.environ.get("SCBL_ENABLE_IPV6", "y").lower() in {"1", "y", "yes", "true", "on"},
         "wssEnabled": True,
@@ -600,9 +601,20 @@ def _metrics_loop() -> None:
         print(f"control-plane metrics: {text}; response-write-errors={write_errors}", flush=True)
 
 
+class ScblThreadingHTTPServer(ThreadingHTTPServer):
+    request_queue_size = 128
+    daemon_threads = True
+    block_on_close = False
+    allow_reuse_address = True
+
+
 class Handler(BaseHTTPRequestHandler):
     server_version = f"SCBLControlPlane/{SERVER_TOOL_VERSION}"
     protocol_version = "HTTP/1.1"
+
+    def setup(self) -> None:
+        super().setup()
+        self.connection.settimeout(8.0)
 
     def log_message(self, fmt: str, *args: Any) -> None:
         print(f"{self.address_string()} - {fmt % args}", flush=True)
@@ -770,8 +782,7 @@ def main() -> None:
     threading.Thread(target=_session_refresh_loop, name="scbl-session-snapshot", daemon=True).start()
     threading.Thread(target=_health_refresh_loop, name="scbl-health-snapshot", daemon=True).start()
     threading.Thread(target=_metrics_loop, name="scbl-control-metrics", daemon=True).start()
-    server = ThreadingHTTPServer((SERVER_IP, CONTROL_PORT), Handler)
-    server.daemon_threads = True
+    server = ScblThreadingHTTPServer((SERVER_IP, CONTROL_PORT), Handler)
     print(
         f"SCBL control plane v{SERVER_TOOL_VERSION} listening on http://{SERVER_IP}:{CONTROL_PORT}; "
         f"heartbeat TTL={HEARTBEAT_TTL_SECONDS}s; session snapshot={SESSION_REFRESH_SECONDS}s",

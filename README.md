@@ -2,17 +2,17 @@
 
 SCBL 是面向《细胞分裂：黑名单》社区联机环境的自建客户端、Linux 服务端部署和客户端更新管理项目。
 
-> 当前 Windows 客户端：**v1.0.1**  
-> 当前 Linux 服务端工具：**v1.0.1**
+> 当前 Windows 客户端：**v1.0.2**<br>
+> 当前 Linux 服务端工具：**v1.0.2**
 
 ## 快速开始
 
 ### Windows 客户端
 
-前往仓库的 Releases 页面，下载标题为 **[CLIENT] Windows Client v1.0.1** 的版本：
+前往仓库的 Releases 页面，下载标题为 **[CLIENT] Windows Client v1.0.2** 的版本：
 
 ```text
-SCBL-Client-v1.0.1-win-x86.zip
+SCBL-Client-v1.0.2-win-x86.zip
 ```
 
 解压后运行 `SplinterCellCNLauncher.exe`。启动器会先确认服务器当前正式版本；版本不一致时必须更新或退出。
@@ -49,8 +49,8 @@ curl -fsSL https://raw.githubusercontent.com/caox233/SCBL/main/scripts/install-s
 ## 网络路径
 
 - 启动器、控制平面和游戏服务端流量优先与固定服务器直接通信。
-- 玩家之间的游戏 UDP 流量优先使用 EasyTier P2P 直连。
-- 普通客户端不承担第三方数据中继；P2P 失败时由固定服务器兜底。
+- 玩家之间优先使用 EasyTier P2P UDP，UDP 无法打洞时保留 P2P TCP 打洞。
+- 普通客户端不承担第三方数据中继；固定服务器使用 UDP 主入口和 WSS 兜底。
 - 使用稳定的一跳优先策略，不为很小的延迟差异切换到多跳路径。
 
 ## 本地编译
@@ -58,7 +58,7 @@ curl -fsSL https://raw.githubusercontent.com/caox233/SCBL/main/scripts/install-s
 ```powershell
 git clone https://github.com/caox233/SCBL.git
 cd SCBL\client
-powershell -ExecutionPolicy Bypass -File .uild_all_windows.ps1 -Fast -Package
+powershell -ExecutionPolicy Bypass -File .\build_all_windows.ps1 -Fast -Package
 ```
 
 客户端构建从 `caox233/5th-echelon` 的已验证 Release 获取 Hooks DLL；SCBL 仓库不保存 Hooks 源码或预编译 Hooks 文件。

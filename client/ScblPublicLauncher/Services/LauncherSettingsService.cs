@@ -219,7 +219,9 @@ public sealed class LauncherSettingsService
         settings.EasyTierStableRelayMode = false;
         settings.EasyTierEnableP2P = true;
         settings.EasyTierLatencyFirst = false;
-        if (settings.EasyTierWssPort is <= 0 or > 65535)
+        // v1.0.2 reuses TCP 11010 for the fixed server WSS fallback. Migrate the
+        // former default 10443 automatically while preserving deliberate custom ports.
+        if (settings.EasyTierWssPort is <= 0 or > 65535 || settings.EasyTierWssPort == 10443)
             settings.EasyTierWssPort = PublicTunnelConfig.DefaultWssPort;
         if (settings.PublicUpdatePort is <= 0 or > 65535)
             settings.PublicUpdatePort = PublicTunnelConfig.DefaultPublicUpdatePort;

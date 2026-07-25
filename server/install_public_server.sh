@@ -13,7 +13,7 @@ DEFAULT_SCBL_POOL_START="10.66.0.2"
 DEFAULT_SCBL_POOL_END="10.66.0.254"
 DEFAULT_SCBL_PORT="11010"
 DEFAULT_SCBL_UPDATE_PORT="18080"
-DEFAULT_SCBL_WSS_PORT="10443"
+DEFAULT_SCBL_WSS_PORT="11010"
 DEFAULT_SCBL_ENABLE_IPV6="y"
 DEFAULT_SCBL_SECRET="CHANGE_ME_SCBL_PUBLIC_SECRET_2026"
 DEFAULT_EASYTIER_VERSION="v2.6.4"
@@ -97,7 +97,7 @@ install_management_command() {
   fi
 
   # Preserve the files required when the manager is launched later through SCBL.
-  for asset in scbl_control_plane.py service.toml.template check_scbl_udp_11010.sh; do
+  for asset in scbl_control_plane.py scbl_update_server.py service.toml.template check_scbl_udp_11010.sh; do
     if [[ -f "$source_dir/$asset" && "$source_dir/$asset" != "$MANAGER_DIR/$asset" ]]; then
       install -m 0755 "$source_dir/$asset" "$MANAGER_DIR/$asset"
     fi
@@ -828,6 +828,11 @@ set_defaults() {
   SCBL_PORT="${SCBL_PORT:-$DEFAULT_SCBL_PORT}"
   SCBL_UPDATE_PORT="${SCBL_UPDATE_PORT:-$DEFAULT_SCBL_UPDATE_PORT}"
   SCBL_WSS_PORT="${SCBL_WSS_PORT:-$DEFAULT_SCBL_WSS_PORT}"
+  # v1.0.2 reuses the EasyTier UDP port number for WSS over TCP. Migrate the
+  # former default while preserving explicitly configured custom ports.
+  if [[ "$SCBL_WSS_PORT" == "10443" && "$SCBL_PORT" == "$DEFAULT_SCBL_PORT" ]]; then
+    SCBL_WSS_PORT="$SCBL_PORT"
+  fi
   SCBL_ENABLE_IPV6="${SCBL_ENABLE_IPV6:-$DEFAULT_SCBL_ENABLE_IPV6}"
   SCBL_SECRET="${SCBL_SECRET:-$DEFAULT_SCBL_SECRET}"
   SCBL_SERVER_IP="${SCBL_SERVER_IP:-$DEFAULT_SCBL_SERVER_IP}"
@@ -1487,7 +1492,7 @@ printf '  在线配置：%s:80/TCP（%s）\n' "\$SCBL_SERVER_IP" "\$(listen_any_
 printf '  内容服务：%s:8000/TCP（%s）\n' "\$SCBL_SERVER_IP" "\$(listen_any_tcp 8000 && echo 正常 || echo 未监听)"
 printf '  PRUDP认证：%s:21126/UDP（%s）\n' "\$SCBL_SERVER_IP" "\$(listen_any_udp 21126 && echo 正常 || echo 未监听)"
 printf '  PRUDP安全：%s:21127/UDP（%s）\n' "\$SCBL_SERVER_IP" "\$(listen_any_udp 21127 && echo 正常 || echo 未监听)"
-printf '  公网更新：http://0.0.0.0:%s（%s）\n' "\$SCBL_UPDATE_PORT" "\$(listen_any_tcp "\$SCBL_UPDATE_PORT" && echo 正常 || echo 未监听)"
+printf '  公网更新：IPv4/IPv6 TCP %s（%s）\n' "\$SCBL_UPDATE_PORT" "\$(listen_any_tcp "\$SCBL_UPDATE_PORT" && echo 正常 || echo 未监听)"
 printf '  数据库：%s\n' "\$([[ -f \$SCBL_ROOT/server/5th-echelon.db ]] && echo 存在 || echo 缺失)"
 STATUS_EOF
   chmod 0755 /usr/local/bin/scbl-server-status
@@ -1516,9 +1521,11 @@ import sys
 path, instance_name, instance_id, cidr, port, wss_port, enable_ipv6, network_name, secret, mtu = sys.argv[1:]
 q = lambda value: json.dumps(value, ensure_ascii=False)
 ipv6_enabled = str(enable_ipv6).strip().lower() in {"y", "yes", "1", "true", "on"}
-listeners = [f"udp://0.0.0.0:{port}", f"tcp://0.0.0.0:{port}", f"wss://0.0.0.0:{wss_port}"]
+# The fixed server publishes UDP as the primary ingress and WSS as the
+# TCP-compatible fallback. Player-to-player TCP hole punching remains enabled.
+listeners = [f"udp://0.0.0.0:{port}", f"wss://0.0.0.0:{wss_port}"]
 if ipv6_enabled:
-    listeners += [f"udp://[::]:{port}", f"tcp://[::]:{port}", f"wss://[::]:{wss_port}"]
+    listeners += [f"udp://[::]:{port}", f"wss://[::]:{wss_port}"]
 text = f'''instance_name = {q(instance_name)}
 instance_id = {q(instance_id)}
 hostname = "scbl-public-server"
@@ -1703,15 +1710,19 @@ SYSCTLEOF
     remove_iptables_nat_rule_all POSTROUTING -s "$SCBL_VIRTUAL_NET" -o "$SCBL_WAN_IFACE" -j MASQUERADE
   fi
 
-  # Keep virtual-interface service access, public EasyTier listeners, and the public update HTTP port.
+  # Keep virtual-interface service access, UDP primary ingress, WSS fallback,
+  # and the dual-stack public update service. Remove the legacy raw TCP listener rule
+  # first; when WSS reuses the same port it is added back explicitly below.
   ensure_iptables_rule INPUT -i scbl0 -j ACCEPT
   ensure_iptables_rule OUTPUT -o scbl0 -j ACCEPT
-  ensure_iptables_rule INPUT -p tcp --dport "$SCBL_PORT" -j ACCEPT
+  remove_iptables_rule_all INPUT -p tcp --dport "$SCBL_PORT" -j ACCEPT
   ensure_iptables_rule INPUT -p tcp --dport "$SCBL_UPDATE_PORT" -j ACCEPT
   ensure_iptables_rule INPUT -p udp --dport "$SCBL_PORT" -j ACCEPT
   ensure_iptables_rule INPUT -p tcp --dport "$SCBL_WSS_PORT" -j ACCEPT
   if [[ "${SCBL_ENABLE_IPV6,,}" =~ ^(y|yes|1|true|on)$ ]] && command -v ip6tables >/dev/null 2>&1; then
-    ip6tables -C INPUT -p tcp --dport "$SCBL_PORT" -j ACCEPT 2>/dev/null || ip6tables -I INPUT -p tcp --dport "$SCBL_PORT" -j ACCEPT || true
+    while ip6tables -C INPUT -p tcp --dport "$SCBL_PORT" -j ACCEPT 2>/dev/null; do
+      ip6tables -D INPUT -p tcp --dport "$SCBL_PORT" -j ACCEPT 2>/dev/null || break
+    done
     ip6tables -C INPUT -p tcp --dport "$SCBL_UPDATE_PORT" -j ACCEPT 2>/dev/null || ip6tables -I INPUT -p tcp --dport "$SCBL_UPDATE_PORT" -j ACCEPT || true
     ip6tables -C INPUT -p udp --dport "$SCBL_PORT" -j ACCEPT 2>/dev/null || ip6tables -I INPUT -p udp --dport "$SCBL_PORT" -j ACCEPT || true
     ip6tables -C INPUT -p tcp --dport "$SCBL_WSS_PORT" -j ACCEPT 2>/dev/null || ip6tables -I INPUT -p tcp --dport "$SCBL_WSS_PORT" -j ACCEPT || true
@@ -1768,7 +1779,7 @@ write_client_settings_sample() {
   "UseCustomPublicEndpoint": true,
   "EasyTierNetworkName": "${EASYTIER_NETWORK_NAME}",
   "EasyTierWssPort": ${SCBL_WSS_PORT},
-  "EasyTierLatencyFirst": true,
+  "EasyTierLatencyFirst": false,
   "EasyTierEnableP2P": true,
   "ForceGameVirtualAdapter": true
 }
@@ -1792,12 +1803,22 @@ write_update_server_files() {
 JSONEOF
   fi
 
+  local update_server_source="$SCRIPT_DIR/scbl_update_server.py"
+  [[ -f "$update_server_source" ]] || update_server_source="$MANAGER_DIR/scbl_update_server.py"
+  [[ -f "$update_server_source" ]] || {
+    echo "部署包缺少 scbl_update_server.py，无法生成双栈更新服务。"
+    return 1
+  }
+  install -m 0755 "$update_server_source" "$SCBL_ROOT/bin/scbl_update_server.py"
+
   cat > "$SCBL_ROOT/bin/start-update-server.sh" <<UPDATESERVER
 #!/usr/bin/env bash
 set -euo pipefail
 source "$ENV_FILE"
-cd "\$SCBL_ROOT/client-updates"
-exec python3 -m http.server "\$SCBL_UPDATE_PORT" --bind 0.0.0.0
+exec python3 "\$SCBL_ROOT/bin/scbl_update_server.py" \
+  --root "\$SCBL_ROOT/client-updates" \
+  --port "\$SCBL_UPDATE_PORT" \
+  --ipv6 "\$SCBL_ENABLE_IPV6"
 UPDATESERVER
   chmod +x "$SCBL_ROOT/bin/start-update-server.sh"
 

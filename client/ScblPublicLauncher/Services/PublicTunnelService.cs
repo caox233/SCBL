@@ -46,7 +46,7 @@ public sealed record EasyTierClientOptions(
 /// </summary>
 public sealed class PublicTunnelService
 {
-    private const int RuntimeProfileRevision = 7;
+    private const int RuntimeProfileRevision = 8;
     private static readonly Regex ScblIpRegex = new(@"\b10\.66\.0\.(?:[1-9]|[1-9][0-9]|1[0-9]{2}|2[0-4][0-9]|25[0-4])(?:/24)?\b", RegexOptions.Compiled);
     private Process? _process;
     private string _lastAssignedIp = "";
@@ -249,7 +249,7 @@ public sealed class PublicTunnelService
 
         bool effectiveP2P = options.EnableP2P;
         string networkMode = "direct-p2p-with-server-fallback";
-        LogService.Info($"Starting EasyTier. endpoint={PublicTunnelConfig.NormalizePublicEndpoint(publicEndpoint)}, wssPort={options.WssPort}, network={options.NetworkName}, mode={networkMode}, addressing=dhcp, p2p={effectiveP2P}, clientDataRelay=false, serverFallback=true, latencyFirst={options.LatencyFirst}, underlayDualStack=true");
+        LogService.Info($"Starting EasyTier. endpoint={PublicTunnelConfig.NormalizePublicEndpoint(publicEndpoint)}, wssPort={options.WssPort}, network={options.NetworkName}, mode={networkMode}, addressing=dhcp, p2p={effectiveP2P}, serverIngress=udp-primary-wss-fallback, clientDataRelay=false, serverFallback=true, latencyFirst={options.LatencyFirst}, underlayDualStack=true");
         _process = Process.Start(psi) ?? throw new InvalidOperationException("EasyTier 网络核心启动失败。");
         AttachOutputHandlers(_process);
 
@@ -403,8 +403,9 @@ relay_network_whitelist = {Q(networkName)}
         {
             string tunnelEndpoint = PublicTunnelConfig.BuildEndpoint(candidateHost, tunnelPort);
             string wssEndpoint = PublicTunnelConfig.BuildEndpoint(candidateHost, wssPort);
+            // Fixed-server bootstrap uses UDP first and WSS as the TCP-based fallback.
+            // Raw TCP is intentionally not published as a third server peer entry.
             uris.Add("udp://" + tunnelEndpoint);
-            uris.Add("tcp://" + tunnelEndpoint);
             uris.Add("wss://" + wssEndpoint);
         }
         return uris.Distinct(StringComparer.OrdinalIgnoreCase).ToArray();
@@ -466,7 +467,7 @@ relay_network_whitelist = {Q(networkName)}
             options.ForceGameVirtualAdapter.ToString(),
             options.WssPort.ToString(),
             "dual-stack-underlay",
-            "client-direct-p2p-server-fallback",
+            "client-direct-p2p-udp-wss-server-fallback",
             PublicTunnelConfig.Mtu.ToString()
         });
         return Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(material)));

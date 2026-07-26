@@ -1,0 +1,99 @@
+name: Validate Server Tool v1.0.3 hotfix
+
+on:
+  push:
+    branches:
+      - agent/server-tool-v1.0.3-package-hotfix
+    paths:
+      - tools/agent_server_tool_103_patch.py
+      - .github/workflows/agent-server-tool-103.yml
+
+permissions:
+  contents: write
+
+jobs:
+  validate-and-apply:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: agent/server-tool-v1.0.3-package-hotfix
+          fetch-depth: 0
+
+      - name: Apply manager hotfix
+        run: python3 tools/agent_server_tool_103_patch.py
+
+      - name: Validate shell and embedded Python
+        shell: bash
+        run: |
+          set -euo pipefail
+          bash -n server/install_public_server.sh
+          bash -n scripts/install-server.sh
+          python3 - <<'PY'
+          from pathlib import Path
+          import re
+          for path in (Path('server/install_public_server.sh'), Path('scripts/install-server.sh')):
+              text = path.read_text(encoding='utf-8')
+              blocks = re.findall(r"<<'?(PYEOF_[A-Za-z0-9_]+)'?\n(.*?)\n\1", text, re.S)
+              if path.name == 'install_public_server.sh' and not blocks:
+                  raise SystemExit(f'{path}: no embedded Python blocks found')
+              for marker, source in blocks:
+                  compile(source, f'{path}:{marker}', 'exec')
+          PY
+
+      - name: Run server tests
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 -m py_compile \
+            server/scbl_control_plane.py \
+            server/scbl_update_server.py \
+            server/test_control_plane.py \
+            server/test_update_server.py \
+            server/test_ddns_go_native.py \
+            server/test_release_manifest_routing.py
+          python3 server/test_control_plane.py
+          python3 server/test_update_server.py
+          python3 server/test_ddns_go_native.py
+          python3 server/test_release_manifest_routing.py
+
+      - name: Build and inspect Server Tool archive
+        shell: bash
+        run: |
+          set -euo pipefail
+          version="$(tr -d '\r\n ' < VERSION_SERVER_TOOL)"
+          root="SCBL-Server-Tool-v${version}-linux-x86_64"
+          rm -rf stage dist
+          mkdir -p "stage/$root/THIRD_PARTY_LICENSES" dist
+          cp server/install_public_server.sh server/scbl_control_plane.py server/scbl_update_server.py \
+             server/check_scbl_binary_release.sh server/5th-echelon_branch.txt scripts/install-server.sh \
+             VERSION_SERVER_TOOL VERSION_CLIENT COMPONENT_VERSIONS.json README.md CHANGELOG.md \
+             THIRD_PARTY_NOTICES.md "stage/$root/"
+          cp THIRD_PARTY_LICENSES/EasyTier-LGPL-3.0.txt "stage/$root/THIRD_PARTY_LICENSES/"
+          chmod 0755 \
+            "stage/$root/install_public_server.sh" \
+            "stage/$root/install-server.sh" \
+            "stage/$root/check_scbl_binary_release.sh" \
+            "stage/$root/scbl_update_server.py"
+          for required in install_public_server.sh install-server.sh scbl_control_plane.py scbl_update_server.py VERSION_SERVER_TOOL; do
+            test -s "stage/$root/$required"
+          done
+          python3 -m py_compile "stage/$root/scbl_control_plane.py" "stage/$root/scbl_update_server.py"
+          tar -C stage -czf "dist/${root}.tar.gz" "$root"
+          tar -tzf "dist/${root}.tar.gz" | grep -Fxq "$root/scbl_update_server.py"
+          tar -xzf "dist/${root}.tar.gz" -C /tmp
+          bash -n "/tmp/$root/install_public_server.sh"
+          bash -n "/tmp/$root/install-server.sh"
+          python3 -m py_compile "/tmp/$root/scbl_control_plane.py" "/tmp/$root/scbl_update_server.py"
+
+      - name: Commit verified manager changes
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add server/install_public_server.sh CHANGELOG.md
+          git diff --cached --check
+          git commit -m 'Fix Server Tool update service packaging'
+          git push origin HEAD:agent/server-tool-v1.0.3-package-hotfix

@@ -15,6 +15,10 @@ internal static class Program
             string? pidText = GetArg(args, "--pid");
             string? restart = GetArg(args, "--restart");
             string? requestedVersion = GetArg(args, "--version");
+            string? waitPidText = GetArg(args, "--wait-pid");
+
+            if (args.Any(x => x.Equals("--restart-helper", StringComparison.OrdinalIgnoreCase)))
+                return RestartCoordinator.RunHelper(target, restart, waitPidText);
 
             if (string.IsNullOrWhiteSpace(target))
             {
@@ -42,7 +46,7 @@ internal static class Program
             if (IsGameRunning())
             {
                 Log("Update deferred because a Blacklist game process is still running. Runtime processes were not stopped.");
-                TryRelaunchLauncher(target, restart);
+                RestartCoordinator.LaunchImmediately(target, restart);
                 return 7;
             }
 
@@ -87,14 +91,14 @@ internal static class Program
             WriteAppliedUpdateReceipt(target, appliedVersion);
             Log("Update finished.");
 
-            if (!string.IsNullOrWhiteSpace(restart) && File.Exists(restart))
+            if (!RestartCoordinator.ScheduleAfterUpdaterExit(target, restart))
             {
-                Process.Start(new ProcessStartInfo
+                Log("Launcher restart helper could not be scheduled; trying an immediate fallback.");
+                if (!RestartCoordinator.LaunchImmediately(target, restart))
                 {
-                    FileName = restart,
-                    WorkingDirectory = target,
-                    UseShellExecute = true
-                });
+                    Log("Update succeeded, but the launcher could not be restarted automatically.");
+                    return 8;
+                }
             }
 
             return 0;

@@ -29,7 +29,6 @@ public sealed class ProcessRouterService
     private string _runningAssignedIp = "";
     private int _runningInterfaceIndex = -1;
     private string _runningLauncherBaseDir = "";
-    private string _statusFilePath = "";
     private int _processGeneration;
     private volatile bool _stopRequested;
     private TaskCompletionSource<bool>? _readySignal;
@@ -44,59 +43,12 @@ public sealed class ProcessRouterService
     public string GetRouterExePath(string launcherBaseDir)
         => Path.Combine(launcherBaseDir, "tools", "scbl-process-router.exe");
 
-    public string GetStatusFilePath(string launcherBaseDir)
-        => Path.Combine(LogService.PersistentDataDirectory, "runtime", "game-route-status.json");
-
-    public string GetHistoryFilePath(string launcherBaseDir)
-        => Path.Combine(LogService.PersistentDataDirectory, "runtime", "game-route-history.jsonl");
 
     public string GetSessionFilePath(string launcherBaseDir)
         => Path.Combine(LogService.PersistentDataDirectory, "runtime", "route-guard-session.json");
 
     public string GetGuardHealthFilePath(string launcherBaseDir)
         => Path.Combine(LogService.PersistentDataDirectory, "runtime", "route-guard-health.json");
-
-    public GameRouteStatus? TryReadGameRouteStatus(string launcherBaseDir)
-    {
-        string path = GetStatusFilePath(launcherBaseDir);
-        try
-        {
-            if (!File.Exists(path))
-                return null;
-            string? json = null;
-            for (int attempt = 1; attempt <= 3; attempt++)
-            {
-                try
-                {
-                    json = File.ReadAllText(path);
-                    break;
-                }
-                catch (IOException) when (attempt < 3)
-                {
-                    Thread.Sleep(attempt * 8);
-                }
-                catch (UnauthorizedAccessException) when (attempt < 3)
-                {
-                    Thread.Sleep(attempt * 8);
-                }
-            }
-            if (string.IsNullOrWhiteSpace(json))
-                return null;
-            var status = JsonSerializer.Deserialize<GameRouteStatus>(json, new JsonSerializerOptions
-            {
-                PropertyNameCaseInsensitive = true
-            });
-            if (status == null)
-                return null;
-            long ageMs = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds() - status.UpdatedAtUnixMs;
-            return ageMs >= 0 && ageMs <= 5000 ? status : null;
-        }
-        catch (Exception ex)
-        {
-            LogService.Info("Game route status read skipped: " + ex.Message);
-            return null;
-        }
-    }
 
     public async Task EnsureStartedAsync(
         string launcherBaseDir,
@@ -178,7 +130,7 @@ public sealed class ProcessRouterService
             _stopRequested = false;
             try
             {
-                await StartOnceAsync(launcherBaseDir, assignedIp, TimeSpan.FromMilliseconds(1500), interfaceIndex, preserveHistory: attempt > 1).ConfigureAwait(false);
+                await StartOnceAsync(launcherBaseDir, assignedIp, TimeSpan.FromMilliseconds(1500), interfaceIndex).ConfigureAwait(false);
                 return;
             }
             catch (Exception ex)
@@ -193,7 +145,7 @@ public sealed class ProcessRouterService
         throw new Exception("按进程导流组件启动失败。" + (lastError == null ? "" : " " + lastError.Message));
     }
 
-    private async Task StartOnceAsync(string launcherBaseDir, string assignedIp, TimeSpan startupWindow, int interfaceIndex, bool preserveHistory)
+    private async Task StartOnceAsync(string launcherBaseDir, string assignedIp, TimeSpan startupWindow, int interfaceIndex)
     {
         string exe = GetRouterExePath(launcherBaseDir);
         string toolsDir = Path.GetDirectoryName(exe)!;
@@ -208,15 +160,6 @@ public sealed class ProcessRouterService
             throw new FileNotFoundException("未找到 WinDivert64.sys，请先把 WinDivert 文件放到 publish-single\\tools。", sys64);
 
         Directory.CreateDirectory(LogService.LogDirectory);
-        _statusFilePath = GetStatusFilePath(launcherBaseDir);
-        string historyFilePath = GetHistoryFilePath(launcherBaseDir);
-        Directory.CreateDirectory(Path.GetDirectoryName(_statusFilePath)!);
-        try { File.Delete(_statusFilePath); } catch { }
-        if (!preserveHistory)
-        {
-            try { File.Delete(historyFilePath); } catch { }
-            try { File.Delete(historyFilePath + ".1"); } catch { }
-        }
         KillResidualRouters();
         lock (_sessionSync)
             WriteSessionHeartbeatLocked();
@@ -237,10 +180,6 @@ public sealed class ProcessRouterService
         psi.ArgumentList.Add(PublicTunnelConfig.VirtualNetworkCidr);
         psi.ArgumentList.Add("-interface-index");
         psi.ArgumentList.Add(interfaceIndex.ToString());
-        psi.ArgumentList.Add("-status-file");
-        psi.ArgumentList.Add(_statusFilePath);
-        psi.ArgumentList.Add("-history-file");
-        psi.ArgumentList.Add(historyFilePath);
         psi.ArgumentList.Add("-session-file");
         psi.ArgumentList.Add(_sessionFilePath);
         psi.ArgumentList.Add("-session-id");
@@ -502,7 +441,7 @@ public sealed class ProcessRouterService
                         try
                         {
                             LogService.Warning($"Restarting process router after unexpected exit, attempt={attempt}/3. EasyTier will not be restarted.");
-                            await StartOnceAsync(_runningLauncherBaseDir, _runningAssignedIp, TimeSpan.FromMilliseconds(1500), _runningInterfaceIndex, preserveHistory: true).ConfigureAwait(false);
+                            await StartOnceAsync(_runningLauncherBaseDir, _runningAssignedIp, TimeSpan.FromMilliseconds(1500), _runningInterfaceIndex).ConfigureAwait(false);
                             Interlocked.Increment(ref _automaticRestartSuccessCount);
                             _lastExitReason = "automatic restart succeeded";
                             WriteGuardHealthSnapshot("running");
@@ -581,11 +520,6 @@ public sealed class ProcessRouterService
         _runningAssignedIp = "";
         _runningInterfaceIndex = -1;
         _runningLauncherBaseDir = "";
-        if (!string.IsNullOrWhiteSpace(_statusFilePath))
-        {
-            try { File.Delete(_statusFilePath); } catch { }
-        }
-        _statusFilePath = "";
         _lastExitReason = reason;
         WriteGuardHealthSnapshot("stopped");
     }

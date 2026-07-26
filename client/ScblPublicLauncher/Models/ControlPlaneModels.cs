@@ -10,7 +10,7 @@ public sealed class ControlPlaneCapabilities
     public string ServerVirtualIp { get; init; } = "";
     public int Mtu { get; init; }
     public int UdpPort { get; init; }
-    public int TcpPort { get; init; }
+    public int? TcpPort { get; init; }
     public int WssPort { get; init; }
     public bool Ipv4Enabled { get; init; }
     public bool Ipv6Enabled { get; init; }

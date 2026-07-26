@@ -2755,24 +2755,12 @@ public partial class MainWindow : Window
                             token).ConfigureAwait(false);
                     }
 
-                    GameRouteStatus? fallbackStatus = _processRouterService.TryReadGameRouteStatus(GetLauncherBaseDirectory());
                     bool authorityActive = authoritative?.Authoritative == true && authoritative.Active;
                     bool localHost = authorityActive && authoritative!.RequesterIsHost;
                     string hostIp = authorityActive ? authoritative!.HostVirtualIp.Trim() : "";
                     string hostUsername = authorityActive ? authoritative!.HostUsername.Trim() : "";
-                    int activePeers = authorityActive
-                        ? authoritative!.ParticipantCount
-                        : fallbackStatus?.ActivePeerCount ?? 0;
-                    string roleSource = authorityActive ? "game-server" : "traffic-fallback";
-
-                    if (!authorityActive
-                        && fallbackStatus != null
-                        && fallbackStatus.Role.Equals("client", StringComparison.OrdinalIgnoreCase)
-                        && fallbackStatus.Confidence >= 80
-                        && PublicTunnelConfig.IsScblClientIp(fallbackStatus.PrimaryPeerIp))
-                    {
-                        hostIp = fallbackStatus.PrimaryPeerIp.Trim();
-                    }
+                    int activePeers = authorityActive ? authoritative!.ParticipantCount : 0;
+                    string roleSource = authorityActive ? "game-server" : "";
 
                     if (localHost)
                     {
@@ -2794,7 +2782,7 @@ public partial class MainWindow : Window
                             _lastGameHopCount = null;
                             _gameRoleSource = roleSource;
                             _gameHostUsername = hostUsername;
-                            _gameSessionId = authoritative.SessionId;
+                            _gameSessionId = authoritative!.SessionId;
                             if (changed)
                                 LogService.Info($"Local game host confirmed by game server. session={_gameSessionId}, players={activePeers}.");
                             WriteGameQualitySnapshot();
@@ -2900,7 +2888,7 @@ public partial class MainWindow : Window
                             _lastGameAddressFamily = "";
                             _lastGameNextHop = "";
                             _lastGameHopCount = null;
-                            _gameRoleSource = authorityActive ? "game-server" : "traffic-fallback";
+                            _gameRoleSource = authorityActive ? "game-server" : "";
                             _gameHostUsername = "";
                             _gameSessionId = null;
                             WriteGameQualitySnapshot();

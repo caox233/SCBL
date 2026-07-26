@@ -30,4 +30,23 @@ assert "ShouldRetryStatusCode(response.StatusCode)" in remote
 assert "cancellationToken.IsCancellationRequested" in remote
 assert "Client version check recovered after retry" in remote
 assert "Client version check unavailable after {CheckAttemptCount} attempts" in remote
+
+route_guard = Path("client/scbl-process-router/main.go").read_text(encoding="utf-8")
+launcher = Path("client/ScblPublicLauncher/MainWindow.xaml.cs").read_text(encoding="utf-8")
+router_service = Path("client/ScblPublicLauncher/Services/ProcessRouterService.cs").read_text(encoding="utf-8")
+control_models = Path("client/ScblPublicLauncher/Models/ControlPlaneModels.cs").read_text(encoding="utf-8")
+tunnel = Path("client/ScblPublicLauncher/Services/PublicTunnelService.cs").read_text(encoding="utf-8")
+assert "traffic-fallback" not in launcher
+assert "TryReadGameRouteStatus" not in launcher
+assert "TryReadGameRouteStatus" not in router_service
+assert "game-route-status.json" not in router_service
+assert "game-route-history.jsonl" not in router_service
+assert "shouldConvertToVirtualBroadcast" not in route_guard
+assert "sendBroadcastFanout" not in route_guard
+assert "BROADCAST-FANOUT" not in route_guard
+assert "HOST-DETECT" not in route_guard
+assert "10.66.0.255 broadcasts remain unchanged" in route_guard
+assert "public int? TcpPort" in control_models
+assert "bind_device = true" in tunnel
+
 print("SCBL client update restart and version-check retry checks passed")

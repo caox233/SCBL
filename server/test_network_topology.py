@@ -13,7 +13,8 @@ update = Path("server/scbl_update_server.py").read_text(encoding="utf-8")
 assert "EasyTierLatencyFirst { get; set; } = false" in settings
 assert "settings.EasyTierLatencyFirst = false;" in settings_service
 assert "settings.EasyTierWssPort == 10443" in settings_service
-assert "private const int RuntimeProfileRevision = 8;" in tunnel
+assert "private const int RuntimeProfileRevision = 9;" in tunnel
+assert "bind_device = true" in tunnel
 assert 'uris.Add("udp://" + tunnelEndpoint);' in tunnel
 assert 'uris.Add("wss://" + wssEndpoint);' in tunnel
 assert 'uris.Add("tcp://" + tunnelEndpoint);' not in tunnel

@@ -46,7 +46,7 @@ public sealed record EasyTierClientOptions(
 /// </summary>
 public sealed class PublicTunnelService
 {
-    private const int RuntimeProfileRevision = 8;
+    private const int RuntimeProfileRevision = 9;
     private static readonly Regex ScblIpRegex = new(@"\b10\.66\.0\.(?:[1-9]|[1-9][0-9]|1[0-9]{2}|2[0-4][0-9]|25[0-4])(?:/24)?\b", RegexOptions.Compiled);
     private Process? _process;
     private string _lastAssignedIp = "";
@@ -344,6 +344,7 @@ network_secret = {Q(secret)}
 [flags]
 default_protocol = "udp"
 dev_name = {Q(PublicTunnelConfig.TunnelName)}
+bind_device = true
 enable_encryption = true
 # No virtual IPv6 address is assigned to the game overlay, but EasyTier IPv6 underlay/P2P is enabled.
 enable_ipv6 = true

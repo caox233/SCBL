@@ -26,7 +26,7 @@ import (
 )
 
 const (
-	routerVersion         = "1.0.4"
+	routerVersion         = "1.0.5"
 	windivertLayerNetwork = 0
 	divertBufSize         = 0xFFFF
 	protoTCP              = 6
@@ -48,8 +48,6 @@ type Config struct {
 	NATTTL           time.Duration
 	Priority         int
 	InterfaceIndex   uint
-	StatusFile       string
-	HistoryFile      string
 	SessionFile      string
 	SessionID        string
 	LauncherPID      uint
@@ -88,40 +86,15 @@ func ipv4Range(ipnet *net.IPNet) (IPv4, IPv4) {
 	return first, last
 }
 
-func isLimitedBroadcast(ip IPv4) bool {
-	return ip == (IPv4{255, 255, 255, 255})
-}
-
-func isIPv4Multicast(ip IPv4) bool {
-	return ip[0] >= 224 && ip[0] <= 239
-}
-
-func looksLikeDirectedBroadcast(ip IPv4) bool {
-	// SCBL uses /24, and the legacy game/Radmin/typical home LANs observed in diagnostics
-	// also use /24. Strict mode intentionally converts any x.x.x.255 game UDP destination.
-	return ip[3] == 255
-}
-
-func shouldConvertToVirtualBroadcast(ip IPv4) bool {
-	return isLimitedBroadcast(ip) || isIPv4Multicast(ip) || looksLikeDirectedBroadcast(ip)
-}
-
 type routingAudit struct {
-	StartedAt              time.Time
-	LastSummary            time.Time
-	LastSpecial            time.Time
-	LastFanout             time.Time
-	ForcedVirtual          uint64
-	VirtualBroadcast       uint64
-	ConvertedBroadcast     uint64
-	BroadcastFanoutPackets uint64
-	BroadcastFanoutCopies  uint64
-	BroadcastNoRecentPeer  uint64
-	BroadcastFanoutFailed  uint64
-	BlockedOutbound        uint64
-	BlockedInbound         uint64
-	RestoredInbound        uint64
-	OwnerUnknown           uint64
+	StartedAt       time.Time
+	LastSummary     time.Time
+	LastSpecial     time.Time
+	ForcedVirtual   uint64
+	BlockedOutbound uint64
+	BlockedInbound  uint64
+	RestoredInbound uint64
+	OwnerUnknown    uint64
 }
 
 func newRoutingAudit() *routingAudit {
@@ -141,73 +114,13 @@ func (a *routingAudit) NoteSpecial(action string, pid uint32, proto uint8, src I
 	log.Printf("strict %s pid=%d %s %s:%d -> %s:%d", action, pid, protoName(proto), src, srcPort, dst, dstPort)
 }
 
-func (a *routingAudit) NoteFanout(pid uint32, meta *PacketMeta, peers []IPv4, sent, failed int) {
-	if a == nil || meta == nil || (!a.LastFanout.IsZero() && time.Since(a.LastFanout) < 1200*time.Millisecond) {
-		return
-	}
-	a.LastFanout = time.Now()
-	peerText := make([]string, 0, len(peers))
-	for _, peer := range peers {
-		peerText = append(peerText, peer.String())
-	}
-	log.Printf("[BROADCAST-FANOUT] pid=%d %s %s:%d -> %s:%d recent-peers=%v sent=%d failed=%d",
-		pid, protoName(meta.Proto), meta.SrcIP, meta.SrcPort, meta.DstIP, meta.DstPort, peerText, sent, failed)
-}
-
-func (a *routingAudit) RecordFanout(pid uint32, meta *PacketMeta, peers []IPv4, sent, failed int) {
-	if a == nil {
-		return
-	}
-	if len(peers) == 0 {
-		a.BroadcastNoRecentPeer++
-		return
-	}
-	a.BroadcastFanoutPackets++
-	a.BroadcastFanoutCopies += uint64(sent)
-	a.BroadcastFanoutFailed += uint64(failed)
-	a.NoteFanout(pid, meta, peers, sent, failed)
-}
-
-func sendBroadcastFanout(div *Divert, packet []byte, address divertAddress, clientIP IPv4, interfaceIndex uint, peers []IPv4) (sent, failed int) {
-	if div == nil || len(packet) == 0 || len(peers) == 0 {
-		return 0, 0
-	}
-	for _, peer := range peers {
-		clone := append([]byte(nil), packet...)
-		meta, ok := parsePacket(clone)
-		if !ok || meta.Proto != protoUDP {
-			failed++
-			continue
-		}
-		meta.SetSrcIP(clientIP)
-		meta.SetDstIP(peer)
-		cloneAddress := address
-		if interfaceIndex > 0 {
-			cloneAddress.SetNetworkInterface(uint32(interfaceIndex), 0)
-		}
-		if err := div.CalcChecksums(clone, &cloneAddress); err != nil {
-			log.Printf("broadcast fanout checksum warning peer=%s: %v", peer, err)
-			failed++
-			continue
-		}
-		if err := div.Send(clone, &cloneAddress); err != nil {
-			log.Printf("broadcast fanout send failed peer=%s: %v", peer, err)
-			failed++
-			continue
-		}
-		sent++
-	}
-	return sent, failed
-}
-
 func (a *routingAudit) MaybeLogSummary() {
 	if a == nil || time.Since(a.LastSummary) < 30*time.Second {
 		return
 	}
 	a.LastSummary = time.Now()
-	log.Printf("[STRICT-ROUTE] forced-virtual=%d virtual-broadcast=%d converted-broadcast=%d fanout-packets=%d fanout-copies=%d fanout-no-peer=%d fanout-failed=%d restored-inbound=%d blocked-outbound=%d blocked-inbound=%d owner-unknown=%d uptime=%s",
-		a.ForcedVirtual, a.VirtualBroadcast, a.ConvertedBroadcast, a.BroadcastFanoutPackets, a.BroadcastFanoutCopies,
-		a.BroadcastNoRecentPeer, a.BroadcastFanoutFailed, a.RestoredInbound, a.BlockedOutbound, a.BlockedInbound,
+	log.Printf("[STRICT-ROUTE] forced-virtual=%d restored-inbound=%d blocked-outbound=%d blocked-inbound=%d owner-unknown=%d uptime=%s",
+		a.ForcedVirtual, a.RestoredInbound, a.BlockedOutbound, a.BlockedInbound,
 		a.OwnerUnknown, time.Since(a.StartedAt).Round(time.Second))
 }
 
@@ -226,8 +139,6 @@ func main() {
 	flag.DurationVar(&cfg.NATTTL, "nat-ttl", defaultNATTTL, "NAT mapping TTL")
 	flag.IntVar(&cfg.Priority, "priority", -1200, "WinDivert priority")
 	flag.UintVar(&cfg.InterfaceIndex, "interface-index", 0, "EasyTier IPv4 interface index used for forced game routing")
-	flag.StringVar(&cfg.StatusFile, "status-file", "", "optional JSON status file for active game peer detection")
-	flag.StringVar(&cfg.HistoryFile, "history-file", "", "optional JSONL history file for recent game traffic diagnostics")
 	flag.StringVar(&cfg.SessionFile, "session-file", "", "launcher-owned JSON session/heartbeat file")
 	flag.StringVar(&cfg.SessionID, "session-id", "", "launcher session id expected in the heartbeat file")
 	flag.UintVar(&cfg.LauncherPID, "launcher-pid", 0, "launcher process id that owns this route-guard session")
@@ -299,9 +210,6 @@ func run(cfg Config) error {
 	nat := newNATTable(cfg.NATTTL)
 	defer nat.Stop()
 
-	traffic := newGameTrafficTracker(clientIP, virtualNet, cfg.StatusFile, cfg.HistoryFile)
-	defer traffic.Stop()
-
 	div, err := openDivert(int16(cfg.Priority))
 	if err != nil {
 		return err
@@ -315,7 +223,7 @@ func run(cfg Config) error {
 
 	_, virtualBroadcast := ipv4Range(virtualNet)
 	audit := newRoutingAudit()
-	log.Printf("WinDivert opened. Strict game isolation active; virtual broadcast=%s", virtualBroadcast.String())
+	log.Printf("WinDivert opened. Strict game isolation active; EasyTier handles native UDP broadcast relay, virtual broadcast=%s", virtualBroadcast.String())
 	buf := make([]byte, divertBufSize)
 	var addr divertAddress
 
@@ -356,14 +264,9 @@ func run(cfg Config) error {
 
 				switch {
 				case ipInNet(meta.DstIP, virtualNet):
-					// Every SCBL unicast and subnet-broadcast packet is pinned to EasyTier,
-					// even when Windows already selected the expected source address.
+					// Pin only packets already addressed to the SCBL overlay. Existing
+					// 10.66.0.255 broadcasts remain unchanged for EasyTier's native relay.
 					isVirtualBroadcast := meta.Proto == protoUDP && meta.DstIP == virtualBroadcast
-					if isVirtualBroadcast {
-						audit.VirtualBroadcast++
-					} else {
-						traffic.Record(meta.DstIP, true, meta.Proto, len(pkt), meta.SrcPort, meta.DstPort, tcpSynWithoutAck(meta))
-					}
 					if cfg.InterfaceIndex > 0 {
 						addr.SetNetworkInterface(uint32(cfg.InterfaceIndex), 0)
 					}
@@ -376,31 +279,7 @@ func run(cfg Config) error {
 						meta.SetSrcIP(clientIP)
 						changed = true
 					}
-					if isVirtualBroadcast {
-						peers := traffic.RecentPeers(time.Now(), broadcastPeerRetention, maxBroadcastFanoutPeers)
-						sent, failed := sendBroadcastFanout(div, pkt, addr, clientIP, cfg.InterfaceIndex, peers)
-						audit.RecordFanout(pid, meta, peers, sent, failed)
-					}
 					audit.ForcedVirtual++
-
-				case meta.Proto == protoUDP && shouldConvertToVirtualBroadcast(meta.DstIP):
-					// Convert limited broadcasts, physical/Radmin directed broadcasts and
-					// multicast into the SCBL subnet broadcast. Also duplicate the packet as
-					// unicast to recently active game peers, preserving migration discovery
-					// when native subnet broadcast is unavailable but unicast is healthy.
-					if cfg.InterfaceIndex > 0 {
-						addr.SetNetworkInterface(uint32(cfg.InterfaceIndex), 0)
-					}
-					nat.PutWildcard(original)
-					oldDst := meta.DstIP
-					meta.SetSrcIP(clientIP)
-					meta.SetDstIP(virtualBroadcast)
-					changed = true
-					audit.ConvertedBroadcast++
-					audit.NoteSpecial("converted", pid, meta.Proto, original.LocalIP, original.LocalPort, oldDst, original.RemotePort, virtualBroadcast)
-					peers := traffic.RecentPeers(time.Now(), broadcastPeerRetention, maxBroadcastFanoutPeers)
-					sent, failed := sendBroadcastFanout(div, pkt, addr, clientIP, cfg.InterfaceIndex, peers)
-					audit.RecordFanout(pid, meta, peers, sent, failed)
 
 				default:
 					// Strict mode intentionally prevents the original game process from bypassing
@@ -421,7 +300,6 @@ func run(cfg Config) error {
 					audit.BlockedInbound++
 					audit.NoteSpecial("blocked-in", pid, meta.Proto, meta.SrcIP, meta.SrcPort, meta.DstIP, meta.DstPort, IPv4{})
 				} else {
-					traffic.Record(meta.SrcIP, false, meta.Proto, len(pkt), meta.DstPort, meta.SrcPort, tcpSynWithoutAck(meta))
 					// Restore the game's original local bind address when strict source NAT was
 					// required. Wildcard mappings cover replies to converted broadcast/multicast.
 					if original, ok := nat.Get(meta.Proto, meta.DstPort, meta.SrcPort, meta.SrcIP); ok {
@@ -651,453 +529,6 @@ func (m *PacketMeta) SetSrcPort(port uint16) {
 func (m *PacketMeta) SetDstPort(port uint16) {
 	binary.BigEndian.PutUint16(m.Data[m.PortOffset+2:m.PortOffset+4], port)
 	m.DstPort = port
-}
-
-func tcpSynWithoutAck(m *PacketMeta) bool {
-	if m == nil || m.Proto != protoTCP || len(m.Data) <= m.PortOffset+13 {
-		return false
-	}
-	flags := m.Data[m.PortOffset+13]
-	return flags&0x02 != 0 && flags&0x10 == 0
-}
-
-// ---------------- Game traffic status ----------------
-
-const (
-	gameTrafficPort          = 13000
-	gameTrafficWindow        = 3 * time.Second
-	gamePeerRecentThreshold  = 1500 * time.Millisecond
-	gameCandidateConfirmRuns = 3
-	gameInitialConfirmRuns   = 2
-	broadcastPeerRetention   = 10 * time.Minute
-	maxBroadcastFanoutPeers  = 16
-)
-
-type trafficSample struct {
-	At       time.Time
-	Outbound bool
-	Bytes    uint64
-	Proto    uint8
-}
-
-type peerTraffic struct {
-	IP        IPv4
-	LastSeen  time.Time
-	Samples   []trafficSample
-	Protocols map[string]bool
-}
-
-type gameTrafficTracker struct {
-	mu                     sync.Mutex
-	localIP                IPv4
-	virtualNet             *net.IPNet
-	statusFile             string
-	historyFile            string
-	lastHistoryWrite       time.Time
-	lastHistoryFingerprint string
-	peers                  map[IPv4]*peerTraffic
-	recentPeers            map[IPv4]time.Time
-	networkAddress         IPv4
-	broadcastAddress       IPv4
-	stop                   chan struct{}
-	currentRole            string
-	currentPeer            IPv4
-	pendingRole            string
-	pendingPeer            IPv4
-	pendingCount           int
-}
-
-type gamePeerStatus struct {
-	IP                   string   `json:"ip"`
-	OutboundPackets      uint64   `json:"outboundPackets"`
-	InboundPackets       uint64   `json:"inboundPackets"`
-	OutboundBytes        uint64   `json:"outboundBytes"`
-	InboundBytes         uint64   `json:"inboundBytes"`
-	LastSeenUnixMs       int64    `json:"lastSeenUnixMs"`
-	Protocols            []string `json:"protocols"`
-	OutboundAverageBytes uint64   `json:"outboundAverageBytes"`
-	InboundAverageBytes  uint64   `json:"inboundAverageBytes"`
-	OutboundMaxBytes     uint64   `json:"outboundMaxBytes"`
-	InboundMaxBytes      uint64   `json:"inboundMaxBytes"`
-}
-
-type gameRouteStatus struct {
-	UpdatedAtUnixMs int64            `json:"updatedAtUnixMs"`
-	LocalIP         string           `json:"localIp"`
-	Role            string           `json:"role"`
-	PrimaryPeerIP   string           `json:"primaryPeerIp"`
-	CandidatePeerIP string           `json:"candidatePeerIp,omitempty"`
-	Confidence      int              `json:"confidence"`
-	ActivePeerCount int              `json:"activePeerCount"`
-	WindowMs        int64            `json:"windowMs"`
-	DetectionMode   string           `json:"detectionMode"`
-	Peers           []gamePeerStatus `json:"peers"`
-}
-
-type peerWindowStats struct {
-	IP                   IPv4
-	LastSeen             time.Time
-	OutboundPackets      uint64
-	InboundPackets       uint64
-	OutboundBytes        uint64
-	InboundBytes         uint64
-	Protocols            []string
-	OutboundAverageBytes uint64
-	InboundAverageBytes  uint64
-	OutboundMaxBytes     uint64
-	InboundMaxBytes      uint64
-	Score                uint64
-}
-
-type rawGameHostCandidate struct {
-	Role       string
-	Peer       IPv4
-	Confidence int
-}
-
-func newGameTrafficTracker(localIP IPv4, virtualNet *net.IPNet, statusFile, historyFile string) *gameTrafficTracker {
-	networkAddress, broadcastAddress := ipv4Range(virtualNet)
-	t := &gameTrafficTracker{
-		localIP:          localIP,
-		virtualNet:       virtualNet,
-		statusFile:       strings.TrimSpace(statusFile),
-		historyFile:      strings.TrimSpace(historyFile),
-		peers:            map[IPv4]*peerTraffic{},
-		recentPeers:      map[IPv4]time.Time{},
-		networkAddress:   networkAddress,
-		broadcastAddress: broadcastAddress,
-		stop:             make(chan struct{}),
-		currentRole:      "unknown",
-	}
-	if t.statusFile != "" {
-		_ = os.MkdirAll(filepath.Dir(t.statusFile), 0755)
-		_ = os.Remove(t.statusFile)
-		if t.historyFile != "" {
-			_ = os.MkdirAll(filepath.Dir(t.historyFile), 0755)
-			_ = os.Remove(t.historyFile)
-		}
-		go t.writeLoop()
-	}
-	return t
-}
-
-// Record observes only traffic that Windows attributes to the game process. Host detection is
-// intentionally narrower than routing: only the game's UDP/13000 peer traffic participates in
-// host inference. Login, service, EasyTier, probe, and unrelated virtual-LAN packets are ignored.
-func (t *gameTrafficTracker) Record(remote IPv4, outbound bool, proto uint8, size int, localPort, remotePort uint16, syn bool) {
-	if t == nil || remote == t.localIP || remote == t.networkAddress || remote == t.broadcastAddress || remote.String() == "10.66.0.1" || !ipInNet(remote, t.virtualNet) {
-		return
-	}
-	if proto != protoUDP || (localPort != gameTrafficPort && remotePort != gameTrafficPort) {
-		return
-	}
-
-	now := time.Now()
-	t.mu.Lock()
-	t.recentPeers[remote] = now
-	if t.statusFile != "" {
-		p := t.peers[remote]
-		if p == nil {
-			p = &peerTraffic{IP: remote, Protocols: map[string]bool{}}
-			t.peers[remote] = p
-		}
-		p.LastSeen = now
-		p.Protocols[protoName(proto)] = true
-		p.Samples = append(p.Samples, trafficSample{At: now, Outbound: outbound, Bytes: uint64(size), Proto: proto})
-	}
-	_ = syn
-	t.mu.Unlock()
-}
-
-func (t *gameTrafficTracker) RecentPeers(now time.Time, maxAge time.Duration, limit int) []IPv4 {
-	if t == nil || maxAge <= 0 || limit <= 0 {
-		return nil
-	}
-	type recentPeer struct {
-		IP       IPv4
-		LastSeen time.Time
-	}
-	cutoff := now.Add(-maxAge)
-	t.mu.Lock()
-	items := make([]recentPeer, 0, len(t.recentPeers))
-	for ip, lastSeen := range t.recentPeers {
-		if lastSeen.Before(cutoff) {
-			delete(t.recentPeers, ip)
-			continue
-		}
-		if ip == t.localIP || ip == t.networkAddress || ip == t.broadcastAddress || ip.String() == "10.66.0.1" || !ipInNet(ip, t.virtualNet) {
-			continue
-		}
-		items = append(items, recentPeer{IP: ip, LastSeen: lastSeen})
-	}
-	t.mu.Unlock()
-	sort.Slice(items, func(i, j int) bool {
-		if items[i].LastSeen.Equal(items[j].LastSeen) {
-			return items[i].IP.String() < items[j].IP.String()
-		}
-		return items[i].LastSeen.After(items[j].LastSeen)
-	})
-	if len(items) > limit {
-		items = items[:limit]
-	}
-	out := make([]IPv4, 0, len(items))
-	for _, item := range items {
-		out = append(out, item.IP)
-	}
-	return out
-}
-
-func (t *gameTrafficTracker) writeLoop() {
-	ticker := time.NewTicker(1 * time.Second)
-	defer ticker.Stop()
-	for {
-		select {
-		case <-ticker.C:
-			t.writeSnapshot()
-		case <-t.stop:
-			t.writeSnapshot()
-			return
-		}
-	}
-}
-
-func (t *gameTrafficTracker) writeSnapshot() {
-	if t.statusFile == "" {
-		return
-	}
-	now := time.Now()
-	t.mu.Lock()
-	stats := t.collectWindowStatsLocked(now)
-	raw := inferGameHostCandidate(stats, now)
-	status := t.stabilizeCandidateLocked(stats, raw, now)
-	t.mu.Unlock()
-
-	rawJSON, err := json.MarshalIndent(status, "", "  ")
-	if err != nil {
-		return
-	}
-	tmp := t.statusFile + ".tmp"
-	if err := os.WriteFile(tmp, rawJSON, 0644); err != nil {
-		return
-	}
-	_ = os.Remove(t.statusFile)
-	_ = os.Rename(tmp, t.statusFile)
-
-	if t.historyFile != "" {
-		fingerprint := fmt.Sprintf("%s|%s|%s|%d", status.Role, status.PrimaryPeerIP, status.CandidatePeerIP, status.ActivePeerCount)
-		changed := fingerprint != t.lastHistoryFingerprint
-		due := t.lastHistoryWrite.IsZero() || now.Sub(t.lastHistoryWrite) >= 10*time.Second
-		if changed || due {
-			t.lastHistoryWrite = now
-			t.lastHistoryFingerprint = fingerprint
-			compact, err := json.Marshal(status)
-			if err == nil {
-				if info, statErr := os.Stat(t.historyFile); statErr == nil && info.Size() > 1024*1024 {
-					_ = os.Remove(t.historyFile + ".1")
-					_ = os.Rename(t.historyFile, t.historyFile+".1")
-				}
-				if f, openErr := os.OpenFile(t.historyFile, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644); openErr == nil {
-					_, _ = f.Write(append(compact, '\n'))
-					_ = f.Close()
-				}
-			}
-		}
-	}
-}
-
-func (t *gameTrafficTracker) collectWindowStatsLocked(now time.Time) []peerWindowStats {
-	cutoff := now.Add(-gameTrafficWindow)
-	stats := make([]peerWindowStats, 0, len(t.peers))
-	for ip, p := range t.peers {
-		first := 0
-		for first < len(p.Samples) && p.Samples[first].At.Before(cutoff) {
-			first++
-		}
-		if first > 0 {
-			p.Samples = append([]trafficSample(nil), p.Samples[first:]...)
-		}
-		if len(p.Samples) == 0 {
-			if now.Sub(p.LastSeen) > gameTrafficWindow {
-				delete(t.peers, ip)
-			}
-			continue
-		}
-
-		item := peerWindowStats{IP: p.IP, LastSeen: p.LastSeen}
-		protocols := map[string]bool{}
-		for _, sample := range p.Samples {
-			protocols[protoName(sample.Proto)] = true
-			if sample.Outbound {
-				item.OutboundPackets++
-				item.OutboundBytes += sample.Bytes
-				if sample.Bytes > item.OutboundMaxBytes {
-					item.OutboundMaxBytes = sample.Bytes
-				}
-			} else {
-				item.InboundPackets++
-				item.InboundBytes += sample.Bytes
-				if sample.Bytes > item.InboundMaxBytes {
-					item.InboundMaxBytes = sample.Bytes
-				}
-			}
-		}
-		for proto := range protocols {
-			item.Protocols = append(item.Protocols, proto)
-		}
-		if item.OutboundPackets > 0 {
-			item.OutboundAverageBytes = item.OutboundBytes / item.OutboundPackets
-		}
-		if item.InboundPackets > 0 {
-			item.InboundAverageBytes = item.InboundBytes / item.InboundPackets
-		}
-		if len(item.Protocols) == 2 && item.Protocols[0] > item.Protocols[1] {
-			item.Protocols[0], item.Protocols[1] = item.Protocols[1], item.Protocols[0]
-		}
-		// Packet cadence is a stronger host signal than payload size. Bytes have a low weight so
-		// one large state packet cannot outweigh sustained two-way communication.
-		biDirectionalBonus := uint64(0)
-		if item.OutboundPackets > 0 && item.InboundPackets > 0 {
-			biDirectionalBonus = 200_000
-		}
-		item.Score = biDirectionalBonus + (item.OutboundPackets+item.InboundPackets)*4096 + (item.OutboundBytes+item.InboundBytes)/16
-		stats = append(stats, item)
-	}
-	sort.Slice(stats, func(i, j int) bool {
-		if stats[i].Score == stats[j].Score {
-			return stats[i].IP.String() < stats[j].IP.String()
-		}
-		return stats[i].Score > stats[j].Score
-	})
-	return stats
-}
-
-func inferGameHostCandidate(stats []peerWindowStats, now time.Time) rawGameHostCandidate {
-	eligible := make([]peerWindowStats, 0, len(stats))
-	for _, item := range stats {
-		if now.Sub(item.LastSeen) <= gamePeerRecentThreshold && item.OutboundPackets >= 2 && item.InboundPackets >= 2 {
-			eligible = append(eligible, item)
-		}
-	}
-	if len(eligible) == 0 {
-		return rawGameHostCandidate{Role: "unknown"}
-	}
-	if len(eligible) == 1 {
-		return rawGameHostCandidate{Role: "client", Peer: eligible[0].IP, Confidence: 96}
-	}
-
-	// The July three-player trace proved that SCBL exchanges UDP/13000 packets in a full mesh.
-	// Therefore "two peers means I am host" is invalid. Never infer a local host from topology.
-	// A remote host is reported only when one flow strongly and consistently dominates the next
-	// strongest flow. Balanced multi-peer traffic remains unknown instead of displaying a false 0ms.
-	top := eligible[0]
-	second := eligible[1]
-	strongScoreLead := top.Score >= second.Score*5/2
-	strongPacketLead := (top.OutboundPackets + top.InboundPackets) >= (second.OutboundPackets+second.InboundPackets)*2
-	if strongScoreLead && strongPacketLead {
-		return rawGameHostCandidate{Role: "client", Peer: top.IP, Confidence: 84}
-	}
-	return rawGameHostCandidate{Role: "unknown", Peer: top.IP, Confidence: 0}
-}
-
-func (t *gameTrafficTracker) stabilizeCandidateLocked(stats []peerWindowStats, raw rawGameHostCandidate, now time.Time) gameRouteStatus {
-	status := gameRouteStatus{
-		UpdatedAtUnixMs: now.UnixMilli(),
-		LocalIP:         t.localIP.String(),
-		Role:            "unknown",
-		ActivePeerCount: len(stats),
-		WindowMs:        gameTrafficWindow.Milliseconds(),
-		DetectionMode:   "game-process-udp-13000-fallback-v4-strict-route",
-		Peers:           make([]gamePeerStatus, 0, len(stats)),
-	}
-	for _, item := range stats {
-		status.Peers = append(status.Peers, gamePeerStatus{
-			IP:                   item.IP.String(),
-			OutboundPackets:      item.OutboundPackets,
-			InboundPackets:       item.InboundPackets,
-			OutboundBytes:        item.OutboundBytes,
-			InboundBytes:         item.InboundBytes,
-			LastSeenUnixMs:       item.LastSeen.UnixMilli(),
-			Protocols:            item.Protocols,
-			OutboundAverageBytes: item.OutboundAverageBytes,
-			InboundAverageBytes:  item.InboundAverageBytes,
-			OutboundMaxBytes:     item.OutboundMaxBytes,
-			InboundMaxBytes:      item.InboundMaxBytes,
-		})
-	}
-	if raw.Peer != (IPv4{}) {
-		status.CandidatePeerIP = raw.Peer.String()
-	}
-
-	currentStillRecent := false
-	if t.currentRole == "client" {
-		for _, item := range stats {
-			if item.IP == t.currentPeer && now.Sub(item.LastSeen) <= gamePeerRecentThreshold {
-				currentStillRecent = true
-				break
-			}
-		}
-	}
-
-	sameAsCurrent := raw.Role == t.currentRole && (raw.Role != "client" || raw.Peer == t.currentPeer)
-	if sameAsCurrent {
-		t.pendingRole = ""
-		t.pendingPeer = IPv4{}
-		t.pendingCount = 0
-	} else if raw.Role == "unknown" {
-		if t.currentRole != "unknown" {
-			log.Printf("[HOST-DETECT] cleared previous-role=%s previous-target=%s reason=balanced-or-ambiguous-full-mesh active-peers=%d", t.currentRole, t.currentPeer.String(), len(stats))
-		}
-		t.currentRole = "unknown"
-		t.currentPeer = IPv4{}
-		t.pendingRole = ""
-		t.pendingPeer = IPv4{}
-		t.pendingCount = 0
-	} else {
-		samePending := raw.Role == t.pendingRole && (raw.Role != "client" || raw.Peer == t.pendingPeer)
-		if samePending {
-			t.pendingCount++
-		} else {
-			t.pendingRole = raw.Role
-			t.pendingPeer = raw.Peer
-			t.pendingCount = 1
-		}
-
-		required := gameCandidateConfirmRuns
-		if t.currentRole == "unknown" || !currentStillRecent {
-			required = gameInitialConfirmRuns
-		}
-		if t.pendingCount >= required {
-			previousRole := t.currentRole
-			previousPeer := t.currentPeer
-			t.currentRole = raw.Role
-			t.currentPeer = raw.Peer
-			t.pendingRole = ""
-			t.pendingPeer = IPv4{}
-			t.pendingCount = 0
-			previousTarget := previousPeer.String()
-			currentTarget := t.currentPeer.String()
-			log.Printf("[HOST-DETECT] confirmed role=%s target=%s previous-role=%s previous-target=%s confidence=%d active-peers=%d window=%s",
-				t.currentRole, currentTarget, previousRole, previousTarget, raw.Confidence, len(stats), gameTrafficWindow)
-		}
-	}
-
-	status.Role = t.currentRole
-	if t.currentRole == "client" {
-		status.PrimaryPeerIP = t.currentPeer.String()
-		status.Confidence = raw.Confidence
-	}
-	return status
-}
-
-func (t *gameTrafficTracker) Stop() {
-	if t == nil {
-		return
-	}
-	select {
-	case <-t.stop:
-	default:
-		close(t.stop)
-	}
 }
 
 // ---------------- NAT state ----------------

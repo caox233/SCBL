@@ -1,6 +1,8 @@
 using System;
+using System.Diagnostics;
 using System.IO;
 using System.Linq;
+using System.Net;
 using System.Net.Http;
 using System.Security.Cryptography;
 using System.Text.Json;
@@ -11,8 +13,16 @@ namespace SplinterCellCNLauncher.Services;
 
 public sealed class RemoteClientUpdateService
 {
-    private const int CheckTimeoutSeconds = 8;
+    private const int CheckAttemptCount = 3;
+    private const int CheckTimeoutSeconds = 7;
+    private const int CheckConnectTimeoutSeconds = 4;
     private const int DownloadTimeoutSeconds = 900;
+    private static readonly TimeSpan[] CheckRetryDelays =
+    {
+        TimeSpan.Zero,
+        TimeSpan.FromMilliseconds(350),
+        TimeSpan.FromMilliseconds(900)
+    };
 
     public sealed class RemoteUpdateInfo
     {
@@ -79,69 +89,109 @@ public sealed class RemoteClientUpdateService
     {
         baseUrl = NormalizeBaseUrl(baseUrl);
         string manifestUrl = baseUrl + "client_update_manifest.json";
-        try
+
+        for (int attempt = 1; attempt <= CheckAttemptCount; attempt++)
         {
-            using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-            timeout.CancelAfter(TimeSpan.FromSeconds(CheckTimeoutSeconds));
-            using var http = CreateHttpClient();
-            using var response = await http.GetAsync(manifestUrl, timeout.Token).ConfigureAwait(false);
-            if (!response.IsSuccessStatusCode)
+            TimeSpan retryDelay = CheckRetryDelays[attempt - 1];
+            if (retryDelay > TimeSpan.Zero)
             {
-                LogService.Info($"Client version information unavailable: url={manifestUrl}, status={(int)response.StatusCode}");
-                return RemoteUpdateCheckResult.Unavailable(baseUrl);
+                LogService.Info(
+                    $"Retrying client version check: attempt={attempt}/{CheckAttemptCount}, delayMs={(long)retryDelay.TotalMilliseconds}, endpoint={manifestUrl}");
+                await Task.Delay(retryDelay, cancellationToken).ConfigureAwait(false);
             }
 
-            await using var stream = await response.Content.ReadAsStreamAsync(timeout.Token).ConfigureAwait(false);
-            var manifest = await JsonSerializer.DeserializeAsync<RemoteManifest>(stream, cancellationToken: timeout.Token).ConfigureAwait(false);
-            string targetVersion = NormalizeVersion(manifest?.version ?? "");
-            string current = NormalizeVersion(currentVersion);
-            string mode = (manifest?.updateMode ?? manifest?.update_mode ?? "").Trim();
-            string package = NormalizeRelativePath(manifest?.fullPackage ?? manifest?.full_package ?? "");
-            string expected = (manifest?.fullPackageSha256 ?? manifest?.full_package_sha256 ?? "").Trim().ToLowerInvariant();
-
-            if (!IsThreePartVersion(targetVersion) ||
-                !mode.Equals("full-package", StringComparison.OrdinalIgnoreCase) ||
-                !IsSafePackagePath(package) ||
-                !IsSha256(expected))
+            var stopwatch = Stopwatch.StartNew();
+            try
             {
-                LogService.Error("Client version information is incomplete or invalid.");
-                return RemoteUpdateCheckResult.Unavailable(baseUrl);
+                using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+                timeout.CancelAfter(TimeSpan.FromSeconds(CheckTimeoutSeconds));
+                using var http = CreateHttpClient(TimeSpan.FromSeconds(CheckConnectTimeoutSeconds));
+                using var response = await http.GetAsync(
+                    manifestUrl,
+                    HttpCompletionOption.ResponseHeadersRead,
+                    timeout.Token).ConfigureAwait(false);
+
+                if (!response.IsSuccessStatusCode)
+                {
+                    LogService.Info(
+                        $"Client version information unavailable: attempt={attempt}/{CheckAttemptCount}, url={manifestUrl}, status={(int)response.StatusCode}, elapsedMs={stopwatch.ElapsedMilliseconds}");
+                    if (attempt < CheckAttemptCount && ShouldRetryStatusCode(response.StatusCode))
+                        continue;
+                    return RemoteUpdateCheckResult.Unavailable(baseUrl);
+                }
+
+                await using var stream = await response.Content.ReadAsStreamAsync(timeout.Token).ConfigureAwait(false);
+                var manifest = await JsonSerializer.DeserializeAsync<RemoteManifest>(
+                    stream,
+                    cancellationToken: timeout.Token).ConfigureAwait(false);
+                string targetVersion = NormalizeVersion(manifest?.version ?? "");
+                string current = NormalizeVersion(currentVersion);
+                string mode = (manifest?.updateMode ?? manifest?.update_mode ?? "").Trim();
+                string package = NormalizeRelativePath(manifest?.fullPackage ?? manifest?.full_package ?? "");
+                string expected = (manifest?.fullPackageSha256 ?? manifest?.full_package_sha256 ?? "").Trim().ToLowerInvariant();
+
+                if (!IsThreePartVersion(targetVersion) ||
+                    !mode.Equals("full-package", StringComparison.OrdinalIgnoreCase) ||
+                    !IsSafePackagePath(package) ||
+                    !IsSha256(expected))
+                {
+                    LogService.Error("Client version information is incomplete or invalid.");
+                    return RemoteUpdateCheckResult.Unavailable(baseUrl);
+                }
+
+                if (attempt > 1)
+                {
+                    LogService.Info(
+                        $"Client version check recovered after retry: attempt={attempt}/{CheckAttemptCount}, elapsedMs={stopwatch.ElapsedMilliseconds}, endpoint={manifestUrl}");
+                }
+
+                if (current.Equals(targetVersion, StringComparison.OrdinalIgnoreCase))
+                    return RemoteUpdateCheckResult.Completed(baseUrl, null);
+
+                var announcement = manifest?.updateAnnouncement ?? manifest?.update_announcement;
+                bool announcementEnabled = announcement?.enabled ?? true;
+                var update = new RemoteUpdateInfo
+                {
+                    Version = targetVersion,
+                    BaseUrl = baseUrl,
+                    FullPackage = package,
+                    FullPackageSha256 = expected,
+                    IsVersionUpgrade = true,
+                    ReleaseNotes = (manifest?.release_notes ?? manifest?.releaseNotes ?? Array.Empty<string>())
+                        .Where(x => !string.IsNullOrWhiteSpace(x))
+                        .Select(x => x.Trim())
+                        .ToArray(),
+                    UpdateAnnouncementTitle = announcementEnabled ? FirstNonEmpty(announcement?.title, announcement?.title_zh) : "",
+                    UpdateAnnouncementBody = announcementEnabled ? FirstNonEmpty(announcement?.body, announcement?.body_zh) : "",
+                    UpdateAnnouncementTitleEn = announcementEnabled ? (announcement?.title_en ?? "").Trim() : "",
+                    UpdateAnnouncementBodyEn = announcementEnabled ? (announcement?.body_en ?? "").Trim() : ""
+                };
+                LogService.Info($"Client version mismatch: local={current}, required={targetVersion}");
+                return RemoteUpdateCheckResult.Completed(baseUrl, update);
             }
-
-            if (current.Equals(targetVersion, StringComparison.OrdinalIgnoreCase))
-                return RemoteUpdateCheckResult.Completed(baseUrl, null);
-
-            var announcement = manifest?.updateAnnouncement ?? manifest?.update_announcement;
-            bool announcementEnabled = announcement?.enabled ?? true;
-            var update = new RemoteUpdateInfo
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
             {
-                Version = targetVersion,
-                BaseUrl = baseUrl,
-                FullPackage = package,
-                FullPackageSha256 = expected,
-                IsVersionUpgrade = true,
-                ReleaseNotes = (manifest?.release_notes ?? manifest?.releaseNotes ?? Array.Empty<string>())
-                    .Where(x => !string.IsNullOrWhiteSpace(x))
-                    .Select(x => x.Trim())
-                    .ToArray(),
-                UpdateAnnouncementTitle = announcementEnabled ? FirstNonEmpty(announcement?.title, announcement?.title_zh) : "",
-                UpdateAnnouncementBody = announcementEnabled ? FirstNonEmpty(announcement?.body, announcement?.body_zh) : "",
-                UpdateAnnouncementTitleEn = announcementEnabled ? (announcement?.title_en ?? "").Trim() : "",
-                UpdateAnnouncementBodyEn = announcementEnabled ? (announcement?.body_en ?? "").Trim() : ""
-            };
-            LogService.Info($"Client version mismatch: local={current}, required={targetVersion}");
-            return RemoteUpdateCheckResult.Completed(baseUrl, update);
+                throw;
+            }
+            catch (OperationCanceledException ex)
+            {
+                LogService.Info(
+                    $"Client version check attempt timed out: attempt={attempt}/{CheckAttemptCount}, elapsedMs={stopwatch.ElapsedMilliseconds}, endpoint={manifestUrl}, reason={DescribeException(ex)}");
+            }
+            catch (HttpRequestException ex)
+            {
+                LogService.Info(
+                    $"Client version check attempt failed: attempt={attempt}/{CheckAttemptCount}, elapsedMs={stopwatch.ElapsedMilliseconds}, endpoint={manifestUrl}, error={ex.HttpRequestError}, reason={DescribeException(ex)}");
+            }
+            catch (Exception ex)
+            {
+                LogService.Info(
+                    $"Client version check attempt failed: attempt={attempt}/{CheckAttemptCount}, elapsedMs={stopwatch.ElapsedMilliseconds}, endpoint={manifestUrl}, error={ex.GetType().Name}, reason={DescribeException(ex)}");
+            }
         }
-        catch (OperationCanceledException)
-        {
-            LogService.Info($"Client version check timed out: {manifestUrl}");
-            return RemoteUpdateCheckResult.Unavailable(baseUrl);
-        }
-        catch (Exception ex)
-        {
-            LogService.Info($"Client version check failed: endpoint={manifestUrl}, reason={ex.Message}");
-            return RemoteUpdateCheckResult.Unavailable(baseUrl);
-        }
+
+        LogService.Info($"Client version check unavailable after {CheckAttemptCount} attempts: {manifestUrl}");
+        return RemoteUpdateCheckResult.Unavailable(baseUrl);
     }
 
     public async Task<LocalClientUpdateService.UpdatePackageInfo> DownloadAsync(
@@ -186,16 +236,32 @@ public sealed class RemoteClientUpdateService
         }
     }
 
-    private static HttpClient CreateHttpClient()
+    private static HttpClient CreateHttpClient(TimeSpan? connectTimeout = null)
     {
         var handler = new SocketsHttpHandler
         {
             UseProxy = false,
             Proxy = null,
-            ConnectTimeout = TimeSpan.FromSeconds(6),
+            ConnectTimeout = connectTimeout ?? TimeSpan.FromSeconds(6),
             PooledConnectionLifetime = TimeSpan.FromMinutes(2)
         };
         return new HttpClient(handler, disposeHandler: true) { Timeout = Timeout.InfiniteTimeSpan };
+    }
+
+    private static bool ShouldRetryStatusCode(HttpStatusCode statusCode)
+        => statusCode == HttpStatusCode.RequestTimeout
+           || statusCode == HttpStatusCode.TooManyRequests
+           || (int)statusCode >= 500;
+
+    private static string DescribeException(Exception ex)
+    {
+        string[] parts = new[] { ex.Message, ex.InnerException?.Message ?? "" }
+            .Where(x => !string.IsNullOrWhiteSpace(x))
+            .Select(x => x.Replace('\r', ' ').Replace('\n', ' ').Trim())
+            .Distinct(StringComparer.Ordinal)
+            .Take(2)
+            .ToArray();
+        return parts.Length == 0 ? ex.GetType().Name : string.Join(" | ", parts);
     }
 
     private static string NormalizeBaseUrl(string value)

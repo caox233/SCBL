@@ -1,0 +1,82 @@
+name: Validate Windows Client v1.0.3 restart fix
+
+on:
+  push:
+    branches:
+      - agent/client-v1.0.3-restart-fix
+    paths:
+      - tools/agent_client_103_restart_patch.py
+      - .github/workflows/agent-client-103-restart.yml
+
+permissions:
+  contents: write
+
+jobs:
+  validate-and-apply:
+    runs-on: windows-2022
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: agent/client-v1.0.3-restart-fix
+          fetch-depth: 0
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 8.0.x
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: 1.23.2
+          cache: true
+          cache-dependency-path: client/scbl-process-router/go.sum
+
+      - name: Apply client restart fix
+        shell: pwsh
+        run: python tools/agent_client_103_restart_patch.py
+
+      - name: Run restart regression check
+        shell: pwsh
+        run: python server/test_client_update_restart.py
+
+      - name: Build and package Windows client
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          .\client\build_all_windows.ps1 -Fast -Package -OutputDir "$env:GITHUB_WORKSPACE\dist"
+          $zip = Get-Item ".\dist\SCBL-Client-v1.0.3-win-x86.zip"
+          if ($zip.Length -le 0) { throw 'Client package is empty.' }
+          Add-Type -AssemblyName System.IO.Compression.FileSystem
+          $archive = [IO.Compression.ZipFile]::OpenRead($zip.FullName)
+          try {
+            $names = @($archive.Entries | ForEach-Object FullName)
+            foreach ($required in @(
+              'SplinterCellCNLauncher.exe',
+              'SCBL.Updater.exe',
+              'tools/SCBL.Updater.payload.exe'
+            )) {
+              if ($names -notcontains $required) { throw "Client package missing $required" }
+            }
+          }
+          finally {
+            $archive.Dispose()
+          }
+          $hash = (Get-FileHash $zip.FullName -Algorithm SHA256).Hash.ToLowerInvariant()
+          "package=$($zip.Name)" | Set-Content .\client-v1.0.3-validation.txt -Encoding ascii
+          "sha256=$hash" | Add-Content .\client-v1.0.3-validation.txt -Encoding ascii
+          "restart_helper=OK" | Add-Content .\client-v1.0.3-validation.txt -Encoding ascii
+          "launcher_build=OK" | Add-Content .\client-v1.0.3-validation.txt -Encoding ascii
+          "updater_build=OK" | Add-Content .\client-v1.0.3-validation.txt -Encoding ascii
+
+      - name: Commit verified formal changes
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          Remove-Item tools/agent_client_103_restart_patch.py -Force
+          Remove-Item .github/workflows/agent-client-103-restart.yml -Force
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add -A
+          git diff --cached --check
+          git commit -m 'Fix client restart after update'
+          git push origin HEAD:agent/client-v1.0.3-restart-fix

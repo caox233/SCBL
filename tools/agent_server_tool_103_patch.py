@@ -83,4 +83,14 @@ replace_once(
 ''',
 )
 
+replace_once(
+    "CHANGELOG.md",
+    "# 更新记录\n\n## v1.0.2\n",
+    "# 更新记录\n\n## Server Tool v1.0.3\n\n"
+    "- 修复 v1.0.2 服务端完整包遗漏 `scbl_update_server.py`，导致首次部署生成双栈更新服务时中止的问题。\n"
+    "- 一键安装和在线升级现在会校验、保存、备份并恢复双栈更新服务脚本。\n"
+    "- 发布流程增加安装包必需文件和归档内容检查，禁止再次发布残缺 Server Tool 包。\n\n"
+    "## v1.0.2\n",
+)
+
 print("Server Tool v1.0.3 manager hotfix applied")

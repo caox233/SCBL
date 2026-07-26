@@ -7,7 +7,7 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: write
+  contents: read
 
 concurrency:
   group: scbl-validate-${{ github.ref }}
@@ -19,24 +19,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: agent/client-v1.0.3-restart-fix
-          fetch-depth: 0
-
-      - uses: actions/setup-dotnet@v4
-        with:
-          dotnet-version: 8.0.x
-
-      - name: Apply client restart patch
-        shell: bash
-        run: |
-          set -euo pipefail
-          python3 tools/agent_client_103_restart_patch.py
-          python3 server/test_client_update_restart.py
-          dotnet publish client/SCBL.Updater/SCBL.Updater.csproj \
-            -c Release -r win-x86 --self-contained true \
-            -p:PublishSingleFile=true \
-            -o /tmp/scbl-updater-v1.0.3
-          test -s /tmp/scbl-updater-v1.0.3/SCBL.Updater.exe
+          fetch-depth: 2
 
       - name: Detect Route Guard changes
         id: changes
@@ -137,19 +120,3 @@ jobs:
           GOOS=windows GOARCH=amd64 go test .
           GOOS=windows GOARCH=amd64 go build -mod=readonly -trimpath -o /tmp/scbl-process-router.exe .
           test -s /tmp/scbl-process-router.exe
-
-      - name: Commit verified formal changes
-        shell: bash
-        run: |
-          set -euo pipefail
-          git config user.name 'github-actions[bot]'
-          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          git add \
-            VERSION VERSION_CLIENT COMPONENT_VERSIONS.json README.md CHANGELOG.md \
-            client/SCBL.Updater/Program.cs client/SCBL.Updater/RestartCoordinator.cs \
-            client/ScblPublicLauncher/Services/LocalClientUpdateService.cs \
-            client/scbl-process-router/main.go \
-            docs/releases/CLIENT_v1.0.3.md server/test_client_update_restart.py
-          git diff --cached --check
-          git commit -m 'Fix client restart after update'
-          git push origin HEAD:agent/client-v1.0.3-restart-fix

@@ -19,4 +19,13 @@ assert "client-release-manifest.json" not in client_release
 assert "server-tool-release-manifest.json" not in server_release
 assert "[CLIENT] Windows Client v${version}" in client_release
 assert "[SERVER] Server Tool v${version}" in server_release
-print("direct formal release routing checks passed")
+
+# The dual-stack update service is a required Server Tool runtime dependency.
+assert "server/scbl_update_server.py" in server_release
+assert 'tar -tzf "dist/$package" | grep -Fxq "$root/scbl_update_server.py"' in server_release
+assert "scbl_update_server.py" in bootstrap
+assert 'update_server_file="$package_root/scbl_update_server.py"' in bootstrap
+assert 'update_new="${package_root}/scbl_update_server.py"' in manager
+assert 'install -m 0644 "$update_new" "$MANAGER_DIR/scbl_update_server.py"' in manager
+
+print("direct formal release routing and package dependency checks passed")

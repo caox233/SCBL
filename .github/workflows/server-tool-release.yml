@@ -70,19 +70,41 @@ jobs:
           version='${{ needs.metadata.outputs.version }}'
           bash -n server/install_public_server.sh
           bash -n scripts/install-server.sh
-          python3 -m py_compile server/scbl_control_plane.py server/test_control_plane.py server/test_ddns_go_native.py server/test_release_manifest_routing.py
+          python3 -m py_compile \
+            server/scbl_control_plane.py \
+            server/scbl_update_server.py \
+            server/test_control_plane.py \
+            server/test_update_server.py \
+            server/test_ddns_go_native.py \
+            server/test_release_manifest_routing.py
           python3 server/test_control_plane.py
+          python3 server/test_update_server.py
           python3 server/test_ddns_go_native.py
           python3 server/test_release_manifest_routing.py
           root="SCBL-Server-Tool-v${version}-linux-x86_64"
           mkdir -p "stage/$root/THIRD_PARTY_LICENSES" dist
-          cp server/install_public_server.sh server/scbl_control_plane.py server/check_scbl_binary_release.sh \
-             server/5th-echelon_branch.txt scripts/install-server.sh VERSION_SERVER_TOOL VERSION_CLIENT \
-             COMPONENT_VERSIONS.json README.md CHANGELOG.md THIRD_PARTY_NOTICES.md "stage/$root/"
+          cp server/install_public_server.sh server/scbl_control_plane.py server/scbl_update_server.py \
+             server/check_scbl_binary_release.sh server/5th-echelon_branch.txt scripts/install-server.sh \
+             VERSION_SERVER_TOOL VERSION_CLIENT COMPONENT_VERSIONS.json README.md CHANGELOG.md \
+             THIRD_PARTY_NOTICES.md "stage/$root/"
           cp THIRD_PARTY_LICENSES/EasyTier-LGPL-3.0.txt "stage/$root/THIRD_PARTY_LICENSES/"
-          chmod 0755 "stage/$root/install_public_server.sh" "stage/$root/install-server.sh" "stage/$root/check_scbl_binary_release.sh"
+          chmod 0755 \
+            "stage/$root/install_public_server.sh" \
+            "stage/$root/install-server.sh" \
+            "stage/$root/check_scbl_binary_release.sh" \
+            "stage/$root/scbl_update_server.py"
+          for required in \
+            install_public_server.sh \
+            install-server.sh \
+            scbl_control_plane.py \
+            scbl_update_server.py \
+            VERSION_SERVER_TOOL; do
+            test -s "stage/$root/$required"
+          done
+          python3 -m py_compile "stage/$root/scbl_control_plane.py" "stage/$root/scbl_update_server.py"
           package="${root}.tar.gz"
           tar -C stage -czf "dist/$package" "$root"
+          tar -tzf "dist/$package" | grep -Fxq "$root/scbl_update_server.py"
           package_sha="$(sha256sum "dist/$package" | awk '{print $1}')"
           printf '%s  %s\n' "$package_sha" "$package" > "dist/${package}.sha256"
           (cd dist && sha256sum $(find . -maxdepth 1 -type f ! -name SHA256SUMS.txt -printf '%f\n' | sort) > SHA256SUMS.txt)

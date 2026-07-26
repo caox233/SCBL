@@ -53,9 +53,15 @@ package_root="$(find "$TMP/extract" -mindepth 1 -maxdepth 1 -type d -name 'SCBL-
 [[ -n "$package_root" ]] || { echo "服务端工具包目录不正确。" >&2; exit 1; }
 installer="$package_root/install_public_server.sh"
 version_file="$package_root/VERSION_SERVER_TOOL"
-[[ -f "$installer" && -f "$version_file" ]] || { echo "服务端工具包缺少必要文件。" >&2; exit 1; }
+control_file="$package_root/scbl_control_plane.py"
+update_server_file="$package_root/scbl_update_server.py"
+[[ -f "$installer" && -f "$version_file" && -f "$control_file" && -f "$update_server_file" ]] || {
+  echo "服务端工具包缺少必要文件。" >&2
+  exit 1
+}
 [[ "$(tr -d '[:space:]' < "$version_file")" == "$version" ]] || { echo "服务端工具包版本不一致。" >&2; exit 1; }
 bash -n "$installer"
+python3 -m py_compile "$control_file" "$update_server_file"
 python3 - "$installer" <<'PYEOF_VALIDATE_BOOTSTRAP_MANAGER'
 from pathlib import Path
 import re, sys
@@ -70,7 +76,7 @@ PYEOF_VALIDATE_BOOTSTRAP_MANAGER
 install -d -m 0755 "$MANAGER_DIR"
 install -m 0755 "$installer" "$MANAGER_TARGET"
 install -m 0644 "$version_file" "$MANAGER_DIR/VERSION_SERVER_TOOL"
-for asset in scbl_control_plane.py check_scbl_binary_release.sh 5th-echelon_branch.txt; do
+for asset in scbl_control_plane.py scbl_update_server.py check_scbl_binary_release.sh 5th-echelon_branch.txt; do
   [[ -f "$package_root/$asset" ]] || continue
   case "$asset" in *.sh) mode=0755 ;; *) mode=0644 ;; esac
   install -m "$mode" "$package_root/$asset" "$MANAGER_DIR/$asset"

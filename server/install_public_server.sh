@@ -2573,7 +2573,7 @@ update_server_tool_online() {
   load_env_if_exists; set_defaults
   local repo="${SCBL_RELEASE_REPOSITORY:-$DEFAULT_SCBL_RELEASE_REPOSITORY}"
   local version_url="${SCBL_SERVER_TOOL_VERSION_URL:-https://raw.githubusercontent.com/${repo}/main/VERSION_SERVER_TOOL}"
-  local version tag package base expected actual cmp tmpdir extract_root manager_new control_new version_new
+  local version tag package base expected actual cmp tmpdir extract_root manager_new control_new update_new version_new
   local backup_root control_changed=0 binary_check_new branch_new package_root
 
   echo "正在检查 GitHub 正式服务端工具版本..."
@@ -2632,20 +2632,22 @@ PYEOF_SAFE_SERVER_EXTRACT
   package_root="$(find "$extract_root" -mindepth 1 -maxdepth 1 -type d -name 'SCBL-Server-Tool-v*-linux-x86_64' -print -quit)"
   manager_new="${package_root}/install_public_server.sh"
   control_new="${package_root}/scbl_control_plane.py"
+  update_new="${package_root}/scbl_update_server.py"
   version_new="${package_root}/VERSION_SERVER_TOOL"
-  [[ -f "$manager_new" && -f "$control_new" && -f "$version_new" ]] || {
+  [[ -f "$manager_new" && -f "$control_new" && -f "$update_new" && -f "$version_new" ]] || {
     rm -rf "$tmpdir"; echo "服务端工具包缺少必要文件。"; return 1;
   }
   [[ "$(tr -d '[:space:]' < "$version_new")" == "$version" ]] || {
     rm -rf "$tmpdir"; echo "服务端工具包版本信息不一致。"; return 1;
   }
   validate_manager_script_file "$manager_new"
-  python3 -m py_compile "$control_new"
+  python3 -m py_compile "$control_new" "$update_new"
 
   backup_root="$SCBL_ROOT/backups/server-tool/$(date +%Y%m%d_%H%M%S)"
   mkdir -p "$backup_root"
   [[ -f "$MANAGER_SCRIPT" ]] && cp -a "$MANAGER_SCRIPT" "$backup_root/install_public_server.sh"
   [[ -f "$MANAGER_DIR/VERSION_SERVER_TOOL" ]] && cp -a "$MANAGER_DIR/VERSION_SERVER_TOOL" "$backup_root/VERSION_SERVER_TOOL"
+  [[ -f "$MANAGER_DIR/scbl_update_server.py" ]] && cp -a "$MANAGER_DIR/scbl_update_server.py" "$backup_root/scbl_update_server.py"
   [[ -f "$SCBL_ROOT/server/scbl_control_plane.py" ]] && cp -a "$SCBL_ROOT/server/scbl_control_plane.py" "$backup_root/scbl_control_plane.py"
   [[ -f "$SCBL_ROOT/server/check_scbl_binary_release.sh" ]] && cp -a "$SCBL_ROOT/server/check_scbl_binary_release.sh" "$backup_root/check_scbl_binary_release.sh"
   [[ -f "$SCBL_ROOT/server/5th-echelon_branch.txt" ]] && cp -a "$SCBL_ROOT/server/5th-echelon_branch.txt" "$backup_root/5th-echelon_branch.txt"
@@ -2657,6 +2659,7 @@ PYEOF_SAFE_SERVER_EXTRACT
   if ! {
     install -m 0755 "$manager_new" "$MANAGER_SCRIPT"
     install -m 0644 "$version_new" "$MANAGER_DIR/VERSION_SERVER_TOOL"
+    install -m 0644 "$update_new" "$MANAGER_DIR/scbl_update_server.py"
     install -d -m 0755 "$SCBL_ROOT/server"
     install -m 0644 "$control_new" "$SCBL_ROOT/server/scbl_control_plane.py"
     binary_check_new="$(find "$package_root" -type f -name check_scbl_binary_release.sh -print -quit)"
@@ -2679,6 +2682,7 @@ PYEOF_SERVER_TOOL_STATE
     echo "升级失败，正在恢复服务端工具..."
     [[ -f "$backup_root/install_public_server.sh" ]] && install -m 0755 "$backup_root/install_public_server.sh" "$MANAGER_SCRIPT"
     [[ -f "$backup_root/VERSION_SERVER_TOOL" ]] && install -m 0644 "$backup_root/VERSION_SERVER_TOOL" "$MANAGER_DIR/VERSION_SERVER_TOOL"
+    [[ -f "$backup_root/scbl_update_server.py" ]] && install -m 0644 "$backup_root/scbl_update_server.py" "$MANAGER_DIR/scbl_update_server.py"
     [[ -f "$backup_root/scbl_control_plane.py" ]] && install -m 0644 "$backup_root/scbl_control_plane.py" "$SCBL_ROOT/server/scbl_control_plane.py"
     systemctl restart scbl-control-plane.service 2>/dev/null || true
     rm -rf "$tmpdir"

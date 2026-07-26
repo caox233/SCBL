@@ -24,7 +24,9 @@ public sealed class LocalClientUpdateService
         if (!File.Exists(updater))
             throw new FileNotFoundException("没有找到客户端更新程序。", updater);
 
-        string launcherExe = Process.GetCurrentProcess().MainModule?.FileName ?? Path.Combine(baseDir, "SplinterCellCNLauncher.exe");
+        string launcherExe = Path.Combine(baseDir, "SplinterCellCNLauncher.exe");
+        if (!File.Exists(launcherExe))
+            launcherExe = Environment.ProcessPath ?? Process.GetCurrentProcess().MainModule?.FileName ?? launcherExe;
         var psi = new ProcessStartInfo
         {
             FileName = updater,

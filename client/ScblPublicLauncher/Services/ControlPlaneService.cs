@@ -1,5 +1,6 @@
 using SplinterCellCNLauncher.Models;
 using System;
+using System.Collections.Generic;
 using System.IO;
 using System.Net;
 using System.Net.Http;
@@ -14,11 +15,13 @@ namespace SplinterCellCNLauncher.Services;
 
 /// <summary>
 /// Talks to the signed SCBL sidecar control plane over the EasyTier overlay.
-/// A single bound HttpClient is reused while the local virtual IP is stable.
+/// Each endpoint has an isolated bound connection pool so a stalled room-status
+/// request cannot delay heartbeats or online-player discovery.
 /// </summary>
 public sealed class ControlPlaneService : IDisposable
 {
     public const int DefaultPort = PublicTunnelConfig.ControlPlanePort;
+    private const int MaxAttempts = 2;
     private static readonly JsonSerializerOptions JsonOptions = new()
     {
         PropertyNameCaseInsensitive = true,
@@ -26,7 +29,7 @@ public sealed class ControlPlaneService : IDisposable
     };
 
     private readonly object _clientSync = new();
-    private HttpClient? _client;
+    private readonly Dictionary<string, HttpClient> _clients = new(StringComparer.OrdinalIgnoreCase);
     private string _clientBindIp = "";
     private bool _disposed;
     private long _lastFailureLogUnixMs;
@@ -40,20 +43,20 @@ public sealed class ControlPlaneService : IDisposable
         CancellationToken cancellationToken = default)
     {
         string path = $"/v1/bootstrap?username={Uri.EscapeDataString(username ?? string.Empty)}&clientVersion={Uri.EscapeDataString(clientVersion ?? string.Empty)}";
-        return SendAsync<ControlPlaneBootstrapContext>(HttpMethod.Get, path, null, localBindIp, tunnelSecret, TimeSpan.FromSeconds(2), cancellationToken);
+        return SendAsync<ControlPlaneBootstrapContext>(HttpMethod.Get, path, null, localBindIp, tunnelSecret, "bootstrap", TimeSpan.FromSeconds(2), cancellationToken);
     }
 
     public Task<ControlPlanePeersResponse?> GetPeersAsync(
         string localBindIp,
         string tunnelSecret,
         CancellationToken cancellationToken = default)
-        => SendAsync<ControlPlanePeersResponse>(HttpMethod.Get, "/v1/peers", null, localBindIp, tunnelSecret, TimeSpan.FromSeconds(2), cancellationToken);
+        => SendAsync<ControlPlanePeersResponse>(HttpMethod.Get, "/v1/peers", null, localBindIp, tunnelSecret, "peers", TimeSpan.FromSeconds(2), cancellationToken);
 
     public Task<ControlPlaneGameSession?> GetGameSessionAsync(
         string localBindIp,
         string tunnelSecret,
         CancellationToken cancellationToken = default)
-        => SendAsync<ControlPlaneGameSession>(HttpMethod.Get, "/v1/game-session", null, localBindIp, tunnelSecret, TimeSpan.FromSeconds(2), cancellationToken);
+        => SendAsync<ControlPlaneGameSession>(HttpMethod.Get, "/v1/game-session", null, localBindIp, tunnelSecret, "game-session", TimeSpan.FromSeconds(2), cancellationToken);
 
     public async Task<bool> SendHeartbeatAsync(
         ControlPlaneHeartbeat heartbeat,
@@ -67,6 +70,7 @@ public sealed class ControlPlaneService : IDisposable
             heartbeat,
             localBindIp,
             tunnelSecret,
+            "heartbeat",
             TimeSpan.FromSeconds(2),
             cancellationToken).ConfigureAwait(false);
         return result?.Ok == true;
@@ -78,6 +82,7 @@ public sealed class ControlPlaneService : IDisposable
         object? payload,
         string localBindIp,
         string tunnelSecret,
+        string channel,
         TimeSpan timeout,
         CancellationToken cancellationToken)
     {
@@ -85,44 +90,99 @@ public sealed class ControlPlaneService : IDisposable
             return default;
 
         string body = payload == null ? string.Empty : JsonSerializer.Serialize(payload, JsonOptions);
-        long timestamp = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
-        string signature = Sign(timestamp, method.Method, pathAndQuery, body, tunnelSecret);
-
-        try
+        for (int attempt = 1; attempt <= MaxAttempts; attempt++)
         {
-            HttpClient client = GetOrCreateBoundClient(localBindIp);
-            using var request = new HttpRequestMessage(method, new Uri($"http://{PublicTunnelConfig.ServerVirtualIp}:{DefaultPort}{pathAndQuery}"));
-            request.Headers.TryAddWithoutValidation("X-SCBL-Timestamp", timestamp.ToString(System.Globalization.CultureInfo.InvariantCulture));
-            request.Headers.TryAddWithoutValidation("X-SCBL-Signature", signature);
-            if (payload != null)
-                request.Content = new StringContent(body, Encoding.UTF8, "application/json");
-
-            using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-            timeoutCts.CancelAfter(timeout);
-            using HttpResponseMessage response = await client.SendAsync(
-                request,
-                HttpCompletionOption.ResponseHeadersRead,
-                timeoutCts.Token).ConfigureAwait(false);
-            if (!response.IsSuccessStatusCode)
+            HttpClient? client = null;
+            try
             {
-                LogRequestFailure($"Control plane request failed: {method} {pathAndQuery}, HTTP {(int)response.StatusCode}.");
+                client = GetOrCreateBoundClient(localBindIp, channel);
+                long timestamp = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
+                string signature = Sign(timestamp, method.Method, pathAndQuery, body, tunnelSecret);
+                using var request = new HttpRequestMessage(method, new Uri($"http://{PublicTunnelConfig.ServerVirtualIp}:{DefaultPort}{pathAndQuery}"))
+                {
+                    Version = HttpVersion.Version11,
+                    VersionPolicy = HttpVersionPolicy.RequestVersionExact
+                };
+                request.Headers.TryAddWithoutValidation("X-SCBL-Timestamp", timestamp.ToString(System.Globalization.CultureInfo.InvariantCulture));
+                request.Headers.TryAddWithoutValidation("X-SCBL-Signature", signature);
+                if (payload != null)
+                    request.Content = new StringContent(body, Encoding.UTF8, "application/json");
+
+                using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+                timeoutCts.CancelAfter(timeout);
+                using HttpResponseMessage response = await client.SendAsync(
+                    request,
+                    HttpCompletionOption.ResponseHeadersRead,
+                    timeoutCts.Token).ConfigureAwait(false);
+
+                if (!response.IsSuccessStatusCode)
+                {
+                    if (attempt < MaxAttempts && IsTransientStatus(response.StatusCode))
+                    {
+                        InvalidateClient(localBindIp, channel, client);
+                        await DelayBeforeRetryAsync(attempt, cancellationToken).ConfigureAwait(false);
+                        continue;
+                    }
+                    LogRequestFailure($"Control plane request failed: {method} {pathAndQuery}, HTTP {(int)response.StatusCode}.");
+                    return default;
+                }
+
+                await using Stream stream = await response.Content.ReadAsStreamAsync(timeoutCts.Token).ConfigureAwait(false);
+                T? value = await JsonSerializer.DeserializeAsync<T>(stream, JsonOptions, timeoutCts.Token).ConfigureAwait(false);
+                if (attempt > 1)
+                    LogService.Info($"Control plane request recovered after connection reset: {method} {pathAndQuery}, attempt={attempt}/{MaxAttempts}.");
+                return value;
+            }
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+            {
+                throw;
+            }
+            catch (OperationCanceledException)
+            {
+                if (attempt < MaxAttempts)
+                {
+                    if (client != null)
+                        InvalidateClient(localBindIp, channel, client);
+                    await DelayBeforeRetryAsync(attempt, cancellationToken).ConfigureAwait(false);
+                    continue;
+                }
+                LogRequestFailure($"Control plane request timed out after retry: {method} {pathAndQuery}.");
                 return default;
             }
-
-            await using Stream stream = await response.Content.ReadAsStreamAsync(timeoutCts.Token).ConfigureAwait(false);
-            return await JsonSerializer.DeserializeAsync<T>(stream, JsonOptions, timeoutCts.Token).ConfigureAwait(false);
+            catch (JsonException ex)
+            {
+                LogRequestFailure($"Control plane response is invalid: {method} {pathAndQuery}: {ex.Message}");
+                return default;
+            }
+            catch (Exception ex)
+            {
+                if (attempt < MaxAttempts && IsTransientException(ex))
+                {
+                    if (client != null)
+                        InvalidateClient(localBindIp, channel, client);
+                    await DelayBeforeRetryAsync(attempt, cancellationToken).ConfigureAwait(false);
+                    continue;
+                }
+                LogRequestFailure($"Control plane request unavailable: {method} {pathAndQuery}: {ex.Message}");
+                return default;
+            }
         }
-        catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
-        {
-            LogRequestFailure($"Control plane request timed out: {method} {pathAndQuery}.");
-            return default;
-        }
-        catch (Exception ex)
-        {
-            LogRequestFailure($"Control plane request unavailable: {method} {pathAndQuery}: {ex.Message}");
-            return default;
-        }
+        return default;
     }
+
+    private static bool IsTransientStatus(HttpStatusCode statusCode)
+        => statusCode == HttpStatusCode.RequestTimeout
+            || (int)statusCode == 429
+            || (int)statusCode >= 500;
+
+    private static bool IsTransientException(Exception ex)
+        => ex is HttpRequestException
+            || ex is IOException
+            || ex is SocketException
+            || ex is ObjectDisposedException;
+
+    private static Task DelayBeforeRetryAsync(int attempt, CancellationToken cancellationToken)
+        => Task.Delay(TimeSpan.FromMilliseconds(120 * Math.Max(1, attempt)), cancellationToken);
 
     private void LogRequestFailure(string message)
     {
@@ -139,18 +199,34 @@ public sealed class ControlPlaneService : IDisposable
         Interlocked.Increment(ref _suppressedFailureLogs);
     }
 
-    private HttpClient GetOrCreateBoundClient(string localBindIp)
+    private HttpClient GetOrCreateBoundClient(string localBindIp, string channel)
     {
         lock (_clientSync)
         {
             ObjectDisposedException.ThrowIf(_disposed, this);
-            if (_client != null && _clientBindIp.Equals(localBindIp, StringComparison.OrdinalIgnoreCase))
-                return _client;
+            if (!_clientBindIp.Equals(localBindIp, StringComparison.OrdinalIgnoreCase))
+            {
+                DisposeClientsLocked();
+                _clientBindIp = localBindIp;
+            }
+            if (_clients.TryGetValue(channel, out HttpClient? existing))
+                return existing;
+            HttpClient created = CreateBoundClient(localBindIp);
+            _clients[channel] = created;
+            return created;
+        }
+    }
 
-            _client?.Dispose();
-            _client = CreateBoundClient(localBindIp);
-            _clientBindIp = localBindIp;
-            return _client;
+    private void InvalidateClient(string localBindIp, string channel, HttpClient failedClient)
+    {
+        lock (_clientSync)
+        {
+            if (!_clientBindIp.Equals(localBindIp, StringComparison.OrdinalIgnoreCase))
+                return;
+            if (!_clients.TryGetValue(channel, out HttpClient? current) || !ReferenceEquals(current, failedClient))
+                return;
+            _clients.Remove(channel);
+            current.Dispose();
         }
     }
 
@@ -161,9 +237,9 @@ public sealed class ControlPlaneService : IDisposable
             UseProxy = false,
             Proxy = null,
             ConnectTimeout = TimeSpan.FromSeconds(2),
-            PooledConnectionIdleTimeout = TimeSpan.FromSeconds(20),
-            PooledConnectionLifetime = TimeSpan.FromMinutes(2),
-            MaxConnectionsPerServer = 8
+            PooledConnectionIdleTimeout = TimeSpan.FromSeconds(10),
+            PooledConnectionLifetime = TimeSpan.FromSeconds(45),
+            MaxConnectionsPerServer = 2
         };
         handler.ConnectCallback = async (context, cancellationToken) =>
         {
@@ -191,6 +267,12 @@ public sealed class ControlPlaneService : IDisposable
         return Convert.ToHexString(hmac.ComputeHash(Encoding.UTF8.GetBytes(canonical))).ToLowerInvariant();
     }
 
+    private void DisposeClientsLocked()
+    {
+        foreach (HttpClient client in _clients.Values)
+            client.Dispose();
+        _clients.Clear();
+    }
 
     public void Dispose()
     {
@@ -199,8 +281,7 @@ public sealed class ControlPlaneService : IDisposable
             if (_disposed)
                 return;
             _disposed = true;
-            _client?.Dispose();
-            _client = null;
+            DisposeClientsLocked();
             _clientBindIp = "";
         }
     }

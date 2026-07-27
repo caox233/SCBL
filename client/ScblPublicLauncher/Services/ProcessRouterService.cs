@@ -380,10 +380,9 @@ public sealed class ProcessRouterService
             try { exitCode = process.ExitCode; } catch { }
             try { pid = process.Id; } catch { }
             bool intentional = _stopRequested || generation != Volatile.Read(ref _processGeneration);
-            LogService.Error($"Process router exited. pid={pid}, exit={exitCode}, generation={generation}, intentional={intentional}");
-
             if (intentional)
             {
+                LogService.Info($"Process router stopped. pid={pid}, exit={exitCode}, generation={generation}, intentional=true");
                 _lastExitReason = "intentional";
                 WriteGuardHealthSnapshot("stopped");
                 return;
@@ -404,6 +403,7 @@ public sealed class ProcessRouterService
                 return;
             }
 
+            LogService.Error($"Process router exited unexpectedly. pid={pid}, exit={exitCode}, generation={generation}");
             Interlocked.Increment(ref _unexpectedExitCount);
             Interlocked.Exchange(ref _lastUnexpectedExitUnixMs, DateTimeOffset.UtcNow.ToUnixTimeMilliseconds());
             _lastExitReason = $"unexpected exit code {exitCode}";

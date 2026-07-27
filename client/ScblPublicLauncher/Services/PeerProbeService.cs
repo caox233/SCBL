@@ -173,7 +173,7 @@ public sealed class PeerProbeService : IDisposable
         }
 
         int reachableRemote = peers.Values.Count(p => !p.IsSelf && p.IsReachable);
-        LogService.Info($"Peer discovery completed: routeCandidates={routeTargets.Length}, subnetScanned={scanTargets.Length}, serverRegistry={!scanFallback}, reachableRemote={reachableRemote}, totalListed={peers.Count}.");
+        LogService.Info($"Peer discovery completed: routeCandidates={routeTargets.Length}, subnetScanned={scanTargets.Length}, subnetFallback={scanFallback}, reachableRemote={reachableRemote}, totalListed={peers.Count}.");
 
         return peers.Values
             .OrderByDescending(p => p.IsSelf)

@@ -1773,14 +1773,14 @@ public partial class MainWindow : Window
             EasyTierPeerPath? path = await _tunnelService.DetectPeerPathAsync(
                 GetLauncherBaseDirectory(),
                 PublicTunnelConfig.ServerVirtualIp,
-                TimeSpan.FromMilliseconds(force ? 1300 : 850)).ConfigureAwait(false);
+                TimeSpan.FromMilliseconds(force ? 2200 : 1500)).ConfigureAwait(false);
             string transport = path?.TransportMode ?? "";
             string family = path?.UnderlayAddressFamily ?? "";
             if (string.IsNullOrWhiteSpace(transport))
             {
                 transport = await _tunnelService.DetectServerTransportAsync(
                     GetLauncherBaseDirectory(),
-                    TimeSpan.FromMilliseconds(900),
+                    TimeSpan.FromMilliseconds(1200),
                     forceRefresh: force).ConfigureAwait(false);
             }
 
@@ -1816,6 +1816,7 @@ public partial class MainWindow : Window
         _ = Task.Run(async () =>
         {
             int consecutiveFailures = 0;
+            using var timer = new PeriodicTimer(TimeSpan.FromSeconds(5));
             while (!token.IsCancellationRequested)
             {
                 try
@@ -1831,7 +1832,7 @@ public partial class MainWindow : Window
                             token).ConfigureAwait(false);
                         consecutiveFailures = ok ? 0 : consecutiveFailures + 1;
                         if (!ok && consecutiveFailures == 3)
-                            LogService.Info("Control plane heartbeat is unavailable; local EasyTier gameplay is unaffected and fallback discovery remains enabled.");
+                            LogService.Info("Control plane heartbeat is unavailable; local EasyTier gameplay is unaffected and merged route discovery remains enabled.");
                     }
                 }
                 catch (OperationCanceledException)
@@ -1845,7 +1846,8 @@ public partial class MainWindow : Window
 
                 try
                 {
-                    await Task.Delay(TimeSpan.FromSeconds(5), token).ConfigureAwait(false);
+                    if (!await timer.WaitForNextTickAsync(token).ConfigureAwait(false))
+                        break;
                 }
                 catch (OperationCanceledException)
                 {
@@ -3108,7 +3110,7 @@ public partial class MainWindow : Window
         {
             _peerRefreshCts?.Cancel();
             _peerRefreshCts?.Dispose();
-            _peerRefreshCts = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+            _peerRefreshCts = new CancellationTokenSource(TimeSpan.FromSeconds(6));
             var token = _peerRefreshCts.Token;
 
             string selfIp = _assignedIp;
@@ -3128,88 +3130,78 @@ public partial class MainWindow : Window
             if (showPanel)
                 RenderPeerList(L("正在刷新玩家列表...", "Refreshing player list..."));
 
-            ControlPlanePeersResponse? registry = await _controlPlaneService.GetPeersAsync(
+            Task<ControlPlanePeersResponse?> registryTask = _controlPlaneService.GetPeersAsync(
                 selfIp,
                 GetConfiguredTunnelSecret(),
-                token).ConfigureAwait(false);
+                token);
+            Task<IReadOnlyList<string>> routesTask = _tunnelService.ListVirtualPeerIpsAsync(
+                GetLauncherBaseDirectory(),
+                TimeSpan.FromMilliseconds(1800));
 
-            IReadOnlyList<PeerInfo> peers;
-            if (registry != null)
-            {
-                var activeRegistry = registry.Peers
-                    .Where(p => PublicTunnelConfig.IsScblClientIp(p.VirtualIp))
-                    .GroupBy(p => p.VirtualIp, StringComparer.OrdinalIgnoreCase)
-                    .Select(g => g.OrderByDescending(x => x.LastSeenUnixMs).First())
-                    .ToList();
+            ControlPlanePeersResponse? registry = await registryTask.ConfigureAwait(false);
+            IReadOnlyList<string> routeIps = await routesTask.ConfigureAwait(false);
+            var activeRegistry = registry?.Peers
+                .Where(p => PublicTunnelConfig.IsScblClientIp(p.VirtualIp))
+                .GroupBy(p => p.VirtualIp, StringComparer.OrdinalIgnoreCase)
+                .Select(g => g.OrderByDescending(x => x.LastSeenUnixMs).First())
+                .ToList() ?? new List<ControlPlanePeer>();
 
-                if (showPanel)
-                {
-                    string[] candidateIps = activeRegistry
-                        .Where(p => !p.VirtualIp.Equals(selfIp, StringComparison.OrdinalIgnoreCase))
-                        .Select(p => p.VirtualIp)
-                        .ToArray();
-                    IReadOnlyList<PeerInfo> probed = await _peerProbeService.DiscoverAsync(
-                        selfIp,
-                        username,
-                        LauncherVersion,
-                        candidateIps,
-                        token,
-                        scanFallback: false).ConfigureAwait(false);
-                    var names = activeRegistry.ToDictionary(p => p.VirtualIp, StringComparer.OrdinalIgnoreCase);
-                    peers = probed.Select(peer =>
-                    {
-                        names.TryGetValue(peer.VirtualIp, out ControlPlanePeer? registered);
-                        return new PeerInfo
-                        {
-                            Username = peer.IsSelf ? username : registered?.Username ?? peer.Username,
-                            VirtualIp = peer.VirtualIp,
-                            Version = registered?.ClientVersion ?? peer.Version,
-                            LatencyMs = peer.LatencyMs,
-                            IsSelf = peer.IsSelf,
-                            IsReachable = peer.IsReachable || registered != null
-                        };
-                    }).ToList();
-                }
-                else
-                {
-                    var list = activeRegistry.Select(peer => new PeerInfo
-                    {
-                        Username = string.IsNullOrWhiteSpace(peer.Username) ? L("玩家", "Player") : peer.Username,
-                        VirtualIp = peer.VirtualIp,
-                        Version = peer.ClientVersion,
-                        LatencyMs = peer.VirtualIp.Equals(selfIp, StringComparison.OrdinalIgnoreCase) ? 0 : null,
-                        IsSelf = peer.VirtualIp.Equals(selfIp, StringComparison.OrdinalIgnoreCase),
-                        IsReachable = true
-                    }).ToList();
-                    if (!list.Any(p => p.IsSelf))
-                    {
-                        list.Add(new PeerInfo
-                        {
-                            Username = username,
-                            VirtualIp = selfIp,
-                            Version = LauncherVersion,
-                            LatencyMs = 0,
-                            IsSelf = true,
-                            IsReachable = true
-                        });
-                    }
-                    peers = list
-                        .OrderByDescending(p => p.IsSelf)
-                        .ThenBy(p => int.TryParse(p.VirtualIp[(p.VirtualIp.LastIndexOf('.') + 1)..], out int octet) ? octet : int.MaxValue)
-                        .ToList();
-                }
-                LogService.Info($"Peer refresh used server registry: online={registry.OnlineCount}, listed={peers.Count}, directProbe={showPanel}.");
-            }
-            else
+            string[] candidateIps = activeRegistry.Select(p => p.VirtualIp)
+                .Concat(routeIps)
+                .Where(PublicTunnelConfig.IsScblClientIp)
+                .Where(ip => !ip.Equals(selfIp, StringComparison.OrdinalIgnoreCase))
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .ToArray();
+            bool subnetFallback = registry == null && candidateIps.Length == 0;
+            IReadOnlyList<PeerInfo> probed = await _peerProbeService.DiscoverAsync(
+                selfIp,
+                username,
+                LauncherVersion,
+                candidateIps,
+                token,
+                scanFallback: subnetFallback).ConfigureAwait(false);
+
+            var merged = probed
+                .Where(p => PublicTunnelConfig.IsScblClientIp(p.VirtualIp))
+                .GroupBy(p => p.VirtualIp, StringComparer.OrdinalIgnoreCase)
+                .ToDictionary(g => g.Key, g => g.OrderByDescending(x => x.IsReachable).First(), StringComparer.OrdinalIgnoreCase);
+
+            foreach (ControlPlanePeer registered in activeRegistry)
             {
-                IReadOnlyList<string> candidateIps = await _tunnelService
-                    .ListVirtualPeerIpsAsync(AppContext.BaseDirectory, TimeSpan.FromMilliseconds(1300))
-                    .ConfigureAwait(false);
-                peers = await _peerProbeService
-                    .DiscoverAsync(selfIp, username, LauncherVersion, candidateIps, token, scanFallback: true)
-                    .ConfigureAwait(false);
-                LogService.Info($"Peer refresh used local fallback: routes={candidateIps.Count}, listed={peers.Count}.");
+                bool isSelf = registered.VirtualIp.Equals(selfIp, StringComparison.OrdinalIgnoreCase);
+                merged.TryGetValue(registered.VirtualIp, out PeerInfo? detected);
+                merged[registered.VirtualIp] = new PeerInfo
+                {
+                    Username = isSelf ? username : string.IsNullOrWhiteSpace(registered.Username) ? detected?.Username ?? L("玩家", "Player") : registered.Username,
+                    VirtualIp = registered.VirtualIp,
+                    Version = string.IsNullOrWhiteSpace(registered.ClientVersion) ? detected?.Version ?? "" : registered.ClientVersion,
+                    LatencyMs = isSelf ? 0 : detected?.LatencyMs,
+                    IsSelf = isSelf,
+                    IsReachable = true
+                };
             }
+
+            if (!merged.ContainsKey(selfIp))
+            {
+                merged[selfIp] = new PeerInfo
+                {
+                    Username = username,
+                    VirtualIp = selfIp,
+                    Version = LauncherVersion,
+                    LatencyMs = 0,
+                    IsSelf = true,
+                    IsReachable = true
+                };
+            }
+
+            IReadOnlyList<PeerInfo> peers = merged.Values
+                .OrderByDescending(p => p.IsSelf)
+                .ThenBy(p => int.TryParse(p.VirtualIp[(p.VirtualIp.LastIndexOf('.') + 1)..], out int octet) ? octet : int.MaxValue)
+                .ToList();
+            string source = registry != null
+                ? routeIps.Count > 0 ? "server-registry+easytier-routes" : "server-registry"
+                : routeIps.Count > 0 ? "easytier-routes" : "subnet-probe-fallback";
+            LogService.Info($"Peer refresh merged discovery: source={source}, registryOnline={registry?.OnlineCount.ToString() ?? "n/a"}, registryListed={activeRegistry.Count}, routeCandidates={routeIps.Count}, unionCandidates={candidateIps.Length}, listed={peers.Count}, directProbe={showPanel}.");
 
             await Dispatcher.InvokeAsync(() =>
             {

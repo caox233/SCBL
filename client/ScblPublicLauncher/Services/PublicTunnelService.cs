@@ -801,27 +801,45 @@ relay_network_whitelist = {Q(networkName)}
                     Collect(child);
                 return;
             }
-
             if (element.ValueKind != JsonValueKind.Object)
                 return;
 
             foreach (JsonProperty property in element.EnumerateObject())
             {
-                if ((property.NameEquals("ipv4")
-                        || property.NameEquals("cidr")
-                        || property.NameEquals("ipv4_addr")
-                        || property.NameEquals("ipv4Addr"))
-                    && property.Value.ValueKind == JsonValueKind.String)
+                if (property.NameEquals("ipv4")
+                    || property.NameEquals("cidr")
+                    || property.NameEquals("ipv4_addr")
+                    || property.NameEquals("ipv4Addr"))
                 {
-                    string value = (property.Value.GetString() ?? string.Empty).Split('/')[0].Trim();
+                    string value = ReadIpv4Value(property.Value);
                     if (PublicTunnelConfig.IsScblClientIp(value))
                         ips.Add(value);
                 }
-                else
-                {
-                    Collect(property.Value);
-                }
+                Collect(property.Value);
             }
+        }
+
+        static string ReadIpv4Value(JsonElement value)
+        {
+            if (value.ValueKind == JsonValueKind.String)
+                return (value.GetString() ?? string.Empty).Split('/')[0].Trim();
+            if (value.ValueKind != JsonValueKind.Object)
+                return "";
+
+            if (value.TryGetProperty("address", out JsonElement address))
+            {
+                string nested = ReadIpv4Value(address);
+                if (!string.IsNullOrWhiteSpace(nested))
+                    return nested;
+            }
+            if (value.TryGetProperty("addr", out JsonElement numeric) && numeric.TryGetUInt32(out uint raw))
+                return $"{(raw >> 24) & 0xff}.{(raw >> 16) & 0xff}.{(raw >> 8) & 0xff}.{raw & 0xff}";
+            foreach (string name in new[] { "value", "ip", "ipv4" })
+            {
+                if (value.TryGetProperty(name, out JsonElement text) && text.ValueKind == JsonValueKind.String)
+                    return (text.GetString() ?? string.Empty).Split('/')[0].Trim();
+            }
+            return "";
         }
     }
 
@@ -1108,7 +1126,6 @@ relay_network_whitelist = {Q(networkName)}
             string[] cells = line.Trim('|').Split('|').Select(x => x.Trim()).ToArray();
             if (cells.Length < 2)
                 continue;
-
             if (headers == null && cells.Any(x => x.Equals("ipv4", StringComparison.OrdinalIgnoreCase)))
             {
                 headers = cells;
@@ -1116,40 +1133,32 @@ relay_network_whitelist = {Q(networkName)}
                 costIndex = Array.FindIndex(headers, x => x.Equals("cost", StringComparison.OrdinalIgnoreCase));
                 continue;
             }
-
             if (!cells.Any(x => x.StartsWith(PublicTunnelConfig.ServerVirtualIp, StringComparison.OrdinalIgnoreCase)))
                 continue;
 
-            string tunnel = tunnelIndex >= 0 && tunnelIndex < cells.Length
-                ? cells[tunnelIndex]
-                : string.Join(" ", cells);
+            string tunnel = tunnelIndex >= 0 && tunnelIndex < cells.Length ? cells[tunnelIndex] : string.Join(" ", cells);
             string cost = costIndex >= 0 && costIndex < cells.Length ? cells[costIndex] : "";
-            string normalized = tunnel.Trim().ToLowerInvariant();
             string normalizedCost = cost.Trim().ToLowerInvariant();
+            string[] tokens = tunnel.Trim().ToLowerInvariant()
+                .Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+            bool hasWss = tokens.Any(x => x.StartsWith("wss", StringComparison.OrdinalIgnoreCase));
+            bool hasWs = tokens.Any(x => !x.StartsWith("wss", StringComparison.OrdinalIgnoreCase) && x.StartsWith("ws", StringComparison.OrdinalIgnoreCase));
+            bool hasUdp = tokens.Any(x => x.StartsWith("udp", StringComparison.OrdinalIgnoreCase));
+            bool hasTcp = tokens.Any(x => x.StartsWith("tcp", StringComparison.OrdinalIgnoreCase));
+            int protocolFamilies = new[] { hasWss, hasWs, hasUdp, hasTcp }.Count(x => x);
 
-            // EasyTier's peer table reports a relayed/multi-hop route in the cost column.
-            // Check it before the available tunnel list, otherwise a relay whose next hop uses
-            // UDP could be misreported as a direct UDP path.
-            if (normalizedCost.Contains("relay")
+            // The non-verbose peer table lists every available connection, not the selected one.
+            // Reporting WSS merely because it appears in "udp,wss6,udp6,wss" is false. Only use
+            // this fallback when the table exposes exactly one protocol family.
+            if (protocolFamilies != 1)
+                return "";
+
+            string mode = hasWss ? "WSS" : hasWs ? "WS" : hasUdp ? "UDP" : "TCP";
+            bool relayed = normalizedCost.Contains("relay")
                 || (int.TryParse(normalizedCost, out int hopCost) && hopCost > 1)
-                || normalized.Contains("relay"))
-            {
-                if (normalized.Contains("wss")) return "多跳-WSS";
-                if (normalized.Contains("ws")) return "多跳-WS";
-                if (normalized.Contains("tcp")) return "多跳-TCP";
-                return "多跳-UDP";
-            }
-            if (normalized.Contains("wss")) return "WSS";
-            if (normalized.Contains("ws")) return "WS";
-            if (normalized.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
-                .Any(x => x.StartsWith("udp", StringComparison.OrdinalIgnoreCase)))
-            {
-                return "UDP";
-            }
-            if (normalized.Contains("tcp"))
-                return "TCP";
+                || tunnel.Contains("relay", StringComparison.OrdinalIgnoreCase);
+            return relayed ? $"多跳-{mode}" : mode;
         }
-
         return "";
     }
 

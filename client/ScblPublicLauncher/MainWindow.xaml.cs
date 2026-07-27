@@ -43,6 +43,7 @@ public partial class MainWindow : Window
     private readonly AnnouncementService _announcementService = new();
     private readonly DiagnosticExportService _diagnosticExportService = new();
     private readonly UpdaterBootstrapService _updaterBootstrapService = new();
+    private readonly WinDivertBootstrapService _winDivertBootstrapService = new();
     private readonly PeerProbeService _peerProbeService = new();
     private readonly BroadcastProbeService _broadcastProbeService = new();
     private readonly ControlPlaneService _controlPlaneService = new();
@@ -386,6 +387,7 @@ public partial class MainWindow : Window
         // Complete that hand-off before the remote manifest is checked, otherwise the
         // freshly updated launcher can be mistaken for an incomplete same-version repair.
         await _updaterBootstrapService.EnsureCurrentUpdaterAsync();
+        await _winDivertBootstrapService.EnsureCurrentDriverAsync();
 
         // Version confirmation is the first functional startup step. Nothing else is
         // initialized until the server confirms that this is the current formal client.
@@ -539,6 +541,9 @@ public partial class MainWindow : Window
             {
                 SetBusy(true, L("正在下载客户端更新...", "Downloading client update..."));
                 var package = await _remoteUpdateService.DownloadAsync(info);
+                SetBusy(true, L("正在关闭联机组件...", "Stopping network components..."));
+                await _networkOrchestrator.ShutdownAsync("client update");
+                await Task.Delay(350);
                 _localUpdateService.StartUpdater(package, Environment.ProcessId);
                 _allowClose = true;
                 Application.Current.Shutdown();

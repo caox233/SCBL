@@ -5,6 +5,7 @@ internal static class RestartCoordinator
     private const int ParentExitTimeoutMs = 60000;
     private const int LaunchAttempts = 20;
     private const int LaunchRetryDelayMs = 500;
+    private const int LaunchSurvivalCheckMs = 3000;
 
     public static int RunHelper(string? target, string? restart, string? waitPidText)
     {
@@ -144,12 +145,16 @@ internal static class RestartCoordinator
                 {
                     FileName = launcher,
                     WorkingDirectory = workingDirectory,
-                    UseShellExecute = true
+                    UseShellExecute = true,
+                    Verb = "runas"
                 });
                 if (process == null)
                     throw new InvalidOperationException("Process.Start returned null for the launcher.");
 
-                Log($"Updated launcher started successfully on attempt {attempt}. pid={process.Id}, path={launcher}");
+                if (process.WaitForExit(LaunchSurvivalCheckMs))
+                    throw new InvalidOperationException($"Updated launcher exited during startup. exitCode={process.ExitCode}");
+
+                Log($"Updated launcher remained running after {LaunchSurvivalCheckMs}ms on attempt {attempt}. pid={process.Id}, path={launcher}");
                 return true;
             }
             catch (Exception ex)

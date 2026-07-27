@@ -15,7 +15,8 @@ assert 'Path.Combine(target, "SplinterCellCNLauncher.exe")' in restart
 assert "WaitForExit(ParentExitTimeoutMs)" in restart
 assert "LaunchAttempts = 20" in restart
 assert "Thread.Sleep(LaunchRetryDelayMs)" in restart
-assert "Updated launcher started successfully" in restart
+assert "LaunchSurvivalCheckMs = 3000" in restart
+assert "Updated launcher remained running" in restart
 assert 'string launcherExe = Path.Combine(baseDir, "SplinterCellCNLauncher.exe");' in local
 assert "Environment.ProcessPath" in local
 
@@ -48,5 +49,26 @@ assert "HOST-DETECT" not in route_guard
 assert "10.66.0.255 broadcasts remain unchanged" in route_guard
 assert "public int? TcpPort" in control_models
 assert "bind_device = true" in tunnel
+
+updater_project = Path("client/SCBL.Updater/SCBL.Updater.csproj").read_text(encoding="utf-8")
+updater_manifest = Path("client/SCBL.Updater/app.manifest").read_text(encoding="utf-8")
+window = Path("client/ScblPublicLauncher/MainWindow.xaml.cs").read_text(encoding="utf-8")
+driver_bootstrap = Path("client/ScblPublicLauncher/Services/WinDivertBootstrapService.cs").read_text(encoding="utf-8")
+build_script = Path("client/build_all_windows.ps1").read_text(encoding="utf-8")
+package_script = Path("client/create_client_full_package.ps1").read_text(encoding="utf-8")
+assert "ReleaseWinDivertDriverServices(target)" in program
+assert "FilesAreIdentical(source, destination)" in program
+assert "CopyFileWithRetry(file, dest, relative)" in program
+assert "RestoreBackup(target, backup)" in program
+assert "Update failed; relaunching the existing client" in program
+assert "ApplicationManifest>app.manifest" in updater_project
+assert 'requestedExecutionLevel level="requireAdministrator"' in updater_manifest
+assert 'Verb = "runas"' in local
+assert 'await _networkOrchestrator.ShutdownAsync("client update")' in window
+assert "EnsureCurrentDriverAsync" in window
+assert "WinDivert64.payload.sys" in driver_bootstrap
+assert 'Copy-Item -Force $WinDivertSys (Join-Path $Tools "WinDivert64.payload.sys")' in build_script
+assert "'tools/WinDivert64.sys'" in package_script
+assert "WinDivert64.payload.sys" in package_script
 
 print("SCBL client update restart and version-check retry checks passed")

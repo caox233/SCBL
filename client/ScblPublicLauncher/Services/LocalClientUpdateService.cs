@@ -31,6 +31,7 @@ public sealed class LocalClientUpdateService
         {
             FileName = updater,
             UseShellExecute = true,
+            Verb = "runas",
             WorkingDirectory = baseDir,
             Arguments = $"--package {Quote(package.PackagePath)} --version {Quote(package.Version)} --target {Quote(baseDir)} --pid {launcherPid} --restart {Quote(launcherExe)}"
         };

@@ -28,6 +28,8 @@ $Required = @(
     (Join-Path $Publish "tools\easytier-core.exe"),
     (Join-Path $Publish "tools\easytier-cli.exe"),
     (Join-Path $Publish "tools\scbl-process-router.exe"),
+    (Join-Path $Publish "tools\WinDivert.dll"),
+    (Join-Path $Publish "tools\WinDivert64.payload.sys"),
     (Join-Path $Publish "SCBL.Updater.exe"),
     (Join-Path $Publish "tools\SCBL.Updater.payload.exe")
 )
@@ -47,7 +49,7 @@ Add-Type -AssemblyName System.IO.Compression
 Add-Type -AssemblyName System.IO.Compression.FileSystem
 $Compression = if ($Fast) { [System.IO.Compression.CompressionLevel]::Fastest } else { [System.IO.Compression.CompressionLevel]::Optimal }
 $ExcludedRoots = @('logs', 'updates', 'backup')
-$ExcludedFiles = @('launcher_settings.json', 'update_manifest.json', 'client_update_manifest.json')
+$ExcludedFiles = @('launcher_settings.json', 'update_manifest.json', 'client_update_manifest.json', 'tools/WinDivert64.sys')
 
 Write-Step "Creating ZIP directly from publish output (no temporary full-directory copy)..."
 $Stream = [System.IO.File]::Open($Zip, [System.IO.FileMode]::CreateNew, [System.IO.FileAccess]::ReadWrite, [System.IO.FileShare]::None)
@@ -76,4 +78,11 @@ try {
 finally { $Stream.Dispose() }
 
 if (!(Test-Path -LiteralPath $Zip) -or (Get-Item -LiteralPath $Zip).Length -le 0) { throw "Client ZIP was not created." }
-Write-Step "Client full package created: $Zip"
+$VerifyArchive = [System.IO.Compression.ZipFile]::OpenRead($Zip)
+try {
+    $Names = @($VerifyArchive.Entries | ForEach-Object { $_.FullName })
+    if ($Names -contains 'tools/WinDivert64.sys') { throw "Release ZIP must not contain the lock-prone WinDivert64.sys path." }
+    if ($Names -notcontains 'tools/WinDivert64.payload.sys') { throw "Release ZIP is missing the WinDivert driver payload." }
+}
+finally { $VerifyArchive.Dispose() }
+Write-Step "Client full package created with WinDivert payload handoff: $Zip"

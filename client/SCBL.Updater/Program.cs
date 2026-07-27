@@ -1,3 +1,4 @@
+using Microsoft.Win32;
 using System.Diagnostics;
 using System.IO.Compression;
 using System.Security.Cryptography;
@@ -7,13 +8,15 @@ internal static class Program
 {
     private static int Main(string[] args)
     {
+        string? target = null;
+        string? restart = null;
         try
         {
             string? package = GetArg(args, "--package");
             string? plan = GetArg(args, "--plan");
-            string? target = GetArg(args, "--target");
+            target = GetArg(args, "--target");
             string? pidText = GetArg(args, "--pid");
-            string? restart = GetArg(args, "--restart");
+            restart = GetArg(args, "--restart");
             string? requestedVersion = GetArg(args, "--version");
             string? waitPidText = GetArg(args, "--wait-pid");
 
@@ -107,6 +110,11 @@ internal static class Program
         {
             Log("Update failed: " + ex);
             Console.Error.WriteLine(ex);
+            if (!string.IsNullOrWhiteSpace(target))
+            {
+                Log("Update failed; relaunching the existing client instead of leaving the user without a launcher.");
+                RestartCoordinator.LaunchImmediately(target, restart);
+            }
             return 1;
         }
     }
@@ -198,6 +206,8 @@ internal static class Program
         HashSet<int> remaining = GetTcpListenerPids(easyTierRpcPort);
         if (remaining.Count > 0)
             Log($"Warning: EasyTier RPC port {easyTierRpcPort} is still occupied by PID(s): {string.Join(",", remaining)}");
+
+        ReleaseWinDivertDriverServices(target);
     }
 
     private static HashSet<int> GetTcpListenerPids(int port)
@@ -264,14 +274,27 @@ internal static class Program
     {
         string temp = Path.Combine(Path.GetTempPath(), "SCBL_Client_Update_" + Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(temp);
+        string backup = "";
 
         try
         {
             ZipFile.ExtractToDirectory(package, temp, overwriteFiles: true);
             string contentRoot = DetermineContentRoot(temp);
             Log($"Content root: {contentRoot}");
-            BackupCurrent(target);
-            CopyDirectory(contentRoot, target);
+
+            // Complete the backup before modifying any installed file. If a later copy
+            // fails, restore the launcher/tools snapshot so a mixed-version directory is
+            // not left behind.
+            backup = BackupCurrent(target);
+            try
+            {
+                CopyDirectory(contentRoot, target);
+            }
+            catch
+            {
+                RestoreBackup(target, backup);
+                throw;
+            }
         }
         finally
         {
@@ -528,15 +551,15 @@ internal static class Program
                 continue;
             if (Path.GetFileName(file).Equals("SCBL.Updater.exe", StringComparison.OrdinalIgnoreCase))
             {
-                // Avoid replacing the updater while it is running. The next update can replace it.
+                // The running updater is replaced from tools/SCBL.Updater.payload.exe by
+                // the next launcher process.
                 continue;
             }
             if (IsUpdateMetadataFile(relative))
                 continue;
 
             string dest = Path.Combine(target, relative);
-            Directory.CreateDirectory(Path.GetDirectoryName(dest)!);
-            File.Copy(file, dest, overwrite: true);
+            CopyFileWithRetry(file, dest, relative);
         }
     }
 
@@ -585,7 +608,7 @@ internal static class Program
         }
     }
 
-    private static void BackupCurrent(string target)
+    private static string BackupCurrent(string target)
     {
         string backup = Path.Combine(target, "backup", "client_update_" + DateTime.Now.ToString("yyyyMMdd_HHmmss"));
         Directory.CreateDirectory(backup);
@@ -597,12 +620,231 @@ internal static class Program
             if (File.Exists(src))
             {
                 Directory.CreateDirectory(Path.GetDirectoryName(dest)!);
-                File.Copy(src, dest, overwrite: true);
+                CopyFileWithRetry(src, dest, name);
             }
             else if (Directory.Exists(src))
             {
                 CopyDirectory(src, dest);
             }
+        }
+
+        Log("Update rollback snapshot completed: " + backup);
+        return backup;
+    }
+
+    private static void RestoreBackup(string target, string backup)
+    {
+        if (string.IsNullOrWhiteSpace(backup) || !Directory.Exists(backup))
+            return;
+
+        try
+        {
+            string launcher = Path.Combine(backup, "SplinterCellCNLauncher.exe");
+            if (File.Exists(launcher))
+                CopyFileWithRetry(launcher, Path.Combine(target, "SplinterCellCNLauncher.exe"), "SplinterCellCNLauncher.exe rollback");
+
+            string tools = Path.Combine(backup, "tools");
+            if (Directory.Exists(tools))
+                CopyDirectory(tools, Path.Combine(target, "tools"));
+
+            Log("Update rollback completed from: " + backup);
+        }
+        catch (Exception ex)
+        {
+            Log("Update rollback failed: " + ex);
+        }
+    }
+
+    private static void CopyFileWithRetry(string source, string destination, string relative)
+    {
+        if (File.Exists(destination) && FilesAreIdentical(source, destination))
+        {
+            Log("Unchanged file skipped: " + relative);
+            return;
+        }
+
+        Directory.CreateDirectory(Path.GetDirectoryName(destination)!);
+        string temporary = destination + ".scbl-update-new";
+        Exception? lastError = null;
+        bool isWinDivertDriver = Path.GetFileName(destination).Equals("WinDivert64.sys", StringComparison.OrdinalIgnoreCase);
+
+        for (int attempt = 1; attempt <= 32; attempt++)
+        {
+            try
+            {
+                try { if (File.Exists(temporary)) File.Delete(temporary); } catch { }
+                File.Copy(source, temporary, overwrite: true);
+                if (!FilesAreIdentical(source, temporary))
+                    throw new IOException("temporary file hash mismatch");
+                File.Move(temporary, destination, overwrite: true);
+                if (!FilesAreIdentical(source, destination))
+                    throw new IOException("installed file hash mismatch");
+
+                Log($"Updated file: {relative}, attempt={attempt}");
+                return;
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+            {
+                lastError = ex;
+                try { if (File.Exists(temporary)) File.Delete(temporary); } catch { }
+                if (isWinDivertDriver && (attempt == 1 || attempt == 12))
+                    ReleaseWinDivertDriverServices(Path.GetDirectoryName(Path.GetDirectoryName(destination)!)!);
+                if (attempt < 32)
+                    Thread.Sleep(250);
+            }
+        }
+
+        throw new IOException($"Unable to replace {relative} after waiting for file handles to close.", lastError);
+    }
+
+    private static bool FilesAreIdentical(string first, string second)
+    {
+        try
+        {
+            var firstInfo = new FileInfo(first);
+            var secondInfo = new FileInfo(second);
+            return firstInfo.Exists
+                && secondInfo.Exists
+                && firstInfo.Length == secondInfo.Length
+                && ComputeSha256(first).Equals(ComputeSha256(second), StringComparison.OrdinalIgnoreCase);
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
+    private static void ReleaseWinDivertDriverServices(string target)
+    {
+        try
+        {
+            string expectedDriver = Path.GetFullPath(Path.Combine(target, "tools", "WinDivert64.sys"));
+            foreach (string serviceName in FindDriverServices(expectedDriver))
+            {
+                Log($"Stopping WinDivert driver service before update: {serviceName}");
+                RunScCommand("stop", serviceName);
+                Thread.Sleep(300);
+                RunScCommand("delete", serviceName);
+            }
+
+            DateTime deadline = DateTime.UtcNow.AddSeconds(8);
+            while (DateTime.UtcNow < deadline && IsFileExclusivelyLocked(expectedDriver))
+                Thread.Sleep(200);
+
+            if (IsFileExclusivelyLocked(expectedDriver))
+                Log("Warning: WinDivert64.sys is still locked after runtime and driver-service shutdown.");
+            else
+                Log("WinDivert driver file is released for update.");
+        }
+        catch (Exception ex)
+        {
+            Log("WinDivert driver release check skipped: " + ex.Message);
+        }
+    }
+
+    private static IReadOnlyList<string> FindDriverServices(string expectedDriver)
+    {
+        var result = new List<string>();
+        try
+        {
+            using RegistryKey? services = Registry.LocalMachine.OpenSubKey(@"SYSTEM\CurrentControlSet\Services");
+            if (services == null)
+                return result;
+
+            foreach (string name in services.GetSubKeyNames())
+            {
+                try
+                {
+                    using RegistryKey? service = services.OpenSubKey(name);
+                    string imagePath = Convert.ToString(service?.GetValue("ImagePath")) ?? "";
+                    string normalized = NormalizeServiceImagePath(imagePath);
+                    if (!string.IsNullOrWhiteSpace(normalized)
+                        && normalized.Equals(expectedDriver, StringComparison.OrdinalIgnoreCase))
+                    {
+                        result.Add(name);
+                    }
+                }
+                catch
+                {
+                    // Ignore unrelated or protected service keys.
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            Log("Driver service registry scan skipped: " + ex.Message);
+        }
+        return result;
+    }
+
+    private static string NormalizeServiceImagePath(string raw)
+    {
+        if (string.IsNullOrWhiteSpace(raw))
+            return "";
+
+        string value = Environment.ExpandEnvironmentVariables(raw.Trim().Trim('"'));
+        if (value.StartsWith(@"\??\", StringComparison.Ordinal))
+            value = value[4..];
+        if (value.StartsWith(@"\\?\", StringComparison.Ordinal))
+            value = value[4..];
+        if (value.StartsWith(@"\SystemRoot\", StringComparison.OrdinalIgnoreCase))
+            value = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.Windows), value[12..]);
+        if (!Path.IsPathRooted(value))
+            value = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.Windows), value);
+
+        try { return Path.GetFullPath(value); }
+        catch { return ""; }
+    }
+
+    private static void RunScCommand(string action, string serviceName)
+    {
+        try
+        {
+            var psi = new ProcessStartInfo
+            {
+                FileName = "sc.exe",
+                UseShellExecute = false,
+                CreateNoWindow = true,
+                RedirectStandardOutput = true,
+                RedirectStandardError = true
+            };
+            psi.ArgumentList.Add(action);
+            psi.ArgumentList.Add(serviceName);
+            using Process? process = Process.Start(psi);
+            if (process == null)
+                return;
+            string output = process.StandardOutput.ReadToEnd();
+            string error = process.StandardError.ReadToEnd();
+            if (!process.WaitForExit(5000))
+            {
+                try { process.Kill(entireProcessTree: true); } catch { }
+                Log($"sc.exe {action} {serviceName} timed out.");
+                return;
+            }
+            Log($"sc.exe {action} {serviceName} exit={process.ExitCode}: {(output + " " + error).Trim()}");
+        }
+        catch (Exception ex)
+        {
+            Log($"sc.exe {action} {serviceName} failed: {ex.Message}");
+        }
+    }
+
+    private static bool IsFileExclusivelyLocked(string path)
+    {
+        if (!File.Exists(path))
+            return false;
+        try
+        {
+            using var stream = new FileStream(path, FileMode.Open, FileAccess.ReadWrite, FileShare.None);
+            return false;
+        }
+        catch (IOException)
+        {
+            return true;
+        }
+        catch (UnauthorizedAccessException)
+        {
+            return true;
         }
     }
 

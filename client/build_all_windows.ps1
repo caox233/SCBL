@@ -307,7 +307,10 @@ $WinDivertDll = Join-Path $Root "scbl-process-router\WinDivert.dll"
 $WinDivertSys = Join-Path $Root "scbl-process-router\WinDivert64.sys"
 if (Test-Path -LiteralPath $RouterSource) { Copy-Item -Force $RouterSource (Join-Path $Tools "scbl-process-router.exe") }
 if (Test-Path -LiteralPath $WinDivertDll) { Copy-Item -Force $WinDivertDll (Join-Path $Tools "WinDivert.dll") }
-if (Test-Path -LiteralPath $WinDivertSys) { Copy-Item -Force $WinDivertSys (Join-Path $Tools "WinDivert64.sys") }
+if (Test-Path -LiteralPath $WinDivertSys) {
+    Copy-Item -Force $WinDivertSys (Join-Path $Tools "WinDivert64.sys")
+    Copy-Item -Force $WinDivertSys (Join-Path $Tools "WinDivert64.payload.sys")
+}
 
 $WinDivertNotice = Join-Path $Root "WINDIVERT_NOTICE.txt"
 if (Test-Path -LiteralPath $WinDivertNotice) { Copy-Item -Force $WinDivertNotice (Join-Path $Publish "WINDIVERT_NOTICE.txt") }
@@ -331,6 +334,7 @@ if ($BuildRouter -or $Package) {
     $Required.Add((Join-Path $Tools "scbl-process-router.exe"))
     $Required.Add((Join-Path $Tools "WinDivert.dll"))
     $Required.Add((Join-Path $Tools "WinDivert64.sys"))
+    $Required.Add((Join-Path $Tools "WinDivert64.payload.sys"))
 }
 if ($PrepareRuntime -or $Package) {
     $Required.Add((Join-Path $Tools "easytier-core.exe"))

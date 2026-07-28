@@ -49,13 +49,7 @@ jobs:
           python3 /tmp/scbl_patch_part3.py
           python3 /tmp/scbl_patch_part4.py
           sed -i 's/routerVersion         = "1.0.9"/routerVersion         = "1.0.10"/' client/scbl-process-router/main.go
-
-          rm -f \
-            .github/scbl-final2-apply-trigger \
-            .github/scbl-finalize-trigger \
-            .github/workflows/scbl-maintainer-apply-pr38.yml \
-            .github/workflows/scbl-maintainer-command.yml \
-            .github/workflows/scbl-maintainer-workflow-run.yml
+          rm -f .github/scbl-final2-apply-trigger
 
       - name: Commit final source
         shell: bash

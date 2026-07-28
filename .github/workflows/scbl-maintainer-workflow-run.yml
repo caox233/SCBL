@@ -7,6 +7,7 @@ on:
 
 permissions:
   contents: write
+  pull-requests: write
 
 jobs:
   export-final-source:
@@ -20,10 +21,14 @@ jobs:
           ref: agent/release-v1.0.10-v1.0.6-final2
           fetch-depth: 0
 
-      - name: Import validated fix sources
+      - name: Apply and export final source
+        id: export
+        continue-on-error: true
         shell: bash
         run: |
-          set -euo pipefail
+          set -uo pipefail
+          exec > >(tee /tmp/scbl-export.log) 2>&1
+          set -e
           source_ref='agent/client-1.0.10-server-tool-1.0.6-diagnostics'
           git fetch --no-tags origin "$source_ref"
           for file in \
@@ -37,10 +42,6 @@ jobs:
           git show "FETCH_HEAD:server/scbl_server_diagnostics.sh" > server/scbl_server_diagnostics.sh
           chmod 0755 server/scbl_server_diagnostics.sh
 
-      - name: Apply final source changes
-        shell: bash
-        run: |
-          set -euo pipefail
           python3 /tmp/scbl_patch_client_core.py
           python3 /tmp/scbl_patch_redaction.py
           python3 /tmp/scbl_patch_part2.py
@@ -51,12 +52,29 @@ jobs:
             .github/scbl-final2-apply-trigger \
             .github/scbl-workflow-run-trigger
 
-      - name: Commit and export final source tag
-        shell: bash
-        run: |
-          set -euo pipefail
           git config user.name github-actions[bot]
           git config user.email 41898282+github-actions[bot]@users.noreply.github.com
           git add -A
           git commit -m 'Release client v1.0.10 and Server Tool v1.0.6'
           git push --force origin HEAD:refs/tags/scbl-source-v1.0.10-v1.0.6-temp
+
+      - name: Report export result
+        if: always()
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          {
+            echo '### SCBL final source export'
+            echo
+            echo 'Outcome: `${{ steps.export.outcome }}`'
+            echo
+            echo '```text'
+            tail -120 /tmp/scbl-export.log 2>/dev/null || echo 'No export log was produced.'
+            echo '```'
+          } > /tmp/scbl-export-comment.md
+          gh pr comment 43 --repo "$GITHUB_REPOSITORY" --body-file /tmp/scbl-export-comment.md
+
+      - name: Fail when export failed
+        if: steps.export.outcome != 'success'
+        run: exit 1

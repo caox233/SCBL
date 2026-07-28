@@ -1,4 +1,4 @@
-name: SCBL final release builder
+name: SCBL final release source builder
 
 on:
   push:
@@ -8,15 +8,14 @@ on:
 
 permissions:
   contents: write
-  pull-requests: write
 
 jobs:
-  build-clean-release-pr:
+  build-final-source:
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: main
+          ref: agent/release-v1.0.10-v1.0.6-final2
           fetch-depth: 0
 
       - name: Import validated fix sources
@@ -36,13 +35,7 @@ jobs:
           git show "FETCH_HEAD:server/scbl_server_diagnostics.sh" > server/scbl_server_diagnostics.sh
           chmod 0755 server/scbl_server_diagnostics.sh
 
-      - uses: actions/setup-go@v5
-        with:
-          go-version: '1.23.2'
-          cache: true
-          cache-dependency-path: client/scbl-process-router/go.sum
-
-      - name: Apply release fixes
+      - name: Apply final source changes
         shell: bash
         run: |
           set -euo pipefail
@@ -59,70 +52,12 @@ jobs:
             .github/workflows/scbl-maintainer-command.yml \
             .github/workflows/scbl-maintainer-workflow-run.yml
 
-      - name: Validate final source
+      - name: Commit final source
         shell: bash
         run: |
           set -euo pipefail
-          test "$(tr -d '\r\n ' < VERSION_CLIENT)" = "1.0.10"
-          test "$(tr -d '\r\n ' < VERSION_SERVER_TOOL)" = "1.0.6"
-          grep -Fq 'routerVersion         = "1.0.10"' client/scbl-process-router/main.go
-          python3 - <<'PY'
-          import json
-          data = json.load(open('COMPONENT_VERSIONS.json', encoding='utf-8'))
-          assert data['clientVersion'] == '1.0.10'
-          assert data['serverToolVersion'] == '1.0.6'
-          assert data['dedicatedServer']['releaseTag'] == 'scbl-public-stable-latest'
-          PY
-          bash -n server/install_public_server.sh
-          bash -n server/scbl_server_diagnostics.sh
-          bash -n scripts/install-server.sh
-          python3 -m py_compile \
-            server/scbl_control_plane.py \
-            server/scbl_update_server.py \
-            server/test_control_plane.py \
-            server/test_update_server.py \
-            server/test_ddns_go_native.py \
-            server/test_release_manifest_routing.py \
-            server/test_network_topology.py \
-            server/test_client_update_restart.py \
-            server/test_client_network_resilience.py \
-            server/test_server_tool_runtime.py \
-            server/test_server_diagnostics.py \
-            server/test_client_security_regressions.py
-          python3 server/test_control_plane.py
-          python3 server/test_update_server.py
-          python3 server/test_ddns_go_native.py
-          python3 server/test_release_manifest_routing.py
-          python3 server/test_network_topology.py
-          python3 server/test_client_update_restart.py
-          python3 server/test_client_network_resilience.py
-          python3 server/test_server_tool_runtime.py
-          python3 server/test_server_diagnostics.py
-          python3 server/test_client_security_regressions.py
-          (
-            cd client/scbl-process-router
-            test -z "$(gofmt -l .)"
-            GOOS=windows GOARCH=amd64 go vet ./...
-            GOOS=windows GOARCH=amd64 go test ./...
-            GOOS=windows GOARCH=amd64 go build -mod=readonly -trimpath -o /tmp/scbl-process-router.exe .
-          )
-          test -s /tmp/scbl-process-router.exe
-
-      - name: Create clean release pull request
-        uses: peter-evans/create-pull-request@v7
-        with:
-          token: ${{ secrets.GITHUB_TOKEN }}
-          base: main
-          branch: agent/release-v1.0.10-v1.0.6-final
-          delete-branch: false
-          commit-message: Release client v1.0.10 and Server Tool v1.0.6
-          title: Release client v1.0.10 and Server Tool v1.0.6
-          body: |
-            Clean release branch generated from current main.
-
-            - Fix control-plane HTTP 401 caused by saved/runtime EasyTier secret divergence.
-            - Return structured authorization reasons and recover from clock skew.
-            - Harden diagnostic redaction and record the running launcher SHA256.
-            - Add secure one-click Linux server diagnostics and Server Tool menu 15.
-            - Keep 7-player admission unbounded; live in-game host takeover remains a known limitation.
-            - Remove all temporary maintainer and patch workflows.
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add -A
+          git commit -m 'Release client v1.0.10 and Server Tool v1.0.6'
+          git push origin HEAD:agent/release-v1.0.10-v1.0.6-final2

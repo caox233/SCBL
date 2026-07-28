@@ -386,8 +386,14 @@ public partial class MainWindow : Window
         // The previous updater cannot replace its own executable while it is running.
         // Complete that hand-off before the remote manifest is checked, otherwise the
         // freshly updated launcher can be mistaken for an incomplete same-version repair.
-        await _updaterBootstrapService.EnsureCurrentUpdaterAsync();
-        await _winDivertBootstrapService.EnsureCurrentDriverAsync();
+        // Hashing an EXE/SYS on the first cold start can be delayed by disk cache and antivirus;
+        // keep those synchronous file operations off the WPF dispatcher.
+        SetBusy(true, L("正在准备启动器...", "Preparing launcher..."));
+        var bootstrapStopwatch = Stopwatch.StartNew();
+        await Task.WhenAll(
+            Task.Run(async () => await _updaterBootstrapService.EnsureCurrentUpdaterAsync().ConfigureAwait(false)),
+            Task.Run(async () => await _winDivertBootstrapService.EnsureCurrentDriverAsync().ConfigureAwait(false)));
+        LogService.Info($"Launcher bootstrap checks completed: elapsedMs={bootstrapStopwatch.ElapsedMilliseconds}");
 
         // Version confirmation is the first functional startup step. Nothing else is
         // initialized until the server confirms that this is the current formal client.

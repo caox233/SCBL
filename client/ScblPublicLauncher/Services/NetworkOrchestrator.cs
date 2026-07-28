@@ -41,6 +41,7 @@ public sealed class NetworkOrchestrator : IDisposable
     private long? _lastLatencyMs;
     private string _lastTransportMode = "";
     private DateTime _lastGameSessionWatchdogWarningUtc = DateTime.MinValue;
+    private DateTime _lastGameSessionRouteRepairUtc = DateTime.MinValue;
 
     private const int GreenHoldSeconds = 15;
     private const int YellowDebounceMs = 650;
@@ -242,21 +243,29 @@ public sealed class NetworkOrchestrator : IDisposable
                     if (quick.Ok)
                         continue;
 
-                    _consecutiveFailures++;
                     if (_isGameSessionActive())
                     {
+                        NetworkReadyResult recovered = await TryRecoverActiveGameRouteAsync(quick, token).ConfigureAwait(false);
+                        if (recovered.Ok)
+                        {
+                            _consecutiveFailures = 0;
+                            continue;
+                        }
+
+                        _consecutiveFailures++;
                         // Never rebuild the virtual adapter, EasyTier process, or DHCP lease while
-                        // the game owns active LAN/UDP sockets. A transient server probe failure is
-                        // safer than destroying the current room session.
+                        // the game owns active LAN/UDP sockets. The bounded repair above only reapplies
+                        // the existing route binding and keeps the current virtual IP/session intact.
                         if (_lastGameSessionWatchdogWarningUtc == DateTime.MinValue
                             || (DateTime.UtcNow - _lastGameSessionWatchdogWarningUtc).TotalSeconds >= 30)
                         {
                             _lastGameSessionWatchdogWarningUtc = DateTime.UtcNow;
-                            LogService.Warning($"Network watchdog detected a failure while the game is active; automatic EasyTier restart is suppressed. failures={_consecutiveFailures}, message={quick.Message}");
+                            LogService.Warning($"Network watchdog still failed while the game is active; automatic EasyTier restart remains suppressed. failures={_consecutiveFailures}, message={recovered.Message}");
                         }
                         continue;
                     }
 
+                    _consecutiveFailures++;
                     LogService.Error($"Network watchdog transient failure {_consecutiveFailures}/{AutoFailureThreshold}: {quick.Message}");
                     if (_consecutiveFailures < 2)
                         continue;
@@ -275,6 +284,40 @@ public sealed class NetworkOrchestrator : IDisposable
                 }
             }
         }, token);
+    }
+
+    private async Task<NetworkReadyResult> TryRecoverActiveGameRouteAsync(
+        NetworkReadyResult initialFailure,
+        CancellationToken token)
+    {
+        // Give a short underlay/service interruption a chance to recover without touching Windows networking.
+        await Task.Delay(300, token).ConfigureAwait(false);
+        NetworkReadyResult retry = await QuickVerifyAsync("game-session transient retry", token).ConfigureAwait(false);
+        if (retry.Ok)
+        {
+            LogService.Info("Game-session network check recovered on the read-only retry.");
+            return retry;
+        }
+
+        string ip = NetworkHealthCheckService.IsValidScblClientIp(_assignedIp)
+            ? _assignedIp
+            : _getAssignedIp();
+        if (!NetworkHealthCheckService.IsValidScblClientIp(ip))
+            return retry;
+
+        if (_lastGameSessionRouteRepairUtc != DateTime.MinValue
+            && (DateTime.UtcNow - _lastGameSessionRouteRepairUtc).TotalSeconds < 30)
+            return retry;
+
+        _lastGameSessionRouteRepairUtc = DateTime.UtcNow;
+        LogService.Warning($"Game-session server path remained unavailable after read-only retry; reapplying the existing EasyTier route binding only. ip={ip}, initial={initialFailure.Message}");
+        await Task.Run(() => _adapterService.EnsureRouteBindingBestEffort(ip), token).ConfigureAwait(false);
+        await Task.Delay(250, token).ConfigureAwait(false);
+
+        NetworkReadyResult repaired = await QuickVerifyAsync("game-session route-binding repair", token).ConfigureAwait(false);
+        if (repaired.Ok)
+            LogService.Info("Game-session network recovered after non-destructive EasyTier route binding repair.");
+        return repaired;
     }
 
     public async Task ShutdownAsync(string reason)

@@ -729,7 +729,8 @@ relay_network_whitelist = {Q(networkName)}
     public async Task<EasyTierPeerPath?> DetectPeerPathAsync(string launcherBaseDir, string peerIp, TimeSpan timeout)
     {
         peerIp = (peerIp ?? "").Trim().Split('/')[0];
-        if (!PublicTunnelConfig.IsScblClientIp(peerIp))
+        bool isServerPeer = peerIp.Equals(PublicTunnelConfig.ServerVirtualIp, StringComparison.OrdinalIgnoreCase);
+        if (!isServerPeer && !PublicTunnelConfig.IsScblClientIp(peerIp))
             return null;
 
         string cli = GetCliExePath(launcherBaseDir);

@@ -6,40 +6,75 @@ on:
 
 permissions:
   contents: write
-  pull-requests: read
+  pull-requests: write
 
 jobs:
-  apply-pr39:
+  build-clean-release-pr:
     if: >-
       github.event.issue.pull_request &&
       github.event.issue.number == 39 &&
-      github.event.comment.body == '/apply-scbl-pr39'
+      github.event.comment.body == '/build-scbl-release-final'
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: agent/client-1.0.10-server-tool-1.0.6-diagnostics
+          ref: main
           fetch-depth: 0
+
+      - name: Import validated fix sources
+        shell: bash
+        run: |
+          set -euo pipefail
+          source_ref='agent/client-1.0.10-server-tool-1.0.6-diagnostics'
+          git fetch --no-tags origin "$source_ref"
+          for file in \
+            .github/scbl_patch_client_core.py \
+            .github/scbl_patch_redaction.py \
+            .github/scbl_patch_part2.py \
+            .github/scbl_patch_part3.py \
+            .github/scbl_patch_part4.py; do
+            git show "FETCH_HEAD:$file" > "/tmp/$(basename "$file")"
+          done
+          git show "FETCH_HEAD:server/scbl_server_diagnostics.sh" > server/scbl_server_diagnostics.sh
+          chmod 0755 server/scbl_server_diagnostics.sh
+
       - uses: actions/setup-go@v5
         with:
           go-version: '1.23.2'
           cache: true
           cache-dependency-path: client/scbl-process-router/go.sum
-      - name: Apply source fixes
+
+      - name: Apply release fixes
+        shell: bash
         run: |
           set -euo pipefail
-          python3 .github/scbl_patch_client_core.py
-          python3 .github/scbl_patch_redaction.py
-          python3 .github/scbl_patch_part2.py
-          python3 .github/scbl_patch_part3.py
-          python3 .github/scbl_patch_part4.py
+          python3 /tmp/scbl_patch_client_core.py
+          python3 /tmp/scbl_patch_redaction.py
+          python3 /tmp/scbl_patch_part2.py
+          python3 /tmp/scbl_patch_part3.py
+          python3 /tmp/scbl_patch_part4.py
           sed -i 's/routerVersion         = "1.0.9"/routerVersion         = "1.0.10"/' client/scbl-process-router/main.go
+
+          # Remove all temporary maintenance workflows from the formal release.
+          rm -f \
+            .github/workflows/scbl-maintainer-apply-pr38.yml \
+            .github/workflows/scbl-maintainer-command.yml \
+            .github/workflows/scbl-maintainer-workflow-run.yml
+
       - name: Validate final source
+        shell: bash
         run: |
           set -euo pipefail
           test "$(tr -d '\r\n ' < VERSION_CLIENT)" = "1.0.10"
           test "$(tr -d '\r\n ' < VERSION_SERVER_TOOL)" = "1.0.6"
           grep -Fq 'routerVersion         = "1.0.10"' client/scbl-process-router/main.go
+          python3 - <<'PY'
+          import json
+          data = json.load(open('COMPONENT_VERSIONS.json', encoding='utf-8'))
+          assert data['clientVersion'] == '1.0.10'
+          assert data['serverToolVersion'] == '1.0.6'
+          assert data['dedicatedServer']['releaseTag'] == 'scbl-public-stable-latest'
+          PY
           bash -n server/install_public_server.sh
           bash -n server/scbl_server_diagnostics.sh
           bash -n scripts/install-server.sh
@@ -66,22 +101,31 @@ jobs:
           python3 server/test_server_tool_runtime.py
           python3 server/test_server_diagnostics.py
           python3 server/test_client_security_regressions.py
-          cd client/scbl-process-router
-          test -z "$(gofmt -l .)"
-          GOOS=windows GOARCH=amd64 go vet ./...
-          GOOS=windows GOARCH=amd64 go test ./...
-          GOOS=windows GOARCH=amd64 go build -mod=readonly -trimpath -o /tmp/scbl-process-router.exe .
+          (
+            cd client/scbl-process-router
+            test -z "$(gofmt -l .)"
+            GOOS=windows GOARCH=amd64 go vet ./...
+            GOOS=windows GOARCH=amd64 go test ./...
+            GOOS=windows GOARCH=amd64 go build -mod=readonly -trimpath -o /tmp/scbl-process-router.exe .
+          )
           test -s /tmp/scbl-process-router.exe
-      - name: Commit final source
-        run: |
-          set -euo pipefail
-          rm -f .github/scbl_patch*.py \
-            .github/workflows/scbl-apply-release-fixes.yml \
-            .github/workflows/scbl-apply-release-fixes-v2.yml \
-            .github/scbl_patch_error.txt \
-            .github/scbl-pr38-apply-trigger
-          git config user.name github-actions[bot]
-          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
-          git add -A
-          git commit -m 'Release client v1.0.10 and Server Tool v1.0.6 diagnostics fixes'
-          git push origin HEAD:agent/client-1.0.10-server-tool-1.0.6-diagnostics
+
+      - name: Create clean release pull request
+        uses: peter-evans/create-pull-request@v7
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          base: main
+          branch: agent/release-v1.0.10-v1.0.6-final
+          delete-branch: false
+          commit-message: Release client v1.0.10 and Server Tool v1.0.6
+          title: Release client v1.0.10 and Server Tool v1.0.6
+          body: |
+            Clean release branch generated from current main.
+
+            - Fix control-plane HTTP 401 caused by saved/runtime EasyTier secret divergence.
+            - Return structured authorization reasons and recover from clock skew.
+            - Harden diagnostic redaction and record the running launcher SHA256.
+            - Add secure one-click Linux server diagnostics and Server Tool menu 15.
+            - Keep 7-player admission unbounded; live in-game host takeover remains a known limitation.
+            - Remove all temporary maintainer and patch workflows.
+          labels: release

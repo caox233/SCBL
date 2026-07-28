@@ -19,11 +19,16 @@ jobs:
         with:
           ref: agent/client-1.0.10-server-tool-1.0.6-diagnostics
           fetch-depth: 0
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.23.2'
+          cache: true
+          cache-dependency-path: client/scbl-process-router/go.sum
       - name: Check trigger
         id: trigger
         run: |
           if [[ -f .github/scbl-pr38-apply-trigger ]]; then echo 'run=true' >> "$GITHUB_OUTPUT"; else echo 'run=false' >> "$GITHUB_OUTPUT"; fi
-      - name: Apply and validate
+      - name: Apply source fixes
         if: steps.trigger.outputs.run == 'true'
         run: |
           set -euo pipefail
@@ -32,12 +37,46 @@ jobs:
           python3 .github/scbl_patch_part2.py
           python3 .github/scbl_patch_part3.py
           python3 .github/scbl_patch_part4.py
+          sed -i 's/routerVersion         = "1.0.9"/routerVersion         = "1.0.10"/' client/scbl-process-router/main.go
+      - name: Validate final source
+        if: steps.trigger.outputs.run == 'true'
+        run: |
+          set -euo pipefail
+          test "$(tr -d '\r\n ' < VERSION_CLIENT)" = "1.0.10"
+          test "$(tr -d '\r\n ' < VERSION_SERVER_TOOL)" = "1.0.6"
+          grep -Fq 'routerVersion         = "1.0.10"' client/scbl-process-router/main.go
           bash -n server/install_public_server.sh
           bash -n server/scbl_server_diagnostics.sh
-          python3 -m py_compile server/scbl_control_plane.py server/test_control_plane.py server/test_server_diagnostics.py server/test_client_security_regressions.py
+          bash -n scripts/install-server.sh
+          python3 -m py_compile \
+            server/scbl_control_plane.py \
+            server/scbl_update_server.py \
+            server/test_control_plane.py \
+            server/test_update_server.py \
+            server/test_ddns_go_native.py \
+            server/test_release_manifest_routing.py \
+            server/test_network_topology.py \
+            server/test_client_update_restart.py \
+            server/test_client_network_resilience.py \
+            server/test_server_tool_runtime.py \
+            server/test_server_diagnostics.py \
+            server/test_client_security_regressions.py
           python3 server/test_control_plane.py
+          python3 server/test_update_server.py
+          python3 server/test_ddns_go_native.py
+          python3 server/test_release_manifest_routing.py
+          python3 server/test_network_topology.py
+          python3 server/test_client_update_restart.py
+          python3 server/test_client_network_resilience.py
+          python3 server/test_server_tool_runtime.py
           python3 server/test_server_diagnostics.py
           python3 server/test_client_security_regressions.py
+          cd client/scbl-process-router
+          test -z "$(gofmt -l .)"
+          GOOS=windows GOARCH=amd64 go vet ./...
+          GOOS=windows GOARCH=amd64 go test ./...
+          GOOS=windows GOARCH=amd64 go build -mod=readonly -trimpath -o /tmp/scbl-process-router.exe .
+          test -s /tmp/scbl-process-router.exe
       - name: Commit final source
         if: steps.trigger.outputs.run == 'true'
         run: |

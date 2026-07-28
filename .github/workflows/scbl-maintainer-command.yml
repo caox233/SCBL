@@ -1,16 +1,19 @@
-name: SCBL final release source builder
+name: SCBL one-time final release apply
 
 on:
-  push:
-    branches: [main]
-    paths:
-      - .github/scbl-finalize-trigger
+  issue_comment:
+    types: [created]
 
 permissions:
   contents: write
+  pull-requests: read
 
 jobs:
-  build-final-source:
+  apply-final-source:
+    if: >-
+      github.event.issue.pull_request &&
+      github.event.issue.number == 40 &&
+      github.event.comment.body == '/apply-scbl-final2'
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
@@ -47,6 +50,7 @@ jobs:
           sed -i 's/routerVersion         = "1.0.9"/routerVersion         = "1.0.10"/' client/scbl-process-router/main.go
 
           rm -f \
+            .github/scbl-final2-apply-trigger \
             .github/scbl-finalize-trigger \
             .github/workflows/scbl-maintainer-apply-pr38.yml \
             .github/workflows/scbl-maintainer-command.yml \

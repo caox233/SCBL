@@ -4,9 +4,12 @@
 from __future__ import annotations
 
 import importlib.util
+import socket
 import sqlite3
 import sys
 import tempfile
+import threading
+import time
 from pathlib import Path
 
 
@@ -89,7 +92,48 @@ def main() -> None:
         assert unrelated["active"] is False
         assert unrelated["hostVirtualIp"] == ""
 
-        print("control-plane authoritative snapshot tests passed")
+        # Exercise the real request handler. The signed internal probe must complete,
+        # and each HTTP/1.1 response must explicitly close instead of holding an idle
+        # handler thread until a socket timeout.
+        control_plane.SERVER_IP = "127.0.0.1"
+        control_plane.SECRET = b"control-plane-test-secret"
+        control_plane.ALLOW_LOOPBACK = True
+        server = control_plane.ScblThreadingHTTPServer(("127.0.0.1", 0), control_plane.Handler)
+        control_plane.CONTROL_PORT = server.server_address[1]
+        thread = threading.Thread(target=server.serve_forever, kwargs={"poll_interval": 0.01}, daemon=True)
+        thread.start()
+        try:
+            deadline = time.time() + 2.0
+            while time.time() < deadline and not control_plane._signed_health_probe(timeout=0.4):
+                time.sleep(0.02)
+            assert control_plane._signed_health_probe(timeout=0.8) is True
+
+            timestamp = str(int(time.time()))
+            path = "/v1/health"
+            signature = control_plane.expected_signature(timestamp, "GET", path, b"")
+            request = (
+                f"GET {path} HTTP/1.1\r\n"
+                f"Host: 127.0.0.1:{control_plane.CONTROL_PORT}\r\n"
+                f"X-SCBL-Timestamp: {timestamp}\r\n"
+                f"X-SCBL-Signature: {signature}\r\n\r\n"
+            ).encode("ascii")
+            with socket.create_connection(("127.0.0.1", control_plane.CONTROL_PORT), timeout=1.0) as client:
+                client.sendall(request)
+                client.settimeout(1.0)
+                response = bytearray()
+                while True:
+                    chunk = client.recv(4096)
+                    if not chunk:
+                        break
+                    response.extend(chunk)
+            assert b"HTTP/1.1 200" in response
+            assert b"Connection: close" in response
+        finally:
+            server.shutdown()
+            server.server_close()
+            thread.join(timeout=1.0)
+
+        print("control-plane authoritative snapshot and HTTP lifecycle tests passed")
 
 
 if __name__ == "__main__":

@@ -39,6 +39,9 @@ OVERLAY = ipaddress.ip_network("10.66.0.0/24")
 ALLOW_LOOPBACK = os.environ.get("SCBL_ALLOW_LOOPBACK", "n").strip().lower() in {"1", "y", "yes", "true", "on"}
 SESSION_REFRESH_SECONDS = 2.0
 HEALTH_REFRESH_SECONDS = 5.0
+HTTP_REQUEST_TIMEOUT_SECONDS = 5.0
+SELF_WATCHDOG_INTERVAL_SECONDS = 15.0
+SELF_WATCHDOG_FAILURE_THRESHOLD = 2
 
 
 def utc_ms() -> int:
@@ -601,6 +604,59 @@ def _metrics_loop() -> None:
         print(f"control-plane metrics: {text}; response-write-errors={write_errors}", flush=True)
 
 
+
+
+def _signed_health_probe(timeout: float = 2.0) -> bool:
+    timestamp = str(int(time.time()))
+    path = "/v1/health"
+    signature = expected_signature(timestamp, "GET", path, b"")
+    request = (
+        f"GET {path} HTTP/1.1\r\n"
+        f"Host: {SERVER_IP}:{CONTROL_PORT}\r\n"
+        f"X-SCBL-Timestamp: {timestamp}\r\n"
+        f"X-SCBL-Signature: {signature}\r\n"
+        "Connection: close\r\n\r\n"
+    ).encode("ascii")
+    sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    try:
+        sock.settimeout(timeout)
+        # Guarantee that the overlay-only source check sees the fixed server IP.
+        sock.bind((SERVER_IP, 0))
+        sock.connect((SERVER_IP, CONTROL_PORT))
+        sock.sendall(request)
+        response = bytearray()
+        while len(response) < 16 * 1024:
+            chunk = sock.recv(4096)
+            if not chunk:
+                break
+            response.extend(chunk)
+        first_line = bytes(response).split(b"\r\n", 1)[0]
+        return b" 200 " in first_line
+    except OSError:
+        return False
+    finally:
+        sock.close()
+
+
+def _listener_watchdog_loop() -> None:
+    failures = 0
+    while True:
+        time.sleep(SELF_WATCHDOG_INTERVAL_SECONDS)
+        if _signed_health_probe():
+            if failures:
+                print(f"control-plane self-watchdog recovered after {failures} failure(s)", flush=True)
+            failures = 0
+            continue
+        failures += 1
+        print(
+            f"control-plane self-watchdog failed {failures}/{SELF_WATCHDOG_FAILURE_THRESHOLD}: "
+            f"signed health request to {SERVER_IP}:{CONTROL_PORT} did not complete",
+            flush=True,
+        )
+        if failures >= SELF_WATCHDOG_FAILURE_THRESHOLD:
+            print("control-plane listener is unhealthy; exiting for systemd restart", flush=True)
+            os._exit(70)
+
 class ScblThreadingHTTPServer(ThreadingHTTPServer):
     request_queue_size = 128
     daemon_threads = True
@@ -614,10 +670,18 @@ class Handler(BaseHTTPRequestHandler):
 
     def setup(self) -> None:
         super().setup()
-        self.connection.settimeout(8.0)
+        self.connection.settimeout(HTTP_REQUEST_TIMEOUT_SECONDS)
 
     def log_message(self, fmt: str, *args: Any) -> None:
         print(f"{self.address_string()} - {fmt % args}", flush=True)
+
+    def log_error(self, fmt: str, *args: Any) -> None:
+        # Previous keep-alive handling logged an idle timeout for every /v1/peers
+        # connection. Responses now close explicitly, so suppress only stale
+        # timeout noise while preserving all other handler errors.
+        if fmt.startswith("Request timed out"):
+            return
+        super().log_error(fmt, *args)
 
     def _begin_request(self) -> None:
         self._request_started = time.monotonic()
@@ -632,11 +696,14 @@ class Handler(BaseHTTPRequestHandler):
             self.send_header("Content-Length", str(len(data)))
             self.send_header("Cache-Control", "no-store")
             self.send_header("X-Content-Type-Options", "nosniff")
+            self.send_header("Connection", "close")
             self.end_headers()
             self.wfile.write(data)
+            self.wfile.flush()
         except (BrokenPipeError, ConnectionResetError, OSError):
             write_error = True
         finally:
+            self.close_connection = True
             if not getattr(self, "_request_recorded", False):
                 self._request_recorded = True
                 started = getattr(self, "_request_started", time.monotonic())
@@ -783,9 +850,11 @@ def main() -> None:
     threading.Thread(target=_health_refresh_loop, name="scbl-health-snapshot", daemon=True).start()
     threading.Thread(target=_metrics_loop, name="scbl-control-metrics", daemon=True).start()
     server = ScblThreadingHTTPServer((SERVER_IP, CONTROL_PORT), Handler)
+    threading.Thread(target=_listener_watchdog_loop, name="scbl-listener-watchdog", daemon=True).start()
     print(
         f"SCBL control plane v{SERVER_TOOL_VERSION} listening on http://{SERVER_IP}:{CONTROL_PORT}; "
-        f"heartbeat TTL={HEARTBEAT_TTL_SECONDS}s; session snapshot={SESSION_REFRESH_SECONDS}s",
+        f"heartbeat TTL={HEARTBEAT_TTL_SECONDS}s; session snapshot={SESSION_REFRESH_SECONDS}s; "
+        f"connection=close; self-watchdog={SELF_WATCHDOG_INTERVAL_SECONDS}s x {SELF_WATCHDOG_FAILURE_THRESHOLD}",
         flush=True,
     )
     try:

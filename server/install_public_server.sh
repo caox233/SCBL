@@ -199,6 +199,22 @@ run_systemctl_timed() {
   return "$rc"
 }
 
+wait_for_tcp_listener() {
+  local host="$1" port="$2" timeout_seconds="${3:-10}" elapsed=0
+  printf '等待 TCP %s:%s（最长 %s 秒）' "$host" "$port" "$timeout_seconds"
+  while (( elapsed < timeout_seconds )); do
+    if ss -lntH 2>/dev/null | awk -v endpoint="$host:$port" '$4 == endpoint { found=1 } END { exit(found ? 0 : 1) }'; then
+      echo '：已就绪。'
+      return 0
+    fi
+    printf '.'
+    sleep 1
+    ((elapsed+=1))
+  done
+  echo '：超时。'
+  return 1
+}
+
 wait_for_scbl0_ready() {
   local timeout_seconds="${1:-25}" elapsed=0
   printf '等待 EasyTier 虚拟网卡 scbl0（%s，最长 %s 秒）' "$SCBL_SERVER_IP" "$timeout_seconds"
@@ -635,25 +651,59 @@ UNITEOF
 }
 
 run_server_tool_migrations() {
-  local marker="$SCBL_ROOT/.migrations/server-tool-v0.6.9-ddns-go-native"
-  ddns_go_installed || return 0
-  [[ -f "$marker" ]] && return 0
+  local ddns_marker="$SCBL_ROOT/.migrations/server-tool-v0.6.9-ddns-go-native"
+  if ddns_go_installed && [[ ! -f "$ddns_marker" ]]; then
+    echo "正在执行 DDNS-GO 原生化迁移..."
+    cleanup_legacy_ddns_go_management
+    migrate_ddns_go_config_to_native_interface
+    write_ddns_go_service
+    write_ddns_go_guide
+    systemctl enable --now ddns-go.service >/dev/null 2>&1 || true
+    systemctl restart ddns-go.service 2>/dev/null || true
+    backup_env
+    write_env
+    install -d -m 0755 "$(dirname "$ddns_marker")"
+    printf 'completed_at=%s
+listen=%s
+' "$(date -u +'%Y-%m-%dT%H:%M:%SZ')" "$DDNS_GO_LISTEN" > "$ddns_marker"
+    chmod 0644 "$ddns_marker"
+    echo "DDNS-GO 原生化迁移完成，Web 管理地址：http://${DDNS_GO_LISTEN%:9876}:9876"
+  fi
 
-  echo "正在执行 DDNS-GO 原生化迁移..."
-  cleanup_legacy_ddns_go_management
-  migrate_ddns_go_config_to_native_interface
-  write_ddns_go_service
-  write_ddns_go_guide
-  systemctl enable --now ddns-go.service >/dev/null 2>&1 || true
-  systemctl restart ddns-go.service 2>/dev/null || true
-  backup_env
-  write_env
+  migrate_control_plane_runtime_v105
+}
+
+migrate_control_plane_runtime_v105() {
+  local marker="$SCBL_ROOT/.migrations/server-tool-v1.0.5-control-plane-runtime"
+  local source="$MANAGER_DIR/scbl_control_plane.py"
+  local live="$SCBL_ROOT/control-plane/scbl_control_plane.py"
+  [[ -f "$marker" ]] && return 0
+  [[ -f "$source" ]] || source="$SCBL_ROOT/server/scbl_control_plane.py"
+  [[ -f "$source" ]] || {
+    echo "警告：找不到v1.0.5控制平面文件，暂不执行运行目录迁移。"
+    return 1
+  }
+
+  echo "正在迁移v1.0.5控制平面运行文件与systemd配置..."
+  install -d -m 0755 "$MANAGER_DIR" "$SCBL_ROOT/server" "$SCBL_ROOT/control-plane"
+  install -m 0644 "$source" "$MANAGER_DIR/scbl_control_plane.py"
+  install -m 0644 "$source" "$SCBL_ROOT/server/scbl_control_plane.py"
+  install_control_plane_files
+  write_control_plane_systemd_unit
+  systemctl daemon-reload
+  systemctl enable scbl-control-plane.service >/dev/null 2>&1 || true
+  systemctl restart scbl-control-plane.service
+  if ! wait_for_tcp_listener "$SCBL_SERVER_IP" "$SCBL_CONTROL_PORT" 12; then
+    echo "v1.0.5控制平面迁移后19080未就绪，最近日志："
+    journalctl -u scbl-control-plane.service -n 80 --no-pager 2>/dev/null || true
+    return 1
+  fi
   install -d -m 0755 "$(dirname "$marker")"
   printf 'completed_at=%s
-listen=%s
-' "$(date -u +'%Y-%m-%dT%H:%M:%SZ')" "$DDNS_GO_LISTEN" > "$marker"
+version=%s
+' "$(date -u +'%Y-%m-%dT%H:%M:%SZ')" "$SERVER_TOOL_VERSION" > "$marker"
   chmod 0644 "$marker"
-  echo "DDNS-GO 原生化迁移完成，Web 管理地址：http://${DDNS_GO_LISTEN%:9876}:9876"
+  echo "v1.0.5控制平面迁移完成：$SCBL_SERVER_IP:$SCBL_CONTROL_PORT 已就绪。"
 }
 
 write_ddns_go_guide() {
@@ -1450,12 +1500,15 @@ install_dedicated_server() {
 }
 
 install_control_plane_files() {
+  local control_source="$SCRIPT_DIR/scbl_control_plane.py"
   mkdir -p "$SCBL_ROOT/control-plane"
-  if [[ ! -f "$SCRIPT_DIR/scbl_control_plane.py" ]]; then
-    echo "警告：部署包缺少 scbl_control_plane.py，控制平面不会安装。"
+  [[ -f "$control_source" ]] || control_source="$MANAGER_DIR/scbl_control_plane.py"
+  [[ -f "$control_source" ]] || control_source="$SCBL_ROOT/server/scbl_control_plane.py"
+  if [[ ! -f "$control_source" ]]; then
+    echo "警告：部署包和运行目录均缺少 scbl_control_plane.py，控制平面不会安装。"
     return 1
   fi
-  install -m 0755 "$SCRIPT_DIR/scbl_control_plane.py" "$SCBL_ROOT/control-plane/scbl_control_plane.py"
+  install -m 0755 "$control_source" "$SCBL_ROOT/control-plane/scbl_control_plane.py"
 
   cat > /usr/local/bin/scbl-server-status <<STATUS_EOF
 #!/usr/bin/env bash
@@ -1473,6 +1526,14 @@ ok() { systemctl is-active --quiet "\$1" 2>/dev/null && echo 正常 || echo 异�
 listen_tcp() {
   ss -lntH 2>/dev/null | awk -v endpoint="\$1:\$2" '\$4 == endpoint { found=1 } END { exit(found ? 0 : 1) }'
 }
+wait_listen_tcp() {
+  local i
+  for i in {1..20}; do
+    listen_tcp "\$1" "\$2" && return 0
+    sleep 0.1
+  done
+  return 1
+}
 listen_any_tcp() {
   ss -lntH 2>/dev/null | awk -v suffix=":\$1" 'index(\$4, suffix) == length(\$4) - length(suffix) + 1 { found=1 } END { exit(found ? 0 : 1) }'
 }
@@ -1486,8 +1547,8 @@ printf '  控制平面：%s\n' "\$(ok scbl-control-plane.service)"
 printf '  更新服务：%s\n' "\$(ok scbl-update.service)"
 printf '  DDNS-GO：%s\n' "\$(systemctl is-active --quiet ddns-go.service 2>/dev/null && echo 正常 || echo 未启用/异常)"
 printf '  虚拟网卡：%s\n' "\$(ip -4 -br addr show scbl0 2>/dev/null | awk '{print \$2" "\$3}' || true)"
-printf '  控制平面：%s:%s（%s）\n' "\$SCBL_SERVER_IP" "\$SCBL_CONTROL_PORT" "\$(listen_tcp "\$SCBL_SERVER_IP" "\$SCBL_CONTROL_PORT" && echo 正常 || echo 未监听)"
-printf '  账号服务：%s:50051/TCP（%s）\n' "\$SCBL_SERVER_IP" "\$(listen_tcp "\$SCBL_SERVER_IP" 50051 && echo 正常 || echo 未监听)"
+printf '  控制平面：%s:%s（%s）\n' "\$SCBL_SERVER_IP" "\$SCBL_CONTROL_PORT" "\$(wait_listen_tcp "\$SCBL_SERVER_IP" "\$SCBL_CONTROL_PORT" && echo 正常 || echo 未监听)"
+printf '  账号服务：%s:50051/TCP（%s）\n' "\$SCBL_SERVER_IP" "\$(listen_any_tcp 50051 && echo 正常 || echo 未监听)"
 printf '  在线配置：%s:80/TCP（%s）\n' "\$SCBL_SERVER_IP" "\$(listen_any_tcp 80 && echo 正常 || echo 未监听)"
 printf '  内容服务：%s:8000/TCP（%s）\n' "\$SCBL_SERVER_IP" "\$(listen_any_tcp 8000 && echo 正常 || echo 未监听)"
 printf '  PRUDP认证：%s:21126/UDP（%s）\n' "\$SCBL_SERVER_IP" "\$(listen_any_udp 21126 && echo 正常 || echo 未监听)"
@@ -1496,6 +1557,38 @@ printf '  公网更新：IPv4/IPv6 TCP %s（%s）\n' "\$SCBL_UPDATE_PORT" "\$(li
 printf '  数据库：%s\n' "\$([[ -f \$SCBL_ROOT/server/5th-echelon.db ]] && echo 存在 || echo 缺失)"
 STATUS_EOF
   chmod 0755 /usr/local/bin/scbl-server-status
+}
+
+write_control_plane_systemd_unit() {
+  cat > /etc/systemd/system/scbl-control-plane.service <<UNITEOF
+[Unit]
+Description=SCBL Sidecar Control Plane
+After=scbl-tunnel.service scbl-dedicated.service
+Requires=scbl-tunnel.service
+Wants=scbl-dedicated.service
+
+[Service]
+Type=simple
+EnvironmentFile=$ENV_FILE
+WorkingDirectory=$SCBL_ROOT/control-plane
+ExecStartPre=$SCBL_ROOT/bin/wait-scbl0.sh
+ExecStart=/usr/bin/python3 $SCBL_ROOT/control-plane/scbl_control_plane.py
+Restart=always
+RestartSec=2
+TimeoutStartSec=25
+TimeoutStopSec=8
+TasksMax=128
+MemoryHigh=192M
+MemoryMax=256M
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectHome=true
+ProtectSystem=full
+ReadWritePaths=$SCBL_ROOT
+
+[Install]
+WantedBy=multi-user.target
+UNITEOF
 }
 
 write_systemd_files() {
@@ -1635,31 +1728,7 @@ LimitNOFILE=1048576
 WantedBy=multi-user.target
 UNITEOF
 
-  cat > /etc/systemd/system/scbl-control-plane.service <<UNITEOF
-[Unit]
-Description=SCBL Sidecar Control Plane
-After=scbl-tunnel.service scbl-dedicated.service
-Requires=scbl-tunnel.service
-Wants=scbl-dedicated.service
-
-[Service]
-Type=simple
-EnvironmentFile=$ENV_FILE
-WorkingDirectory=$SCBL_ROOT/control-plane
-ExecStartPre=$SCBL_ROOT/bin/wait-scbl0.sh
-ExecStart=/usr/bin/python3 $SCBL_ROOT/control-plane/scbl_control_plane.py
-Restart=on-failure
-RestartSec=3
-TimeoutStartSec=25
-NoNewPrivileges=true
-PrivateTmp=true
-ProtectHome=true
-ProtectSystem=full
-ReadWritePaths=$SCBL_ROOT
-
-[Install]
-WantedBy=multi-user.target
-UNITEOF
+  write_control_plane_systemd_unit
 
   write_update_server_files
   write_package_watcher_files
@@ -1767,7 +1836,14 @@ restart_services() {
 
   stage "启动游戏与控制平面服务"
   run_systemctl_timed 25 restart scbl-dedicated.service || echo "警告：scbl-dedicated.service 启动失败。"
-  run_systemctl_timed 20 restart scbl-control-plane.service || echo "警告：scbl-control-plane.service 启动失败，客户端将回退本地检测。"
+  if run_systemctl_timed 20 restart scbl-control-plane.service; then
+    if ! wait_for_tcp_listener "$SCBL_SERVER_IP" "$SCBL_CONTROL_PORT" 12; then
+      echo "警告：scbl-control-plane.service进程已启动，但控制端口未就绪。"
+      journalctl -u scbl-control-plane.service -n 80 --no-pager 2>/dev/null || true
+    fi
+  else
+    echo "警告：scbl-control-plane.service 启动失败，房主和对局延迟显示不可用。"
+  fi
 }
 
 write_client_settings_sample() {
@@ -2575,6 +2651,7 @@ update_server_tool_online() {
   local version_url="${SCBL_SERVER_TOOL_VERSION_URL:-https://raw.githubusercontent.com/${repo}/main/VERSION_SERVER_TOOL}"
   local version tag package base expected actual cmp tmpdir extract_root manager_new control_new update_new version_new
   local backup_root control_changed=0 binary_check_new branch_new package_root
+  local control_live="$SCBL_ROOT/control-plane/scbl_control_plane.py"
 
   echo "正在检查 GitHub 正式服务端工具版本..."
   version="$(curl -fsSL --connect-timeout 10 --max-time 60 --retry 3 --retry-all-errors "$version_url" 2>/dev/null | tr -d '[:space:]' || true)"
@@ -2648,11 +2725,13 @@ PYEOF_SAFE_SERVER_EXTRACT
   [[ -f "$MANAGER_SCRIPT" ]] && cp -a "$MANAGER_SCRIPT" "$backup_root/install_public_server.sh"
   [[ -f "$MANAGER_DIR/VERSION_SERVER_TOOL" ]] && cp -a "$MANAGER_DIR/VERSION_SERVER_TOOL" "$backup_root/VERSION_SERVER_TOOL"
   [[ -f "$MANAGER_DIR/scbl_update_server.py" ]] && cp -a "$MANAGER_DIR/scbl_update_server.py" "$backup_root/scbl_update_server.py"
-  [[ -f "$SCBL_ROOT/server/scbl_control_plane.py" ]] && cp -a "$SCBL_ROOT/server/scbl_control_plane.py" "$backup_root/scbl_control_plane.py"
+  [[ -f "$MANAGER_DIR/scbl_control_plane.py" ]] && cp -a "$MANAGER_DIR/scbl_control_plane.py" "$backup_root/scbl_control_plane.manager.py"
+  [[ -f "$SCBL_ROOT/server/scbl_control_plane.py" ]] && cp -a "$SCBL_ROOT/server/scbl_control_plane.py" "$backup_root/scbl_control_plane.server.py"
+  [[ -f "$control_live" ]] && cp -a "$control_live" "$backup_root/scbl_control_plane.live.py"
   [[ -f "$SCBL_ROOT/server/check_scbl_binary_release.sh" ]] && cp -a "$SCBL_ROOT/server/check_scbl_binary_release.sh" "$backup_root/check_scbl_binary_release.sh"
   [[ -f "$SCBL_ROOT/server/5th-echelon_branch.txt" ]] && cp -a "$SCBL_ROOT/server/5th-echelon_branch.txt" "$backup_root/5th-echelon_branch.txt"
 
-  if [[ ! -f "$SCBL_ROOT/server/scbl_control_plane.py" ]] || ! cmp -s "$control_new" "$SCBL_ROOT/server/scbl_control_plane.py"; then
+  if [[ ! -f "$control_live" ]] || ! cmp -s "$control_new" "$control_live"; then
     control_changed=1
   fi
 
@@ -2660,8 +2739,10 @@ PYEOF_SAFE_SERVER_EXTRACT
     install -m 0755 "$manager_new" "$MANAGER_SCRIPT"
     install -m 0644 "$version_new" "$MANAGER_DIR/VERSION_SERVER_TOOL"
     install -m 0644 "$update_new" "$MANAGER_DIR/scbl_update_server.py"
-    install -d -m 0755 "$SCBL_ROOT/server"
+    install -m 0644 "$control_new" "$MANAGER_DIR/scbl_control_plane.py"
+    install -d -m 0755 "$SCBL_ROOT/server" "$SCBL_ROOT/control-plane"
     install -m 0644 "$control_new" "$SCBL_ROOT/server/scbl_control_plane.py"
+    install -m 0755 "$control_new" "$control_live"
     binary_check_new="$(find "$package_root" -type f -name check_scbl_binary_release.sh -print -quit)"
     branch_new="$(find "$package_root" -type f -name 5th-echelon_branch.txt -print -quit)"
     [[ -z "$binary_check_new" ]] || install -m 0755 "$binary_check_new" "$SCBL_ROOT/server/check_scbl_binary_release.sh"
@@ -2674,16 +2755,19 @@ with open(path, 'w', encoding='utf-8') as handle:
     json.dump({'version': version, 'releaseTag': tag, 'installedAt': datetime.now(timezone.utc).isoformat(), 'source': 'github-release', 'packageSha256': digest}, handle, ensure_ascii=False, indent=2)
 PYEOF_SERVER_TOOL_STATE
     if [[ "$control_changed" == "1" ]]; then
+      write_control_plane_systemd_unit
+      systemctl daemon-reload
       systemctl restart scbl-control-plane.service
-      sleep 2
-      systemctl is-active --quiet scbl-control-plane.service
+      wait_for_tcp_listener "$SCBL_SERVER_IP" "$SCBL_CONTROL_PORT" 12
     fi
   }; then
     echo "升级失败，正在恢复服务端工具..."
     [[ -f "$backup_root/install_public_server.sh" ]] && install -m 0755 "$backup_root/install_public_server.sh" "$MANAGER_SCRIPT"
     [[ -f "$backup_root/VERSION_SERVER_TOOL" ]] && install -m 0644 "$backup_root/VERSION_SERVER_TOOL" "$MANAGER_DIR/VERSION_SERVER_TOOL"
     [[ -f "$backup_root/scbl_update_server.py" ]] && install -m 0644 "$backup_root/scbl_update_server.py" "$MANAGER_DIR/scbl_update_server.py"
-    [[ -f "$backup_root/scbl_control_plane.py" ]] && install -m 0644 "$backup_root/scbl_control_plane.py" "$SCBL_ROOT/server/scbl_control_plane.py"
+    [[ -f "$backup_root/scbl_control_plane.manager.py" ]] && install -m 0644 "$backup_root/scbl_control_plane.manager.py" "$MANAGER_DIR/scbl_control_plane.py"
+    [[ -f "$backup_root/scbl_control_plane.server.py" ]] && install -m 0644 "$backup_root/scbl_control_plane.server.py" "$SCBL_ROOT/server/scbl_control_plane.py"
+    [[ -f "$backup_root/scbl_control_plane.live.py" ]] && install -m 0755 "$backup_root/scbl_control_plane.live.py" "$control_live"
     systemctl restart scbl-control-plane.service 2>/dev/null || true
     rm -rf "$tmpdir"
     return 1

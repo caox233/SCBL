@@ -103,6 +103,10 @@ public partial class MainWindow : Window
     private CancellationTokenSource? _gameLatencyCts;
     private CancellationTokenSource? _gameNetworkContinuityCts;
     private CancellationTokenSource? _controlPlaneHeartbeatCts;
+    private readonly object _controlPlaneSecretSync = new();
+    private string _cachedControlPlaneSigningSecret = "";
+    private DateTime _cachedControlPlaneSecretWriteUtc = DateTime.MinValue;
+    private int _controlPlaneSecretMismatchLogged;
     private DateTime _lastAutomaticPeerRefreshUtc = DateTime.MinValue;
     private int _peerRefreshRunning;
     private List<PeerInfo> _lastPeers = new();
@@ -249,6 +253,53 @@ public partial class MainWindow : Window
 
     private string GetConfiguredTunnelSecret()
         => PublicTunnelConfig.NormalizeTunnelSecret(_settings.TunnelSecret);
+
+    private string GetControlPlaneSigningSecret()
+    {
+        string configured = GetConfiguredTunnelSecret();
+        string runtimePath = Path.Combine(
+            LogService.PersistentDataDirectory,
+            "network",
+            "scbl-easytier-client.toml");
+        try
+        {
+            if (!File.Exists(runtimePath))
+                return configured;
+
+            DateTime writeUtc = File.GetLastWriteTimeUtc(runtimePath);
+            lock (_controlPlaneSecretSync)
+            {
+                if (_cachedControlPlaneSecretWriteUtc == writeUtc
+                    && !string.IsNullOrWhiteSpace(_cachedControlPlaneSigningSecret))
+                    return _cachedControlPlaneSigningSecret;
+
+                string toml = File.ReadAllText(runtimePath, Encoding.UTF8);
+                Match match = Regex.Match(
+                    toml,
+                    @"(?im)^\s*network_secret\s*=\s*""(?<value>[^""]*)""\s*$",
+                    RegexOptions.CultureInvariant);
+                string runtime = match.Success ? match.Groups["value"].Value.Trim() : "";
+                if (string.IsNullOrWhiteSpace(runtime))
+                    return configured;
+
+                _cachedControlPlaneSigningSecret = runtime;
+                _cachedControlPlaneSecretWriteUtc = writeUtc;
+                if (!runtime.Equals(configured, StringComparison.Ordinal)
+                    && Interlocked.Exchange(ref _controlPlaneSecretMismatchLogged, 1) == 0)
+                {
+                    LogService.Warning(
+                        "The saved tunnel secret differs from the active EasyTier runtime secret; " +
+                        "control-plane signing will follow the active runtime without logging either value.");
+                }
+                return runtime;
+            }
+        }
+        catch (Exception ex)
+        {
+            LogService.Info("Unable to read the active EasyTier secret for control-plane signing; using protected settings: " + ex.Message);
+            return configured;
+        }
+    }
 
     private EasyTierClientOptions GetEasyTierClientOptions()
         => new(
@@ -1722,7 +1773,7 @@ public partial class MainWindow : Window
             using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(5));
             ControlPlanePeersResponse? registry = await _controlPlaneService.GetPeersAsync(
                 bindIp,
-                GetConfiguredTunnelSecret(),
+                GetControlPlaneSigningSecret(),
                 cts.Token).ConfigureAwait(false);
 
             int knownRemotePeers;
@@ -1911,7 +1962,7 @@ public partial class MainWindow : Window
                         bool ok = await _controlPlaneService.SendHeartbeatAsync(
                             heartbeat,
                             bindIp,
-                            GetConfiguredTunnelSecret(),
+                            GetControlPlaneSigningSecret(),
                             token).ConfigureAwait(false);
                         consecutiveFailures = ok ? 0 : consecutiveFailures + 1;
                         if (!ok && consecutiveFailures == 3)
@@ -2841,7 +2892,7 @@ public partial class MainWindow : Window
                     {
                         authoritative = await _controlPlaneService.GetGameSessionAsync(
                             bindIp,
-                            GetConfiguredTunnelSecret(),
+                            GetControlPlaneSigningSecret(),
                             token).ConfigureAwait(false);
                     }
 
@@ -3215,7 +3266,7 @@ public partial class MainWindow : Window
 
             Task<ControlPlanePeersResponse?> registryTask = _controlPlaneService.GetPeersAsync(
                 selfIp,
-                GetConfiguredTunnelSecret(),
+                GetControlPlaneSigningSecret(),
                 token);
             Task<IReadOnlyList<string>> routesTask = _tunnelService.ListVirtualPeerIpsAsync(
                 GetLauncherBaseDirectory(),

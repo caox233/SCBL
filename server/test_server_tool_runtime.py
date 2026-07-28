@@ -6,7 +6,8 @@ manager = Path("server/install_public_server.sh").read_text(encoding="utf-8")
 control = Path("server/scbl_control_plane.py").read_text(encoding="utf-8")
 release = Path("docs/releases/SERVER_TOOL_v1.0.5.md").read_text(encoding="utf-8")
 
-assert version == "1.0.5"
+version_parts = tuple(int(part) for part in version.split("."))
+assert version_parts >= (1, 0, 5)
 assert 'self.send_header("Connection", "close")' in control
 assert "self.close_connection = True" in control
 assert "_signed_health_probe" in control
@@ -22,4 +23,4 @@ assert "server-tool-v1.0.5-control-plane-runtime" in manager
 assert 'install -m 0755 "$control_new" "$control_live"' in manager
 assert 'control_source="$MANAGER_DIR/scbl_control_plane.py"' in manager
 assert "升级后重新执行一次 `SCBL`" in release
-print("Server Tool v1.0.5 control-plane runtime resilience checks passed")
+print(f"Server Tool {version} retains the v1.0.5 control-plane runtime resilience guarantees")

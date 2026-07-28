@@ -128,6 +128,44 @@ def main() -> None:
                     response.extend(chunk)
             assert b"HTTP/1.1 200" in response
             assert b"Connection: close" in response
+
+            bad_request = (
+                f"GET {path} HTTP/1.1\r\n"
+                f"Host: 127.0.0.1:{control_plane.CONTROL_PORT}\r\n"
+                f"X-SCBL-Timestamp: {timestamp}\r\n"
+                "X-SCBL-Signature: 00\r\nConnection: close\r\n\r\n"
+            ).encode("ascii")
+            with socket.create_connection(("127.0.0.1", control_plane.CONTROL_PORT), timeout=1.0) as client:
+                client.sendall(bad_request)
+                client.settimeout(1.0)
+                bad_response = bytearray()
+                while True:
+                    chunk = client.recv(4096)
+                    if not chunk:
+                        break
+                    bad_response.extend(chunk)
+            assert b"HTTP/1.1 401" in bad_response
+            assert b'"reason":"invalid_signature"' in bad_response
+            assert b'"serverTimeUnixMs":' in bad_response
+
+            stale_timestamp = str(int(time.time()) - control_plane.MAX_CLOCK_SKEW_SECONDS - 10)
+            stale_signature = control_plane.expected_signature(stale_timestamp, "GET", path, b"")
+            stale_request = (
+                f"GET {path} HTTP/1.1\r\n"
+                f"Host: 127.0.0.1:{control_plane.CONTROL_PORT}\r\n"
+                f"X-SCBL-Timestamp: {stale_timestamp}\r\n"
+                f"X-SCBL-Signature: {stale_signature}\r\nConnection: close\r\n\r\n"
+            ).encode("ascii")
+            with socket.create_connection(("127.0.0.1", control_plane.CONTROL_PORT), timeout=1.0) as client:
+                client.sendall(stale_request)
+                client.settimeout(1.0)
+                stale_response = bytearray()
+                while True:
+                    chunk = client.recv(4096)
+                    if not chunk:
+                        break
+                    stale_response.extend(chunk)
+            assert b'"reason":"clock_skew"' in stale_response
         finally:
             server.shutdown()
             server.server_close()

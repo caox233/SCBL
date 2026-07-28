@@ -15,6 +15,12 @@ public static class LogService
     private static readonly Regex TomlSecretRegex = new(
         @"(?im)^(\s*network_secret\s*=\s*)""[^""]*""",
         RegexOptions.Compiled | RegexOptions.CultureInvariant);
+    private static readonly Regex EscapedTomlSecretRegex = new(
+        @"(?i)(\b(?:network_secret|access_key|crypto_key)\s*=\s*\\?"")[^""]*\\?""",
+        RegexOptions.Compiled | RegexOptions.CultureInvariant);
+    private static readonly Regex TicketKeyArrayRegex = new(
+        @"(?ims)(^\s*ticket_key\s*=\s*)\[(?:.|\n)*?^\s*\]",
+        RegexOptions.Compiled | RegexOptions.CultureInvariant);
     private static readonly Regex JsonSecretRegex = new(
         @"(?i)(""network_secret""\s*:\s*)""[^""]*""",
         RegexOptions.Compiled | RegexOptions.CultureInvariant);
@@ -63,6 +69,8 @@ public static class LogService
     public static string SanitizeSensitiveText(string? message)
     {
         string safe = message ?? string.Empty;
+        safe = EscapedTomlSecretRegex.Replace(safe, "$1\\\"***REDACTED***\\\"");
+        safe = TicketKeyArrayRegex.Replace(safe, "$1[\"***REDACTED***\"]");
         safe = TomlSecretRegex.Replace(safe, "$1\"***REDACTED***\"");
         safe = JsonSecretRegex.Replace(safe, "$1\"***REDACTED***\"");
         safe = CommandSecretRegex.Replace(safe, "$1***REDACTED***");

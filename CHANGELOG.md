@@ -1,5 +1,13 @@
 # 更新记录
 
+## Windows Client v1.0.10 / Server Tool v1.0.6
+
+- 控制平面签名改为读取当前 EasyTier 运行配置中的实际网络密钥，修复部分客户端已进入虚拟网但 `/v1/heartbeat`、`/v1/peers`、`/v1/game-session` 持续 HTTP 401 的问题。
+- 控制平面401响应增加 `invalid_signature`、`clock_skew` 等原因及服务器时间；客户端可自动校正时钟偏差并重试，服务端按来源和原因限频记录拒绝日志。
+- 客户端诊断包补充启动器可执行文件 SHA256，并修复 EasyTier JSON 内嵌 TOML 导致 `network_secret` 未脱敏的问题。
+- Server Tool 新增 `scbl-server-diagnostics` 和菜单15，一键收集服务、网络、数据库元数据、崩溃记录和二进制哈希；不复制账号数据库并统一脱敏。
+- 7人联机已验证创建、搜索和加入正常；实时房主退出后所有人回大厅仍是已知限制，未宣称完成对局状态接管。
+
 ## Linux Server Tool v1.0.5
 
 - 控制平面HTTP响应改为每次请求后主动关闭连接，避免15秒玩家列表轮询与8秒服务端空闲超时反复创建等待线程、刷出大量 `Request timed out` 日志并抬高长期内存占用。

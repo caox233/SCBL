@@ -9,7 +9,7 @@ router = Path("client/ScblPublicLauncher/Services/ProcessRouterService.cs").read
 probe = Path("client/ScblPublicLauncher/Services/PeerProbeService.cs").read_text(encoding="utf-8")
 diagnostic = Path("client/ScblPublicLauncher/Services/DiagnosticExportService.cs").read_text(encoding="utf-8")
 
-assert version == "1.0.9"
+assert version == "1.0.10"
 assert "private const int MaxAttempts = 2;" in control
 assert '"heartbeat"' in control and '"peers"' in control and '"game-session"' in control
 assert "InvalidateClient(localBindIp, channel, client)" in control

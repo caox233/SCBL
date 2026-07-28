@@ -5,6 +5,7 @@ using System.IO;
 using System.IO.Compression;
 using System.Linq;
 using System.Runtime.InteropServices;
+using System.Security.Cryptography;
 using System.Text;
 using System.Text.RegularExpressions;
 using System.Threading;
@@ -114,6 +115,9 @@ public sealed class DiagnosticExportService
         sb.AppendLine($"GeneratedAt={DateTimeOffset.Now:O}");
         sb.AppendLine($"LauncherVersion={launcherVersion}");
         sb.AppendLine($"LauncherBaseDirectory={launcherBaseDirectory}");
+        string executablePath = Environment.ProcessPath ?? "";
+        sb.AppendLine($"LauncherExecutablePath={executablePath}");
+        sb.AppendLine($"LauncherExecutableSha256={ComputeSha256(executablePath)}");
         sb.AppendLine($"PersistentDataDirectory={LogService.PersistentDataDirectory}");
         sb.AppendLine($"AssignedVirtualIp={assignedVirtualIp}");
         sb.AppendLine($"GameDirectory={gameDirectory}");
@@ -128,6 +132,21 @@ public sealed class DiagnosticExportService
         sb.AppendLine($"Is64BitOperatingSystem={Environment.Is64BitOperatingSystem}");
         sb.AppendLine($"Is64BitProcess={Environment.Is64BitProcess}");
         return sb.ToString();
+    }
+
+    private static string ComputeSha256(string path)
+    {
+        try
+        {
+            if (string.IsNullOrWhiteSpace(path) || !File.Exists(path))
+                return "";
+            using FileStream stream = File.OpenRead(path);
+            return Convert.ToHexString(SHA256.HashData(stream)).ToLowerInvariant();
+        }
+        catch
+        {
+            return "";
+        }
     }
 
     private static async Task CopyKnownTextFilesAsync(string launcherBaseDirectory, string destinationRoot, CancellationToken cancellationToken)

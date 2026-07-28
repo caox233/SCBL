@@ -97,7 +97,7 @@ install_management_command() {
   fi
 
   # Preserve the files required when the manager is launched later through SCBL.
-  for asset in scbl_control_plane.py scbl_update_server.py service.toml.template check_scbl_udp_11010.sh; do
+  for asset in scbl_control_plane.py scbl_update_server.py scbl_server_diagnostics.sh service.toml.template check_scbl_udp_11010.sh; do
     if [[ -f "$source_dir/$asset" && "$source_dir/$asset" != "$MANAGER_DIR/$asset" ]]; then
       install -m 0755 "$source_dir/$asset" "$MANAGER_DIR/$asset"
     fi
@@ -122,6 +122,9 @@ exit 1
 SCBL_COMMAND
   chmod 0755 /usr/local/bin/SCBL
   ln -sfn /usr/local/bin/SCBL /usr/local/bin/scbl
+  if [[ -f "$MANAGER_DIR/scbl_server_diagnostics.sh" ]]; then
+    install -m 0755 "$MANAGER_DIR/scbl_server_diagnostics.sh" /usr/local/bin/scbl-server-diagnostics
+  fi
 }
 
 ensure_utf8_locale() {
@@ -3573,6 +3576,22 @@ update_dedicated_menu() {
   esac
 }
 
+collect_server_diagnostics_menu() {
+  load_env_if_exists; set_defaults
+  local since="3 hours ago"
+  if is_interactive; then
+    read -e -r -p "请输入日志时间范围 [3 hours ago]: " since || true
+    since="${since:-3 hours ago}"
+  fi
+  if [[ ! -x /usr/local/bin/scbl-server-diagnostics ]]; then
+    echo "诊断命令尚未安装，请先升级或重新运行 Server Tool。"
+    pause
+    return 1
+  fi
+  SCBL_ROOT="$SCBL_ROOT" /usr/local/bin/scbl-server-diagnostics "$since"
+  pause
+}
+
 main_menu() {
   while true; do
     load_env_if_exists
@@ -3595,6 +3614,7 @@ main_menu() {
 12. 查看客户端更新状态
 13. 客户端公告管理
 14. SCBL 服务端工具在线升级
+15. 一键收集服务端诊断日志
 0. 退出
 MENU
     read -e -r -p "请选择: " choice || true
@@ -3613,6 +3633,7 @@ MENU
       12) show_client_update_status; pause ;;
       13) configure_client_announcements; pause ;;
       14) server_tool_update_menu ;;
+      15) collect_server_diagnostics_menu ;;
       0) exit 0 ;;
       *) echo "无效选择。" ;;
     esac

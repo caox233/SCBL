@@ -589,6 +589,9 @@ class RequestMetrics:
 
 
 METRICS = RequestMetrics()
+_AUTH_LOG_LOCK = threading.Lock()
+_AUTH_LOG_LAST_MS: dict[tuple[str, str, str], int] = {}
+_AUTH_LOG_SUPPRESSED: dict[tuple[str, str, str], int] = {}
 
 
 def _metrics_loop() -> None:
@@ -719,19 +722,42 @@ class Handler(BaseHTTPRequestHandler):
             return None
         return self.rfile.read(length) if length else b""
 
-    def authorized(self, body: bytes) -> bool:
+    def authorization_failure_reason(self, body: bytes) -> str:
         if not SECRET:
-            return False
+            return "server_secret_unavailable"
         timestamp = self.headers.get("X-SCBL-Timestamp", "")
         signature = self.headers.get("X-SCBL-Signature", "")
+        if not timestamp:
+            return "missing_timestamp"
         try:
             ts = int(timestamp)
         except ValueError:
-            return False
+            return "invalid_timestamp"
         if abs(int(time.time()) - ts) > MAX_CLOCK_SKEW_SECONDS:
-            return False
+            return "clock_skew"
+        if not signature:
+            return "missing_signature"
         expected = expected_signature(timestamp, self.command, self.path, body)
-        return hmac.compare_digest(expected, signature.lower())
+        return "" if hmac.compare_digest(expected, signature.lower()) else "invalid_signature"
+
+    def log_auth_rejection(self, reason: str) -> None:
+        source = self.client_address[0]
+        endpoint = urlsplit(self.path).path
+        key = (source, endpoint, reason)
+        now = utc_ms()
+        with _AUTH_LOG_LOCK:
+            last = _AUTH_LOG_LAST_MS.get(key, 0)
+            if now - last < 30_000:
+                _AUTH_LOG_SUPPRESSED[key] = _AUTH_LOG_SUPPRESSED.get(key, 0) + 1
+                return
+            suppressed = _AUTH_LOG_SUPPRESSED.pop(key, 0)
+            _AUTH_LOG_LAST_MS[key] = now
+        suffix = f" suppressed={suppressed}" if suppressed else ""
+        print(
+            f"control-plane auth rejected source={source} method={self.command} "
+            f"path={endpoint} reason={reason}{suffix}",
+            flush=True,
+        )
 
     def require_overlay_source(self, payload_ip: str | None = None) -> bool:
         source_ip = self.client_address[0]
@@ -748,8 +774,13 @@ class Handler(BaseHTTPRequestHandler):
     def do_GET(self) -> None:  # noqa: N802
         self._begin_request()
         body = b""
-        if not self.authorized(body):
-            self.send_json(HTTPStatus.UNAUTHORIZED, {"error": "invalid signature"})
+        auth_reason = self.authorization_failure_reason(body)
+        if auth_reason:
+            self.log_auth_rejection(auth_reason)
+            self.send_json(
+                HTTPStatus.UNAUTHORIZED,
+                {"error": "unauthorized", "reason": auth_reason, "serverTimeUnixMs": utc_ms()},
+            )
             return
         if not self.require_overlay_source():
             self.send_json(HTTPStatus.FORBIDDEN, {"error": "overlay source required"})
@@ -798,8 +829,13 @@ class Handler(BaseHTTPRequestHandler):
         if body is None:
             self.send_json(HTTPStatus.REQUEST_ENTITY_TOO_LARGE, {"error": "invalid body size"})
             return
-        if not self.authorized(body):
-            self.send_json(HTTPStatus.UNAUTHORIZED, {"error": "invalid signature"})
+        auth_reason = self.authorization_failure_reason(body)
+        if auth_reason:
+            self.log_auth_rejection(auth_reason)
+            self.send_json(
+                HTTPStatus.UNAUTHORIZED,
+                {"error": "unauthorized", "reason": auth_reason, "serverTimeUnixMs": utc_ms()},
+            )
             return
         try:
             payload = json.loads(body.decode("utf-8")) if body else {}

@@ -69,6 +69,7 @@ jobs:
           set -euo pipefail
           version='${{ needs.metadata.outputs.version }}'
           bash -n server/install_public_server.sh
+          bash -n server/scbl_server_diagnostics.sh
           bash -n scripts/install-server.sh
           python3 -m py_compile \
             server/scbl_control_plane.py \
@@ -77,15 +78,19 @@ jobs:
             server/test_update_server.py \
             server/test_ddns_go_native.py \
             server/test_release_manifest_routing.py \
-            server/test_server_tool_runtime.py
+            server/test_server_tool_runtime.py \
+            server/test_server_diagnostics.py \
+            server/test_client_security_regressions.py
           python3 server/test_control_plane.py
           python3 server/test_update_server.py
           python3 server/test_ddns_go_native.py
           python3 server/test_release_manifest_routing.py
           python3 server/test_server_tool_runtime.py
+          python3 server/test_server_diagnostics.py
+          python3 server/test_client_security_regressions.py
           root="SCBL-Server-Tool-v${version}-linux-x86_64"
           mkdir -p "stage/$root/THIRD_PARTY_LICENSES" dist
-          cp server/install_public_server.sh server/scbl_control_plane.py server/scbl_update_server.py \
+          cp server/install_public_server.sh server/scbl_control_plane.py server/scbl_update_server.py server/scbl_server_diagnostics.sh \
              server/check_scbl_binary_release.sh server/5th-echelon_branch.txt scripts/install-server.sh \
              VERSION_SERVER_TOOL VERSION_CLIENT COMPONENT_VERSIONS.json README.md CHANGELOG.md \
              THIRD_PARTY_NOTICES.md "stage/$root/"
@@ -94,12 +99,14 @@ jobs:
             "stage/$root/install_public_server.sh" \
             "stage/$root/install-server.sh" \
             "stage/$root/check_scbl_binary_release.sh" \
-            "stage/$root/scbl_update_server.py"
+            "stage/$root/scbl_update_server.py" \
+            "stage/$root/scbl_server_diagnostics.sh"
           for required in \
             install_public_server.sh \
             install-server.sh \
             scbl_control_plane.py \
             scbl_update_server.py \
+            scbl_server_diagnostics.sh \
             VERSION_SERVER_TOOL; do
             test -s "stage/$root/$required"
           done

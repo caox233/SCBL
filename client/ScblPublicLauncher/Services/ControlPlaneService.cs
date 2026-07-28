@@ -34,6 +34,7 @@ public sealed class ControlPlaneService : IDisposable
     private bool _disposed;
     private long _lastFailureLogUnixMs;
     private int _suppressedFailureLogs;
+    private long _serverClockOffsetSeconds;
 
     public Task<ControlPlaneBootstrapContext?> GetBootstrapAsync(
         string username,
@@ -96,7 +97,7 @@ public sealed class ControlPlaneService : IDisposable
             try
             {
                 client = GetOrCreateBoundClient(localBindIp, channel);
-                long timestamp = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
+                long timestamp = DateTimeOffset.UtcNow.ToUnixTimeSeconds() + Interlocked.Read(ref _serverClockOffsetSeconds);
                 string signature = Sign(timestamp, method.Method, pathAndQuery, body, tunnelSecret);
                 using var request = new HttpRequestMessage(method, new Uri($"http://{PublicTunnelConfig.ServerVirtualIp}:{DefaultPort}{pathAndQuery}"))
                 {
@@ -117,13 +118,27 @@ public sealed class ControlPlaneService : IDisposable
 
                 if (!response.IsSuccessStatusCode)
                 {
+                    string errorBody = await response.Content.ReadAsStringAsync(timeoutCts.Token).ConfigureAwait(false);
+                    TryReadAuthorizationFailure(errorBody, out string reason, out long? serverTimeUnixMs);
+                    if (response.StatusCode == HttpStatusCode.Unauthorized
+                        && reason.Equals("clock_skew", StringComparison.OrdinalIgnoreCase)
+                        && serverTimeUnixMs.HasValue
+                        && attempt < MaxAttempts)
+                    {
+                        long localSeconds = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
+                        Interlocked.Exchange(ref _serverClockOffsetSeconds, (serverTimeUnixMs.Value / 1000) - localSeconds);
+                        InvalidateClient(localBindIp, channel, client);
+                        await DelayBeforeRetryAsync(attempt, cancellationToken).ConfigureAwait(false);
+                        continue;
+                    }
                     if (attempt < MaxAttempts && IsTransientStatus(response.StatusCode))
                     {
                         InvalidateClient(localBindIp, channel, client);
                         await DelayBeforeRetryAsync(attempt, cancellationToken).ConfigureAwait(false);
                         continue;
                     }
-                    LogRequestFailure($"Control plane request failed: {method} {pathAndQuery}, HTTP {(int)response.StatusCode}.");
+                    string detail = string.IsNullOrWhiteSpace(reason) ? "" : $", reason={reason}";
+                    LogRequestFailure($"Control plane request failed: {method} {pathAndQuery}, HTTP {(int)response.StatusCode}{detail}.");
                     return default;
                 }
 
@@ -168,6 +183,27 @@ public sealed class ControlPlaneService : IDisposable
             }
         }
         return default;
+    }
+
+    private static void TryReadAuthorizationFailure(string body, out string reason, out long? serverTimeUnixMs)
+    {
+        reason = "";
+        serverTimeUnixMs = null;
+        if (string.IsNullOrWhiteSpace(body))
+            return;
+        try
+        {
+            using JsonDocument document = JsonDocument.Parse(body);
+            JsonElement root = document.RootElement;
+            if (root.TryGetProperty("reason", out JsonElement reasonElement))
+                reason = reasonElement.GetString() ?? "";
+            if (root.TryGetProperty("serverTimeUnixMs", out JsonElement timeElement)
+                && timeElement.TryGetInt64(out long value))
+                serverTimeUnixMs = value;
+        }
+        catch (JsonException)
+        {
+        }
     }
 
     private static bool IsTransientStatus(HttpStatusCode statusCode)

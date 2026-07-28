@@ -1,8 +1,10 @@
-name: SCBL maintainer command
+name: SCBL final release builder
 
 on:
-  issue_comment:
-    types: [created]
+  push:
+    branches: [main]
+    paths:
+      - .github/scbl-finalize-trigger
 
 permissions:
   contents: write
@@ -10,10 +12,6 @@ permissions:
 
 jobs:
   build-clean-release-pr:
-    if: >-
-      github.event.issue.pull_request &&
-      github.event.issue.number == 39 &&
-      github.event.comment.body == '/build-scbl-release-final'
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
@@ -55,8 +53,8 @@ jobs:
           python3 /tmp/scbl_patch_part4.py
           sed -i 's/routerVersion         = "1.0.9"/routerVersion         = "1.0.10"/' client/scbl-process-router/main.go
 
-          # Remove all temporary maintenance workflows from the formal release.
           rm -f \
+            .github/scbl-finalize-trigger \
             .github/workflows/scbl-maintainer-apply-pr38.yml \
             .github/workflows/scbl-maintainer-command.yml \
             .github/workflows/scbl-maintainer-workflow-run.yml
@@ -128,4 +126,3 @@ jobs:
             - Add secure one-click Linux server diagnostics and Server Tool menu 15.
             - Keep 7-player admission unbounded; live in-game host takeover remains a known limitation.
             - Remove all temporary maintainer and patch workflows.
-          labels: release

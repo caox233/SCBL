@@ -12,7 +12,7 @@ jobs:
   export-final-source:
     if: >-
       github.event.workflow_run.conclusion == 'success' &&
-      github.event.workflow_run.head_branch == 'agent/release-v1.0.10-v1.0.6-final2'
+      github.event.workflow_run.head_branch == 'agent/trigger-workflow-run-v1.0.10'
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4

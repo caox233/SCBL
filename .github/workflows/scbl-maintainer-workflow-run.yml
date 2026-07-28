@@ -1,0 +1,54 @@
+name: SCBL maintainer post-validation apply
+
+on:
+  workflow_run:
+    workflows: ["Validate source"]
+    types: [completed]
+
+permissions:
+  contents: write
+
+jobs:
+  apply-pr39:
+    if: >-
+      github.event.workflow_run.conclusion == 'success' &&
+      github.event.workflow_run.head_branch == 'agent/client-1.0.10-server-tool-1.0.6-diagnostics'
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: agent/client-1.0.10-server-tool-1.0.6-diagnostics
+          fetch-depth: 0
+      - name: Check trigger
+        id: trigger
+        run: |
+          if [[ -f .github/scbl-pr38-apply-trigger ]]; then echo 'run=true' >> "$GITHUB_OUTPUT"; else echo 'run=false' >> "$GITHUB_OUTPUT"; fi
+      - name: Apply and validate
+        if: steps.trigger.outputs.run == 'true'
+        run: |
+          set -euo pipefail
+          python3 .github/scbl_patch_client_core.py
+          python3 .github/scbl_patch_redaction.py
+          python3 .github/scbl_patch_part2.py
+          python3 .github/scbl_patch_part3.py
+          python3 .github/scbl_patch_part4.py
+          bash -n server/install_public_server.sh
+          bash -n server/scbl_server_diagnostics.sh
+          python3 -m py_compile server/scbl_control_plane.py server/test_control_plane.py server/test_server_diagnostics.py server/test_client_security_regressions.py
+          python3 server/test_control_plane.py
+          python3 server/test_server_diagnostics.py
+          python3 server/test_client_security_regressions.py
+      - name: Commit final source
+        if: steps.trigger.outputs.run == 'true'
+        run: |
+          set -euo pipefail
+          rm -f .github/scbl_patch*.py \
+            .github/workflows/scbl-apply-release-fixes.yml \
+            .github/workflows/scbl-apply-release-fixes-v2.yml \
+            .github/scbl_patch_error.txt \
+            .github/scbl-pr38-apply-trigger
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add -A
+          git commit -m 'Release client v1.0.10 and Server Tool v1.0.6 diagnostics fixes'
+          git push origin HEAD:agent/client-1.0.10-server-tool-1.0.6-diagnostics

@@ -1,16 +1,18 @@
-name: SCBL apply final source after marker merge
+name: SCBL export validated release source
 
 on:
-  push:
-    branches: [main]
-    paths:
-      - .github/scbl-final2-apply-trigger
+  issue_comment:
+    types: [created]
 
 permissions:
   contents: write
+  pull-requests: read
 
 jobs:
-  apply-final-source:
+  export-final-source:
+    if: >-
+      github.event.issue.pull_request &&
+      github.event.comment.body == '/export-scbl-v1.0.10-source'
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
@@ -47,7 +49,7 @@ jobs:
           sed -i 's/routerVersion         = "1.0.9"/routerVersion         = "1.0.10"/' client/scbl-process-router/main.go
           rm -f .github/scbl-final2-apply-trigger
 
-      - name: Commit final source
+      - name: Commit and export final source tag
         shell: bash
         run: |
           set -euo pipefail
@@ -55,4 +57,4 @@ jobs:
           git config user.email 41898282+github-actions[bot]@users.noreply.github.com
           git add -A
           git commit -m 'Release client v1.0.10 and Server Tool v1.0.6'
-          git push origin HEAD:agent/release-v1.0.10-v1.0.6-final2
+          git push --force origin HEAD:refs/tags/scbl-source-v1.0.10-v1.0.6-temp

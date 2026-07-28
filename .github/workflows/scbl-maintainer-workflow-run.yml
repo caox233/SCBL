@@ -52,6 +52,13 @@ jobs:
             .github/scbl-final2-apply-trigger \
             .github/scbl-workflow-run-trigger
 
+          # GitHub Actions' token cannot create a ref that changes workflow files.
+          # Keep the branch's current workflows in this temporary source commit;
+          # the connector applies the validated workflow files afterwards.
+          git restore --source=HEAD -- \
+            .github/workflows/server-tool-release.yml \
+            .github/workflows/validate.yml
+
           git config user.name github-actions[bot]
           git config user.email 41898282+github-actions[bot]@users.noreply.github.com
           git add -A

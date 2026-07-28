@@ -7,8 +7,9 @@ window = Path("client/ScblPublicLauncher/MainWindow.xaml.cs").read_text(encoding
 tunnel = Path("client/ScblPublicLauncher/Services/PublicTunnelService.cs").read_text(encoding="utf-8")
 router = Path("client/ScblPublicLauncher/Services/ProcessRouterService.cs").read_text(encoding="utf-8")
 probe = Path("client/ScblPublicLauncher/Services/PeerProbeService.cs").read_text(encoding="utf-8")
+diagnostic = Path("client/ScblPublicLauncher/Services/DiagnosticExportService.cs").read_text(encoding="utf-8")
 
-assert version == "1.0.8"
+assert version == "1.0.9"
 assert "private const int MaxAttempts = 2;" in control
 assert '"heartbeat"' in control and '"peers"' in control and '"game-session"' in control
 assert "InvalidateClient(localBindIp, channel, client)" in control
@@ -30,4 +31,12 @@ assert "TryRecoverActiveGameRouteAsync" in network
 assert "game-session transient retry" in network
 assert "EnsureRouteBindingBestEffort(ip)" in network
 assert "automatic EasyTier restart remains suppressed" in network
-print("SCBL client control-plane and peer-discovery resilience checks passed")
+assert "ServerPathSwitchConfirmSamples = 3" in window
+assert "ApplyServerPathDisplaySample" in window
+assert "Server path display switch pending" in window
+assert "Server path display kept the last confirmed route" in window
+assert "CleanupLegacyRouteHistoryArtifacts" in diagnostic
+assert "LegacyGameRouteHistoryIncluded=False" in diagnostic
+assert 'candidates.Add((Path.Combine(LogService.PersistentDataDirectory, "runtime", "game-route-history.jsonl")' not in diagnostic
+assert "DiagnosticExportService.CleanupLegacyRouteHistoryArtifacts();" in window
+print("SCBL client control-plane, route-display, and diagnostic resilience checks passed")

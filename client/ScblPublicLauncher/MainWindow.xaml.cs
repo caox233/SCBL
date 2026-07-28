@@ -87,6 +87,10 @@ public partial class MainWindow : Window
     private string _lastConnectionAddressFamily = "";
     private DateTime _lastServerPathRefreshUtc = DateTime.MinValue;
     private int _serverPathRefreshRunning;
+    private string _pendingConnectionTransport = "";
+    private string _pendingConnectionAddressFamily = "";
+    private int _pendingServerPathSampleCount;
+    private const int ServerPathSwitchConfirmSamples = 3;
     private ControlPlaneBootstrapContext? _lastBootstrapContext;
     private bool _serverUsesTcpFallback;
     private TaskCompletionSource<MessageBoxResult>? _dialogTcs;
@@ -334,6 +338,7 @@ public partial class MainWindow : Window
             }
         }
 
+        DiagnosticExportService.CleanupLegacyRouteHistoryArtifacts();
         _settingsService.Save(_settings);
         LogService.Info("Public launcher ready.");
         LogService.Info($"Settings path: {_settingsService.SettingsPath}");
@@ -1791,16 +1796,8 @@ public partial class MainWindow : Window
             }
 
             _lastServerPathRefreshUtc = DateTime.UtcNow;
-            await Dispatcher.InvokeAsync(() =>
-            {
-                if (!string.IsNullOrWhiteSpace(transport))
-                    _lastConnectionTransport = transport;
-                if (!string.IsNullOrWhiteSpace(family))
-                    _lastConnectionAddressFamily = family;
-                _serverUsesTcpFallback = IsNonUdpServerTransport(_lastConnectionTransport);
-                RefreshServerStatusTextFromKind();
-            });
-            LogService.Info($"Server path metadata refreshed: transport={transport}, underlay={family}, latency={path?.LatencyMs?.ToString() ?? "n/a"}ms, nextHop={path?.NextHop ?? "n/a"}, hops={path?.HopCount?.ToString() ?? "n/a"}.");
+            await Dispatcher.InvokeAsync(() => ApplyServerPathDisplaySample(transport, family));
+            LogService.Info($"Server path metadata sampled: transport={transport}, underlay={family}, latency={path?.LatencyMs?.ToString() ?? "n/a"}ms, nextHop={path?.NextHop ?? "n/a"}, hops={path?.HopCount?.ToString() ?? "n/a"}.");
         }
         catch (Exception ex)
         {
@@ -1810,6 +1807,86 @@ public partial class MainWindow : Window
         {
             Interlocked.Exchange(ref _serverPathRefreshRunning, 0);
         }
+    }
+
+    private void ApplyServerPathDisplaySample(string transport, string family)
+    {
+        transport = (transport ?? "").Trim();
+        family = (family ?? "").Trim();
+        if (string.IsNullOrWhiteSpace(transport))
+        {
+            _pendingConnectionTransport = "";
+            _pendingConnectionAddressFamily = "";
+            _pendingServerPathSampleCount = 0;
+            LogService.Info("Server path display kept the last confirmed route because the current sample was empty.");
+            return;
+        }
+
+        bool hasConfirmedRoute = !string.IsNullOrWhiteSpace(_lastConnectionTransport);
+        if (!hasConfirmedRoute)
+        {
+            CommitServerPathDisplay(transport, family, "initial sample");
+            return;
+        }
+
+        string comparableFamily = string.IsNullOrWhiteSpace(family)
+            ? _lastConnectionAddressFamily
+            : family;
+        bool matchesConfirmed = transport.Equals(_lastConnectionTransport, StringComparison.OrdinalIgnoreCase)
+            && comparableFamily.Equals(_lastConnectionAddressFamily, StringComparison.OrdinalIgnoreCase);
+        if (matchesConfirmed)
+        {
+            _pendingConnectionTransport = "";
+            _pendingConnectionAddressFamily = "";
+            _pendingServerPathSampleCount = 0;
+            return;
+        }
+
+        // A fallback table may identify a protocol but not its address family. Do not replace a
+        // fully confirmed route with an incomplete sample; wait for the verbose EasyTier result.
+        if (string.IsNullOrWhiteSpace(family))
+        {
+            _pendingConnectionTransport = "";
+            _pendingConnectionAddressFamily = "";
+            _pendingServerPathSampleCount = 0;
+            LogService.Info($"Server path display ignored an incomplete candidate: transport={transport}, underlay=unknown, confirmed={_lastConnectionTransport}/{_lastConnectionAddressFamily}.");
+            return;
+        }
+
+        bool matchesPending = transport.Equals(_pendingConnectionTransport, StringComparison.OrdinalIgnoreCase)
+            && family.Equals(_pendingConnectionAddressFamily, StringComparison.OrdinalIgnoreCase);
+        if (matchesPending)
+        {
+            _pendingServerPathSampleCount++;
+        }
+        else
+        {
+            _pendingConnectionTransport = transport;
+            _pendingConnectionAddressFamily = family;
+            _pendingServerPathSampleCount = 1;
+        }
+
+        if (_pendingServerPathSampleCount < ServerPathSwitchConfirmSamples)
+        {
+            LogService.Info($"Server path display switch pending: candidate={transport}/{family}, samples={_pendingServerPathSampleCount}/{ServerPathSwitchConfirmSamples}, confirmed={_lastConnectionTransport}/{_lastConnectionAddressFamily}.");
+            return;
+        }
+
+        CommitServerPathDisplay(transport, family, $"confirmed after {_pendingServerPathSampleCount} samples");
+    }
+
+    private void CommitServerPathDisplay(string transport, string family, string reason)
+    {
+        string previous = $"{_lastConnectionTransport}/{_lastConnectionAddressFamily}";
+        _lastConnectionTransport = transport;
+        if (!string.IsNullOrWhiteSpace(family))
+            _lastConnectionAddressFamily = family;
+        _pendingConnectionTransport = "";
+        _pendingConnectionAddressFamily = "";
+        _pendingServerPathSampleCount = 0;
+        _serverUsesTcpFallback = IsNonUdpServerTransport(_lastConnectionTransport);
+        RefreshServerStatusTextFromKind();
+        LogService.Info($"Server path display committed: previous={previous}, current={_lastConnectionTransport}/{_lastConnectionAddressFamily}, reason={reason}.");
     }
 
     private void StartControlPlaneHeartbeat()

@@ -105,15 +105,17 @@ jobs:
           end_marker = '        assert unrelated["hostVirtualIp"] == ""'
           start = test_text.index(start_marker)
           end = test_text.index(end_marker, start) + len(end_marker)
-          assertions = '''        assert b["requesterIsHost"] is True
-              assert c["active"] is False
-              assert c["sessionId"] is None
-              assert c["participantCount"] == 0
-              assert c["requesterIsHost"] is False
-              assert "10.66.0.8" not in control_plane.authoritative_sessions_by_ip()
-              assert unrelated["active"] is False
-              assert unrelated["hostVirtualIp"] == ""'''
-          test_path.write_text(test_text[:start] + textwrap.dedent(assertions) + test_text[end:], encoding='utf-8')
+          assertions = "\n".join([
+              '        assert b["requesterIsHost"] is True',
+              '        assert c["active"] is False',
+              '        assert c["sessionId"] is None',
+              '        assert c["participantCount"] == 0',
+              '        assert c["requesterIsHost"] is False',
+              '        assert "10.66.0.8" not in control_plane.authoritative_sessions_by_ip()',
+              '        assert unrelated["active"] is False',
+              '        assert unrelated["hostVirtualIp"] == ""',
+          ])
+          test_path.write_text(test_text[:start] + assertions + test_text[end:], encoding='utf-8')
           PY
 
       - name: Validate release source

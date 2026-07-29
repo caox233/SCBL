@@ -20,3 +20,7 @@
 所有参与邀请测试的 Windows 客户端都必须升级到 v1.0.13。只更新 dedicated server 或手工替换一次 DLL 不足以保证生效，因为旧版启动器每次启动游戏时都会用自身内置资源重新覆盖 `uplay_r1_loader.dll`。
 
 本版本的正式构建流程会在发布前从 `5th-echelon` 的 `scbl-public-stable-latest` Release 下载 Hooks DLL，校验 SHA256 后再嵌入启动器。
+
+## 构建验证
+
+完整 Windows 打包流程已实际生成 `SCBL-Client-v1.0.13-win-x86.zip`，并确认构建期间嵌入的 Hooks DLL SHA256 与上述值完全一致。

@@ -20,6 +20,7 @@ jobs:
         with:
           ref: d90062dee92516cf1a52cb77de5eec5cf305a01e
           fetch-depth: 0
+
       - name: Build and verify Client v1.0.13
         shell: pwsh
         env:
@@ -30,49 +31,109 @@ jobs:
           $ErrorActionPreference = 'Stop'
           & ./client/build_all_windows.ps1 -Package -Clean
           if ($LASTEXITCODE -ne 0) { throw "Client build failed with exit code $LASTEXITCODE" }
+
           $dll = 'client/ScblPublicLauncher/EmbeddedFiles/uplay_r1_loader.dll'
           $actualHook = (Get-FileHash -LiteralPath $dll -Algorithm SHA256).Hash.ToLowerInvariant()
           if ($actualHook -ne $env:EXPECTED_HOOK_SHA256) {
             throw "Embedded Hooks mismatch. expected=$env:EXPECTED_HOOK_SHA256 actual=$actualHook"
           }
+
           $zip = 'client/dist/SCBL-Client-v1.0.13-win-x86.zip'
           if (!(Test-Path -LiteralPath $zip)) { throw 'Client package missing.' }
           $zipHash = (Get-FileHash -LiteralPath $zip -Algorithm SHA256).Hash.ToLowerInvariant()
           "$zipHash  SCBL-Client-v1.0.13-win-x86.zip" | Set-Content -LiteralPath "$zip.sha256" -Encoding ASCII
           "$zipHash  SCBL-Client-v1.0.13-win-x86.zip" | Set-Content -LiteralPath 'client/dist/SHA256SUMS.txt' -Encoding ASCII
-          $env:CLIENT_ZIP_SHA256 = $zipHash
           "CLIENT_ZIP_SHA256=$zipHash" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
           Write-Host "EmbeddedHooksSha256=$actualHook"
           Write-Host "ClientZipSha256=$zipHash"
+
       - name: Publish formal release
         shell: pwsh
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           $ErrorActionPreference = 'Stop'
+
+          $savedPreference = $ErrorActionPreference
+          $ErrorActionPreference = 'Continue'
+          gh release view $env:TAG *> $null
+          $releaseExists = ($LASTEXITCODE -eq 0)
+          $ErrorActionPreference = $savedPreference
+          if ($releaseExists) {
+            gh release delete $env:TAG --cleanup-tag -y
+            if ($LASTEXITCODE -ne 0) { throw 'Could not remove the previous release.' }
+          }
+
           git tag -f $env:TAG $env:EXPECTED_COMMIT
+          if ($LASTEXITCODE -ne 0) { throw 'Could not create the release tag.' }
           git push origin "refs/tags/$env:TAG" --force
-          gh release delete $env:TAG --cleanup-tag -y 2>$null
-          git tag -f $env:TAG $env:EXPECTED_COMMIT
-          git push origin "refs/tags/$env:TAG" --force
-          @"
-          # SCBL Windows Client v1.0.13
+          if ($LASTEXITCODE -ne 0) { throw 'Could not publish the release tag.' }
 
-          本版本修正启动器内置 Hooks 未同步的问题。启动器单文件 EXE 已嵌入邀请修复版 `uplay_r1_loader.dll`，每次启动游戏时会自动覆盖部署该版本。
+          $notes = @(
+            '# SCBL Windows Client v1.0.13',
+            '',
+            '本版本修正启动器内置 Hooks 未同步的问题。启动器单文件 EXE 已嵌入邀请修复版 uplay_r1_loader.dll，每次启动游戏时会自动覆盖部署该版本。',
+            '',
+            '主要内容：',
+            '- 私人房间直接邀请；',
+            '- 大厅多人组队邀请基础；',
+            '- 中文 F5 邀请接受界面；',
+            '- 大厅邀请异常不再导致游戏退出；',
+            '- API 在线心跳，降低好友错误离线；',
+            '- Client 与 Route Guard 版本同步为 v1.0.13。',
+            '',
+            "Embedded Hooks SHA256: $env:EXPECTED_HOOK_SHA256",
+            "Client ZIP SHA256: $env:CLIENT_ZIP_SHA256",
+            "Source commit: $env:EXPECTED_COMMIT"
+          )
+          $notes | Set-Content -LiteralPath RELEASE_NOTES.md -Encoding utf8NoBOM
 
-          主要内容：
-          - 私人房间直接邀请；
-          - 大厅多人组队邀请基础；
-          - 中文 F5 邀请接受界面；
-          - 大厅邀请异常不再导致游戏退出；
-          - API 在线心跳，降低好友错误离线；
-          - Client 与 Route Guard 版本同步为 v1.0.13。
-
-          Embedded Hooks SHA256: `$env:EXPECTED_HOOK_SHA256`
-          Client ZIP SHA256: `$env:CLIENT_ZIP_SHA256`
-          Source commit: `$env:EXPECTED_COMMIT`
-          "@ | Set-Content -LiteralPath RELEASE_NOTES.md -Encoding utf8NoBOM
           gh release create $env:TAG --target $env:EXPECTED_COMMIT --title 'SCBL Windows Client v1.0.13' --notes-file RELEASE_NOTES.md `
             'client/dist/SCBL-Client-v1.0.13-win-x86.zip' `
             'client/dist/SCBL-Client-v1.0.13-win-x86.zip.sha256' `
             'client/dist/SHA256SUMS.txt'
+          if ($LASTEXITCODE -ne 0) { throw 'Formal release creation failed.' }
+
+      - name: Verify published release
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $verifyDir = Join-Path $PWD 'release-verify'
+          Remove-Item -LiteralPath $verifyDir -Recurse -Force -ErrorAction SilentlyContinue
+          New-Item -ItemType Directory -Path $verifyDir | Out-Null
+          gh release download $env:TAG --dir $verifyDir --clobber
+          if ($LASTEXITCODE -ne 0) { throw 'Could not download the formal release.' }
+
+          $zip = Join-Path $verifyDir 'SCBL-Client-v1.0.13-win-x86.zip'
+          $sidecar = Join-Path $verifyDir 'SCBL-Client-v1.0.13-win-x86.zip.sha256'
+          $manifest = Join-Path $verifyDir 'SHA256SUMS.txt'
+          foreach ($path in @($zip, $sidecar, $manifest)) {
+            if (!(Test-Path -LiteralPath $path)) { throw "Release asset missing: $path" }
+          }
+
+          $actualZip = (Get-FileHash -LiteralPath $zip -Algorithm SHA256).Hash.ToLowerInvariant()
+          $sidecarHash = ((Get-Content -LiteralPath $sidecar -Raw -Encoding ASCII).Trim() -split '\s+')[0].ToLowerInvariant()
+          $manifestHash = ((Get-Content -LiteralPath $manifest -Raw -Encoding ASCII).Trim() -split '\s+')[0].ToLowerInvariant()
+          if ($actualZip -ne $env:CLIENT_ZIP_SHA256 -or $sidecarHash -ne $actualZip -or $manifestHash -ne $actualZip) {
+            throw "Release checksum mismatch. build=$env:CLIENT_ZIP_SHA256 actual=$actualZip sidecar=$sidecarHash manifest=$manifestHash"
+          }
+
+          $unpacked = Join-Path $verifyDir 'unpacked'
+          Expand-Archive -LiteralPath $zip -DestinationPath $unpacked -Force
+          $launcher = Get-ChildItem -LiteralPath $unpacked -Recurse -File -Filter 'SplinterCellCNLauncher.exe' | Select-Object -First 1
+          if ($null -eq $launcher) { throw 'Launcher executable is missing from the formal ZIP.' }
+
+          $tagLine = git ls-remote --tags origin "refs/tags/$env:TAG"
+          $tagSha = (($tagLine -split '\s+')[0]).Trim()
+          if ($tagSha -ne $env:EXPECTED_COMMIT) {
+            throw "Release tag mismatch. expected=$env:EXPECTED_COMMIT actual=$tagSha"
+          }
+
+          Write-Host 'Client v1.0.13 formal release verification: PASS'
+          Write-Host "Tag=$env:TAG"
+          Write-Host "Commit=$tagSha"
+          Write-Host "EmbeddedHooksSha256=$env:EXPECTED_HOOK_SHA256"
+          Write-Host "ClientZipSha256=$actualZip"
+          Write-Host "Launcher=$($launcher.FullName)"

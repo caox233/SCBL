@@ -23,4 +23,4 @@
 
 ## 构建验证
 
-完整 Windows 打包流程已实际生成 `SCBL-Client-v1.0.13-win-x86.zip`，并确认构建期间嵌入的 Hooks DLL SHA256 与上述值完全一致。
+完整 Windows 打包流程已实际生成 `SCBL-Client-v1.0.13-win-x86.zip`，确认构建期间嵌入的 Hooks DLL SHA256 与上述值完全一致；Route Guard 源码也会在最终合并前执行格式化、测试和 Windows 目标编译。

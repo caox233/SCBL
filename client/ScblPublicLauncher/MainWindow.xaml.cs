@@ -2674,22 +2674,22 @@ public partial class MainWindow : Window
 
     private string FormatServerStatusText(ServerStatusKind kind)
     {
-        string serverLatency = _lastServerLatencyMs.HasValue
-            ? L($" 延迟:{_lastServerLatencyMs.Value}ms", $" Latency:{_lastServerLatencyMs.Value}ms")
-            : "";
-
         string normalText;
         if (_gameLatencyActive)
         {
+            string descriptor = FormatPathDescriptor(_lastGameAddressFamily, _lastGameTransport, _lastGameHopCount);
+            string pathSuffix = string.IsNullOrWhiteSpace(descriptor) ? "" : $" · {descriptor}";
             if (_localIsGameHost)
             {
-                normalText = L($"本机房主 · {_gameActivePeerCount}名玩家", $"Local host · {_gameActivePeerCount} player(s)");
+                normalText = _lastGameLatencyMs.HasValue
+                    ? L($"本机房主 · 服务端延时 {_lastGameLatencyMs.Value}ms{pathSuffix}", $"Local host · Server latency {_lastGameLatencyMs.Value}ms{pathSuffix}")
+                    : L("本机房主 · 正在检测服务端延时", "Local host · Checking server latency");
             }
             else if (!string.IsNullOrWhiteSpace(_gamePeerIp))
             {
                 normalText = _lastGameLatencyMs.HasValue
-                    ? L($"与房主连接 {_lastGameLatencyMs.Value}ms 延时", $"Host connection {_lastGameLatencyMs.Value}ms latency")
-                    : L("正在检测与房主连接延时", "Checking host connection latency");
+                    ? L($"与房主延时 {_lastGameLatencyMs.Value}ms{pathSuffix}", $"Host latency {_lastGameLatencyMs.Value}ms{pathSuffix}")
+                    : L("正在检测与房主延时", "Checking host latency");
             }
             else if (_gameActivePeerCount > 0)
             {
@@ -2697,14 +2697,17 @@ public partial class MainWindow : Window
             }
             else
             {
-                normalText = L("游戏已启动 · 等待对局", "Game running · Waiting for session");
+                normalText = L("游戏已启动 · 等待房主信息", "Game running · Waiting for host information");
             }
         }
         else
         {
             string descriptor = FormatPathDescriptor(_lastConnectionAddressFamily, _lastConnectionTransport, null);
-            string suffix = string.IsNullOrWhiteSpace(descriptor) ? "" : IsEnglish ? $" ({descriptor})" : $"（{descriptor}）";
-            normalText = L("连接成功", "Connected") + serverLatency + suffix;
+            normalText = L("连接成功", "Connected");
+            if (_lastServerLatencyMs.HasValue)
+                normalText += L($" · 服务端延时 {_lastServerLatencyMs.Value}ms", $" · Server latency {_lastServerLatencyMs.Value}ms");
+            if (!string.IsNullOrWhiteSpace(descriptor))
+                normalText += $" · {descriptor}";
         }
 
         return kind switch
@@ -2725,9 +2728,12 @@ public partial class MainWindow : Window
     {
         string family = (addressFamily ?? "").Trim();
         string mode = (transport ?? "").Trim();
-        bool relay = mode.Contains("多跳", StringComparison.OrdinalIgnoreCase)
-            || mode.Contains("relay", StringComparison.OrdinalIgnoreCase)
-            || (hopCount.HasValue && hopCount.Value > 1);
+        if (mode.Equals("udp", StringComparison.OrdinalIgnoreCase))
+            mode = "UDP";
+        else if (mode.Equals("tcp", StringComparison.OrdinalIgnoreCase))
+            mode = "TCP";
+        else if (mode.Equals("wss", StringComparison.OrdinalIgnoreCase))
+            mode = "WSS";
 
         if (IsEnglish)
         {
@@ -2741,9 +2747,7 @@ public partial class MainWindow : Window
             return mode;
         if (string.IsNullOrWhiteSpace(mode))
             return family;
-        if (relay)
-            return IsEnglish ? $"{family} first hop · {mode}" : $"{family}首跳·{mode}";
-        return $"{family}·{mode}";
+        return $"{family}/{mode}";
     }
 
     private void RefreshServerStatusTextFromKind()
@@ -2839,8 +2843,8 @@ public partial class MainWindow : Window
         // Network check is independent from game state. It only enters cooldown after a manual click.
         btnCheckNetwork.IsEnabled = !_networkCheckButtonCoolingDown && !_isEndingGame;
         btnCheckNetwork.Content = _networkCheckButtonCoolingDown
-            ? L("请稍后...", "Please wait...")
-            : L("检测网络", "Check Network");
+            ? L("请稍后...", "Wait...")
+            : L("↻ 检测网络", "↻ Check");
     }
 
     private void UpdateLaunchButtonAvailability()
@@ -2906,26 +2910,61 @@ public partial class MainWindow : Window
                     if (localHost)
                     {
                         missingCycles = 0;
-                        ResetGameQualityState();
+                        const string targetIp = PublicServerAddress;
+                        if (!_gameQualityHostIp.Equals(targetIp, StringComparison.OrdinalIgnoreCase))
+                            ResetGameQualityState(targetIp);
+
+                        bool shouldQueryPath = !targetIp.Equals(cachedPeerIp, StringComparison.OrdinalIgnoreCase)
+                            || cachedPath == null
+                            || (DateTime.UtcNow - lastPathQueryUtc).TotalSeconds >= 3;
+                        if (shouldQueryPath)
+                        {
+                            cachedPath = await _tunnelService.DetectPeerPathAsync(
+                                GetLauncherBaseDirectory(),
+                                targetIp,
+                                TimeSpan.FromMilliseconds(850)).ConfigureAwait(false);
+                            cachedPeerIp = targetIp;
+                            lastPathQueryUtc = DateTime.UtcNow;
+                        }
+
+                        (bool probeOk, long? probeLatency) = await TryOpenTcpConnectionAsync(
+                            PublicServerAddress,
+                            50051,
+                            TimeSpan.FromMilliseconds(700),
+                            bindIp).ConfigureAwait(false);
+                        RecordGameQualitySample(probeOk, probeLatency);
+
+                        EasyTierPeerPath? path = cachedPath;
+                        long? currentLatency = probeLatency ?? path?.LatencyMs ?? _lastServerLatencyMs;
                         await Dispatcher.InvokeAsync(() =>
                         {
-                            bool changed = !_localIsGameHost
-                                || _gameActivePeerCount != activePeers
+                            string nextTransport = !string.IsNullOrWhiteSpace(path?.TransportMode) ? path.TransportMode : "";
+                            string nextFamily = path?.UnderlayAddressFamily ?? "";
+                            bool routeChanged = !_localIsGameHost
+                                || !_lastGameTransport.Equals(nextTransport, StringComparison.OrdinalIgnoreCase)
+                                || !_lastGameAddressFamily.Equals(nextFamily, StringComparison.OrdinalIgnoreCase)
+                                || _lastGameNextHop != (path?.NextHop ?? "")
+                                || _lastGameHopCount != path?.HopCount
                                 || _gameSessionId != authoritative!.SessionId;
+
                             _gameLatencyActive = true;
                             _localIsGameHost = true;
                             _gameActivePeerCount = activePeers;
                             _gamePeerIp = "";
-                            _lastGameLatencyMs = null;
-                            _lastGameTransport = "";
-                            _lastGameAddressFamily = "";
-                            _lastGameNextHop = "";
-                            _lastGameHopCount = null;
+                            _lastGameLatencyMs = currentLatency;
+                            _lastGameTransport = nextTransport;
+                            _lastGameAddressFamily = nextFamily;
+                            _lastGameNextHop = path?.NextHop ?? "";
+                            _lastGameHopCount = path?.HopCount;
                             _gameRoleSource = roleSource;
                             _gameHostUsername = hostUsername;
                             _gameSessionId = authoritative!.SessionId;
-                            if (changed)
-                                LogService.Info($"Local game host confirmed by game server. session={_gameSessionId}, players={activePeers}.");
+                            if (currentLatency.HasValue)
+                                _lastServerLatencyMs = currentLatency;
+                            if (routeChanged)
+                            {
+                                LogService.Info($"Local host server path updated: source={roleSource}, session={_gameSessionId}, server={targetIp}, transport={_lastGameTransport}, underlay={_lastGameAddressFamily}, latency={_lastGameLatencyMs?.ToString() ?? "n/a"}ms, nextHop={_lastGameNextHop}, hops={_lastGameHopCount?.ToString() ?? "n/a"}.");
+                            }
                             WriteGameQualitySnapshot();
                             RefreshServerStatusTextFromKind();
                         });

@@ -8,13 +8,23 @@ tunnel = Path("client/ScblPublicLauncher/Services/PublicTunnelService.cs").read_
 router = Path("client/ScblPublicLauncher/Services/ProcessRouterService.cs").read_text(encoding="utf-8")
 probe = Path("client/ScblPublicLauncher/Services/PeerProbeService.cs").read_text(encoding="utf-8")
 diagnostic = Path("client/ScblPublicLauncher/Services/DiagnosticExportService.cs").read_text(encoding="utf-8")
+xaml = Path("client/ScblPublicLauncher/MainWindow.xaml").read_text(encoding="utf-8")
 
-assert version == "1.0.11"
+assert version == "1.0.12"
 assert "private const int MaxAttempts = 2;" in control
 assert '"heartbeat"' in control and '"peers"' in control and '"game-session"' in control
 assert "InvalidateClient(localBindIp, channel, client)" in control
 assert "PooledConnectionLifetime = TimeSpan.FromSeconds(45)" in control
 assert "request.Headers.ConnectionClose = true;" in control
+assert 'Content="↻ 检测网络"' in xaml
+assert 'Grid.RowSpan="2"' in xaml
+assert 'x:Name="txtServerStatus"' in xaml and 'TextWrapping="NoWrap"' in xaml
+assert "本机房主 · 服务端延时" in window
+assert "与房主延时" in window
+assert "游戏已启动 · 等待房主信息" in window
+assert '本机房主 · {_gameActivePeerCount}名玩家' not in window
+assert "TryOpenTcpConnectionAsync" in window and "PublicServerAddress" in window and "50051" in window
+assert 'return $"{family}/{mode}";' in window
 assert "PeriodicTimer(TimeSpan.FromSeconds(5))" in window
 assert ".Concat(routeIps)" in window
 assert 'source={source}, registryOnline=' in window

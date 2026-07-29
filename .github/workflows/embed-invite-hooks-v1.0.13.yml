@@ -1,0 +1,114 @@
+name: Prepare client v1.0.13 invitation hooks
+
+on:
+  push:
+    branches:
+      - agent/client-v1.0.13-embed-invite-hooks
+    paths:
+      - .github/workflows/embed-invite-hooks-v1.0.13.yml
+
+permissions:
+  contents: write
+
+jobs:
+  prepare:
+    runs-on: windows-2025
+    timeout-minutes: 45
+    env:
+      EXPECTED_HOOK_SHA256: c816b06d3f651de5b6ae17dd9dd548a396b4e9e55cb802b98aa4d8fd601abbca
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: agent/client-v1.0.13-embed-invite-hooks
+          fetch-depth: 0
+      - name: Update client release metadata
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          Set-Content -LiteralPath VERSION -Value '1.0.13' -Encoding utf8NoBOM
+          Set-Content -LiteralPath VERSION_CLIENT -Value '1.0.13' -Encoding utf8NoBOM
+
+          $components = Get-Content -LiteralPath COMPONENT_VERSIONS.json -Raw -Encoding UTF8 | ConvertFrom-Json
+          $components.clientVersion = '1.0.13'
+          $components | ConvertTo-Json -Depth 10 | Set-Content -LiteralPath COMPONENT_VERSIONS.json -Encoding utf8NoBOM
+
+          $changelog = Get-Content -LiteralPath CHANGELOG.md -Raw -Encoding UTF8
+          $entry = @"
+          ## Windows Client v1.0.13
+
+          - 将 `5th-echelon` 邀请修复版 `uplay_r1_loader.dll` 正式嵌入启动器单文件 EXE；启动游戏前仍由启动器从内置资源覆盖部署，确保每台客户端实际使用同一版本 Hooks。
+          - Hooks 支持私人房间直接邀请和大厅组队邀请、显式接受与重复投递、中文 F5 邀请界面，并修复大厅邀请异常导致游戏退出的问题。
+          - 增加 API 在线心跳，避免仍在大厅的好友因安全连接空闲超时被错误显示为离线。
+          - 本版本仅更新 Windows Client 内置 Hooks；Linux Server Tool 仍为 v1.0.8，专用服务端使用独立滚动 Release。
+
+          "@
+          $changelog = $changelog -replace "# 更新记录\r?\n\r?\n", ("# 更新记录`r`n`r`n" + $entry)
+          Set-Content -LiteralPath CHANGELOG.md -Value $changelog -Encoding utf8NoBOM
+
+          $readme = Get-Content -LiteralPath README.md -Raw -Encoding UTF8
+          $readme = $readme -replace 'Windows Client v1\.0\.12', 'Windows Client v1.0.13'
+          Set-Content -LiteralPath README.md -Value $readme -Encoding utf8NoBOM
+
+          New-Item -ItemType Directory -Force -Path docs/releases | Out-Null
+          @"
+          # SCBL Windows Client v1.0.13
+
+          ## 主要更新
+
+          - 将邀请功能修复后的 `uplay_r1_loader.dll` 嵌入启动器 EXE，启动游戏时自动覆盖部署到游戏目录。
+          - 支持已创建私人房间后邀请线上好友直接加入。
+          - 支持大厅邀请多名好友进入同一大厅队伍，为后续建房或快速搜索提供同队基础。
+          - F5 邀请窗口改为中文提示，并增加明确的接受操作。
+          - 修复大厅邀请服务端返回错误时 Hooks Panic 导致游戏退出。
+          - 使用 API 心跳维持好友在线状态，降低在线好友错误显示离线的问题。
+
+          ## 配套版本
+
+          - Embedded Hooks source: `caox233/5th-echelon@3defed6f595b59ed01a4c9c8af27b0f02d3ce905`
+          - Expected embedded Hooks SHA256: `$env:EXPECTED_HOOK_SHA256`
+          - Linux Server Tool: v1.0.8（未变更）
+
+          ## 升级说明
+
+          所有参与测试的 Windows 客户端都必须升级到 v1.0.13。只更新服务端或手工替换一次 DLL 不足以保证生效，因为启动器每次启动游戏都会用自身内置资源重新覆盖 `uplay_r1_loader.dll`。
+          "@ | Set-Content -LiteralPath docs/releases/CLIENT_v1.0.13.md -Encoding utf8NoBOM
+      - name: Download, embed and build latest Hooks
+        shell: pwsh
+        env:
+          SCBL_5TH_REPOSITORY: caox233/5th-echelon
+          SCBL_5TH_RELEASE_TAG: scbl-public-stable-latest
+          SCBL_GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          & ./client/build_all_windows.ps1 -Package -Clean
+          if ($LASTEXITCODE -ne 0) { throw "Windows client build failed with exit code $LASTEXITCODE" }
+      - name: Verify embedded payload and package
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $dll = 'client/ScblPublicLauncher/EmbeddedFiles/uplay_r1_loader.dll'
+          $manifest = 'client/ScblPublicLauncher/EmbeddedFiles/SCBL_EMBEDDED_SHA256.txt'
+          if (!(Test-Path -LiteralPath $dll)) { throw 'Embedded Hooks DLL is missing.' }
+          $actual = (Get-FileHash -LiteralPath $dll -Algorithm SHA256).Hash.ToLowerInvariant()
+          if ($actual -ne $env:EXPECTED_HOOK_SHA256) {
+            throw "Embedded Hooks hash mismatch. expected=$env:EXPECTED_HOOK_SHA256 actual=$actual"
+          }
+          $manifestText = Get-Content -LiteralPath $manifest -Raw -Encoding ASCII
+          if ($manifestText -notmatch [regex]::Escape($env:EXPECTED_HOOK_SHA256)) {
+            throw 'Embedded checksum manifest was not updated.'
+          }
+          $package = Get-ChildItem -LiteralPath client/dist -File -Filter 'SCBL-Client-v1.0.13-win-x86.zip' | Select-Object -First 1
+          if ($null -eq $package) { throw 'v1.0.13 client package was not generated.' }
+          Write-Host "Embedded Hooks SHA256=$actual"
+          Write-Host "Package=$($package.FullName)"
+      - name: Commit production changes and remove temporary workflow
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          Remove-Item -LiteralPath .github/workflows/embed-invite-hooks-v1.0.13.yml -Force
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add VERSION VERSION_CLIENT COMPONENT_VERSIONS.json CHANGELOG.md README.md docs/releases/CLIENT_v1.0.13.md client/ScblPublicLauncher/EmbeddedFiles/uplay_r1_loader.dll client/ScblPublicLauncher/EmbeddedFiles/SCBL_EMBEDDED_SHA256.txt .github/workflows/embed-invite-hooks-v1.0.13.yml
+          git diff --cached --check
+          git commit -m 'release: embed invitation hooks in client v1.0.13'
+          git push origin HEAD:agent/client-v1.0.13-embed-invite-hooks

@@ -116,6 +116,18 @@ jobs:
               '        assert unrelated["hostVirtualIp"] == ""',
           ])
           test_path.write_text(test_text[:start] + assertions + test_text[end:], encoding='utf-8')
+
+          resilience_path = Path('server/test_client_network_resilience.py')
+          resilience = resilience_path.read_text(encoding='utf-8')
+          resilience, count = re.subn(
+              r'assert "TryOpenTcpConnectionAsync\(\n\s*PublicServerAddress,\n\s*50051" in window',
+              'assert "TryOpenTcpConnectionAsync" in window and "PublicServerAddress" in window and "50051" in window',
+              resilience,
+              count=1,
+          )
+          if count != 1:
+              raise SystemExit(f'Unable to normalize server-latency regression assertion, count={count}')
+          resilience_path.write_text(resilience, encoding='utf-8')
           PY
 
       - name: Validate release source

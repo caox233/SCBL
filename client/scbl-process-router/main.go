@@ -26,7 +26,7 @@ import (
 )
 
 const (
-	routerVersion         = "1.0.12"
+	routerVersion         = "1.0.13"
 	windivertLayerNetwork = 0
 	divertBufSize         = 0xFFFF
 	protoTCP              = 6
@@ -1174,3 +1174,4 @@ func callIPHelperTable(procName string, tableClass int) ([]byte, error) {
 	}
 	return buf[:size], nil
 }
+

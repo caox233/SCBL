@@ -42,28 +42,31 @@ jobs:
               if count != 1:
                   raise SystemExit(f"{path}: expected one exact match, found {count}")
               write(path, text.replace(old, new, 1))'''
-          robust_helper = '''def _repair_multiline_literal(value: str) -> str:
-              trailing_newline = value.endswith("\\n")
-              lines = value.splitlines()
-              if len(lines) > 1 and lines[0].strip():
-                  base = len(lines[0]) - len(lines[0].lstrip())
-                  if base:
-                      repaired = [lines[0]]
-                      for line in lines[1:]:
-                          indent = len(line) - len(line.lstrip()) if line.strip() else base
-                          repaired.append((" " * base + line) if line.strip() and indent < base else line)
-                      lines = repaired
-              result = "\\n".join(lines)
-              return result + ("\\n" if trailing_newline else "")
-
-          def replace_once(path: str, old: str, new: str) -> None:
-              old = _repair_multiline_literal(old)
-              new = _repair_multiline_literal(new)
+          robust_helper = '''def replace_once(path: str, old: str, new: str) -> None:
+              import textwrap as _textwrap
               text = read(path)
               count = text.count(old)
-              if count != 1:
+              if count == 1:
+                  write(path, text.replace(old, new, 1))
+                  return
+              if count > 1 or "\\n" not in old:
                   raise SystemExit(f"{path}: expected one exact match, found {count}; old={old[:240]!r}")
-              write(path, text.replace(old, new, 1))'''
+
+              old_lines = _textwrap.dedent(old).strip("\\n").splitlines()
+              parts = []
+              for line in old_lines:
+                  parts.append(r"[ \\t]*" + re.escape(line.lstrip()) if line.strip() else r"[ \\t]*")
+              pattern = r"(?m)^" + r"\\n".join(parts) + r"$"
+              matches = list(re.finditer(pattern, text))
+              if len(matches) != 1:
+                  raise SystemExit(f"{path}: multiline structural match count={len(matches)}; old={old[:240]!r}")
+
+              matched = matches[0].group(0)
+              first_line = matched.splitlines()[0]
+              base = first_line[:len(first_line) - len(first_line.lstrip())]
+              new_lines = _textwrap.dedent(new).strip("\\n").splitlines()
+              replacement = "\\n".join((base + line) if line.strip() else "" for line in new_lines)
+              write(path, text[:matches[0].start()] + replacement + text[matches[0].end():])'''
           if original_helper not in script:
               raise SystemExit('Unable to locate replace_once helper in reviewed patch script')
           script = script.replace(original_helper, robust_helper, 1)

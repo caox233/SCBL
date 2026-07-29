@@ -71,6 +71,33 @@ jobs:
               raise SystemExit('Unable to locate replace_once helper in reviewed patch script')
           script = script.replace(original_helper, robust_helper, 1)
           exec(compile(script, 'apply-v1.0.12-v1.0.8.py', 'exec'), {})
+
+          control_path = Path('server/scbl_control_plane.py')
+          control = control_path.read_text(encoding='utf-8')
+          refresh_function = '''def refresh_game_session_snapshot() -> bool:
+              global _SESSION_CACHE, _SESSION_SNAPSHOT_AT_MS, _SESSION_SNAPSHOT_ERROR
+              try:
+                  snapshot = _load_authoritative_sessions()
+              except Exception as exc:
+                  with _SESSION_LOCK:
+                      _SESSION_SNAPSHOT_ERROR = clean_text(exc, 256)
+                  return False
+              with _SESSION_LOCK:
+                  _SESSION_CACHE = snapshot
+                  _SESSION_SNAPSHOT_AT_MS = utc_ms()
+                  _SESSION_SNAPSHOT_ERROR = ""
+              return True
+          '''
+          control, count = re.subn(
+              r'def refresh_game_session_snapshot\(\) -> bool:\n.*?(?=\ndef _session_refresh_loop)',
+              textwrap.dedent(refresh_function).rstrip(),
+              control,
+              count=1,
+              flags=re.S,
+          )
+          if count != 1:
+              raise SystemExit(f'Unable to normalize refresh_game_session_snapshot, count={count}')
+          control_path.write_text(control, encoding='utf-8')
           PY
 
       - name: Validate release source

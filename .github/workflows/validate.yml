@@ -150,47 +150,29 @@ jobs:
             'run=false' | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
           }
 
-      - name: Apply release metadata and expected Hooks hash
+      - name: Apply release metadata
         if: steps.trigger.outputs.run == 'true'
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
-          $router = Get-Content -LiteralPath 'client/scbl-process-router/main.go' -Raw -Encoding UTF8
+          $routerPath = 'client/scbl-process-router/main.go'
+          $router = Get-Content -LiteralPath $routerPath -Raw -Encoding UTF8
           $router = $router.Replace('routerVersion         = "1.0.12"', 'routerVersion         = "1.0.13"')
           if ($router -notmatch 'routerVersion\s+= "1\.0\.13"') { throw 'Route Guard version update failed.' }
-          Set-Content -LiteralPath 'client/scbl-process-router/main.go' -Value $router -Encoding utf8NoBOM
-
+          Set-Content -LiteralPath $routerPath -Value $router -Encoding utf8NoBOM
           $manifestPath = 'client/ScblPublicLauncher/EmbeddedFiles/SCBL_EMBEDDED_SHA256.txt'
           $lines = @(Get-Content -LiteralPath $manifestPath -Encoding ASCII)
+          $found = $false
           $updated = foreach ($line in $lines) {
             if ($line -match '(?i)uplay_r1_loader\.dll\s*$') {
+              $found = $true
               "$env:EXPECTED_HOOK_SHA256  uplay_r1_loader.dll"
             } else {
               $line
             }
           }
+          if (!$found) { $updated += "$env:EXPECTED_HOOK_SHA256  uplay_r1_loader.dll" }
           $updated | Set-Content -LiteralPath $manifestPath -Encoding ASCII
-
-          $changelogPath = 'CHANGELOG.md'
-          $changelog = Get-Content -LiteralPath $changelogPath -Raw -Encoding UTF8
-          if ($changelog -notmatch '## Windows Client v1\.0\.13') {
-            $entry = @"
-## Windows Client v1.0.13
-
-- 将邀请功能修复后的 `uplay_r1_loader.dll` 正式嵌入启动器单文件 EXE；启动游戏前由启动器从内置资源覆盖部署，避免旧 DLL 覆盖新邀请逻辑。
-- 支持私人房间直接邀请与大厅组队邀请，增加中文 F5 接受界面，并修复大厅邀请异常导致游戏退出。
-- API 轮询作为在线心跳，降低仍在大厅的好友被错误显示离线的问题。
-- Linux Server Tool 保持 v1.0.8；dedicated server 继续使用独立滚动 Release。
-
-"@
-            $changelog = $changelog -replace '^# 更新记录\r?\n\r?\n', ("# 更新记录`r`n`r`n" + $entry)
-            Set-Content -LiteralPath $changelogPath -Value $changelog -Encoding utf8NoBOM
-          }
-
-          $readmePath = 'README.md'
-          $readme = Get-Content -LiteralPath $readmePath -Raw -Encoding UTF8
-          $readme = $readme.Replace('Windows Client v1.0.12', 'Windows Client v1.0.13')
-          Set-Content -LiteralPath $readmePath -Value $readme -Encoding utf8NoBOM
 
       - name: Build complete v1.0.13 package with current Hooks
         if: steps.trigger.outputs.run == 'true'
@@ -221,7 +203,7 @@ jobs:
           Remove-Item -LiteralPath '.github/scbl-v1.0.13-embed-trigger' -Force
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          git add client/scbl-process-router/main.go client/ScblPublicLauncher/EmbeddedFiles/SCBL_EMBEDDED_SHA256.txt CHANGELOG.md README.md .github/scbl-v1.0.13-embed-trigger
+          git add client/scbl-process-router/main.go client/ScblPublicLauncher/EmbeddedFiles/SCBL_EMBEDDED_SHA256.txt .github/scbl-v1.0.13-embed-trigger
           git diff --cached --check
           git commit -m 'release: finalize client v1.0.13 embedded Hooks metadata'
           git push origin HEAD:agent/client-v1.0.13-embed-invite-hooks

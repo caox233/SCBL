@@ -34,6 +34,10 @@ jobs:
           if not match:
               raise SystemExit('Unable to extract reviewed patch script')
           script = textwrap.dedent(match.group(1))
+          script = script.replace(
+              'raise SystemExit(f"{path}: expected one exact match, found {count}")',
+              'raise SystemExit(f"{path}: expected one exact match, found {count}; old={old[:240]!r}")',
+          )
           exec(compile(script, 'apply-v1.0.12-v1.0.8.py', 'exec'), {})
           PY
 

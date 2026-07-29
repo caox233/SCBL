@@ -35,6 +35,10 @@ assert "ScblThreadingHTTPServer" in control
 assert "ScblUpdateServerV6" in update
 assert "IPV6_V6ONLY" in update
 assert "request_queue_size = 128" in update
-assert "与房主连接 {_lastGameLatencyMs.Value}ms 延时" in window
+assert "本机房主 · 服务端延时 {_lastGameLatencyMs.Value}ms" in window
+assert "与房主延时 {_lastGameLatencyMs.Value}ms" in window
+assert "游戏已启动 · 等待房主信息" in window
+assert "TryOpenTcpConnectionAsync" in window and "PublicServerAddress" in window and "50051" in window
+assert 'return $"{family}/{mode}";' in window
 assert "到房主{hostLabel}" not in window
-print("SCBL UDP/WSS, P2P and dual-stack topology checks passed")
+print("SCBL UDP/WSS, P2P, host latency and dual-stack topology checks passed")

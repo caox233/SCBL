@@ -257,8 +257,7 @@ def _load_authoritative_sessions() -> dict[str, AuthoritativeGameSession]:
             session.participant_ips.update(ips)
             if user_id == session.host_user_id and ips and not session.host_virtual_ip:
                 session.host_virtual_ip = sorted(ips, key=lambda x: int(x.rsplit(".", 1)[-1]))[0]
-
-                # A one-person or one-IP record can be the ordinary online lobby's
+        # A one-person or one-IP record can be the ordinary online lobby's
         # personal session. It is not enough evidence to declare a playable room.
         if not session.host_virtual_ip or session.participant_count < 2 or len(session.participant_ips) < 2:
             continue
@@ -282,6 +281,8 @@ def refresh_game_session_snapshot() -> bool:
         _SESSION_SNAPSHOT_AT_MS = utc_ms()
         _SESSION_SNAPSHOT_ERROR = ""
     return True
+
+
 def _session_refresh_loop() -> None:
     while True:
         refresh_game_session_snapshot()

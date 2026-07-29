@@ -3097,7 +3097,6 @@ public partial class MainWindow : Window
         }, token);
     }
 
-
     private void ResetGameQualityState(string hostIp = "")
     {
         lock (_gameQualitySync)

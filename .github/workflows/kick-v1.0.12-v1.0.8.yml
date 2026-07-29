@@ -29,15 +29,40 @@ jobs:
           python3 - <<'PY'
           from pathlib import Path
           import re, textwrap
+
           source = Path('.github/workflows/apply-v1.0.12-v1.0.8.yml').read_text(encoding='utf-8')
           match = re.search(r"python3 - <<'PY'\n(.*?)\n          PY", source, re.S)
           if not match:
               raise SystemExit('Unable to extract reviewed patch script')
           script = textwrap.dedent(match.group(1))
-          script = script.replace(
-              'raise SystemExit(f"{path}: expected one exact match, found {count}")',
-              'raise SystemExit(f"{path}: expected one exact match, found {count}; old={old[:240]!r}")',
-          )
+
+          original_helper = '''def replace_once(path: str, old: str, new: str) -> None:
+              text = read(path)
+              count = text.count(old)
+              if count != 1:
+                  raise SystemExit(f"{path}: expected one exact match, found {count}")
+              write(path, text.replace(old, new, 1))'''
+          robust_helper = '''def _repair_multiline_literal(value: str) -> str:
+              trailing_newline = value.endswith("\\n")
+              lines = value.splitlines()
+              if len(lines) > 1 and lines[0].strip():
+                  base = len(lines[0]) - len(lines[0].lstrip())
+                  if base:
+                      lines = [lines[0]] + [(" " * base + line) if line else line for line in lines[1:]]
+              result = "\\n".join(lines)
+              return result + ("\\n" if trailing_newline else "")
+
+          def replace_once(path: str, old: str, new: str) -> None:
+              old = _repair_multiline_literal(old)
+              new = _repair_multiline_literal(new)
+              text = read(path)
+              count = text.count(old)
+              if count != 1:
+                  raise SystemExit(f"{path}: expected one exact match, found {count}; old={old[:240]!r}")
+              write(path, text.replace(old, new, 1))'''
+          if original_helper not in script:
+              raise SystemExit('Unable to locate replace_once helper in reviewed patch script')
+          script = script.replace(original_helper, robust_helper, 1)
           exec(compile(script, 'apply-v1.0.12-v1.0.8.py', 'exec'), {})
           PY
 

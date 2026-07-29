@@ -1,0 +1,45 @@
+name: Finalize client v1.0.13 Route Guard formatting
+
+on:
+  pull_request:
+
+permissions:
+  contents: write
+
+jobs:
+  gofmt:
+    if: github.event.pull_request.head.repo.full_name == github.repository && github.head_ref == 'agent/client-v1.0.13-embed-invite-hooks'
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: agent/client-v1.0.13-embed-invite-hooks
+          fetch-depth: 0
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.23.2'
+          cache: true
+          cache-dependency-path: client/scbl-process-router/go.sum
+      - name: Format and validate Route Guard
+        working-directory: client/scbl-process-router
+        shell: bash
+        run: |
+          set -euo pipefail
+          gofmt -w main.go
+          go test ./...
+          GOOS=windows GOARCH=amd64 go build -mod=readonly -trimpath -o /tmp/scbl-process-router.exe .
+          test -s /tmp/scbl-process-router.exe
+      - name: Commit formatting result
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add client/scbl-process-router/main.go
+          if git diff --cached --quiet; then
+            echo 'Route Guard is already formatted.'
+            exit 0
+          fi
+          git diff --cached --check
+          git commit -m 'style: format Route Guard v1.0.13'
+          git push origin HEAD:agent/client-v1.0.13-embed-invite-hooks

@@ -382,7 +382,9 @@ public sealed class NetworkOrchestrator : IDisposable
             SetAssignedIp(ip);
             MarkConnected(ip, check.LatencyMs, "");
 
-            _adapterService.EnsureRouteBindingBestEffort(ip);
+            // QuickCheckAsync already proved the existing EasyTier route and server path.
+            // Rebinding here starts PowerShell and adds visible latency to every game launch.
+            LogService.Info("Silent network reuse passed the read-only route check; route rebinding was skipped.");
             // Route Guard remains stopped until the launcher has an actual game PID.
             _processRouterService.Stop("network reused while no launcher-owned game session is active");
 

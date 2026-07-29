@@ -9,11 +9,12 @@ router = Path("client/ScblPublicLauncher/Services/ProcessRouterService.cs").read
 probe = Path("client/ScblPublicLauncher/Services/PeerProbeService.cs").read_text(encoding="utf-8")
 diagnostic = Path("client/ScblPublicLauncher/Services/DiagnosticExportService.cs").read_text(encoding="utf-8")
 
-assert version == "1.0.10"
+assert version == "1.0.11"
 assert "private const int MaxAttempts = 2;" in control
 assert '"heartbeat"' in control and '"peers"' in control and '"game-session"' in control
 assert "InvalidateClient(localBindIp, channel, client)" in control
 assert "PooledConnectionLifetime = TimeSpan.FromSeconds(45)" in control
+assert "request.Headers.ConnectionClose = true;" in control
 assert "PeriodicTimer(TimeSpan.FromSeconds(5))" in window
 assert ".Concat(routeIps)" in window
 assert 'source={source}, registryOnline=' in window
@@ -31,6 +32,8 @@ assert "TryRecoverActiveGameRouteAsync" in network
 assert "game-session transient retry" in network
 assert "EnsureRouteBindingBestEffort(ip)" in network
 assert "automatic EasyTier restart remains suppressed" in network
+assert network.count("_adapterService.EnsureRouteBindingBestEffort(ip);") == 1
+assert "Silent network reuse passed the read-only route check; route rebinding was skipped." in network
 assert "ServerPathSwitchConfirmSamples = 3" in window
 assert "ApplyServerPathDisplaySample" in window
 assert "Server path display switch pending" in window

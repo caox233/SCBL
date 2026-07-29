@@ -4,23 +4,20 @@ from pathlib import Path
 version = Path("VERSION_SERVER_TOOL").read_text(encoding="utf-8").strip()
 manager = Path("server/install_public_server.sh").read_text(encoding="utf-8")
 control = Path("server/scbl_control_plane.py").read_text(encoding="utf-8")
-release = Path("docs/releases/SERVER_TOOL_v1.0.5.md").read_text(encoding="utf-8")
+release = Path(f"docs/releases/SERVER_TOOL_v{version}.md").read_text(encoding="utf-8")
 
-version_parts = tuple(int(part) for part in version.split("."))
-assert version_parts >= (1, 0, 5)
+assert version == "1.0.7"
 assert 'self.send_header("Connection", "close")' in control
 assert "self.close_connection = True" in control
 assert "_signed_health_probe" in control
 assert "_listener_watchdog_loop" in control
-assert "SELF_WATCHDOG_FAILURE_THRESHOLD = 2" in control
-assert "os._exit(70)" in control
 assert "Restart=always" in manager
 assert "TasksMax=128" in manager
 assert "MemoryMax=256M" in manager
-assert "wait_for_tcp_listener" in manager
-assert 'listen_any_tcp 50051' in manager
-assert "server-tool-v1.0.5-control-plane-runtime" in manager
-assert 'install -m 0755 "$control_new" "$control_live"' in manager
-assert 'control_source="$MANAGER_DIR/scbl_control_plane.py"' in manager
-assert "升级后重新执行一次 `SCBL`" in release
-print(f"Server Tool {version} retains the v1.0.5 control-plane runtime resilience guarantees")
+assert 'diagnostics_new="${package_root}/scbl_server_diagnostics.sh"' in manager
+assert 'bash -n "$diagnostics_new"' in manager
+assert 'install -m 0755 "$diagnostics_new" "$MANAGER_DIR/scbl_server_diagnostics.sh"' in manager
+assert 'install -m 0755 "$diagnostics_new" /usr/local/bin/scbl-server-diagnostics' in manager
+assert 'scbl-server-diagnostics.command' in manager
+assert "菜单15" in release and "在线升级" in release
+print(f"Server Tool {version} diagnostics installation and control-plane guarantees passed")

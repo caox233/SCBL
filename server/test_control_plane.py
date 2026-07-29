@@ -54,6 +54,11 @@ def main() -> None:
                     VALUES (40, 1, 1003, '', NULL);
                 INSERT INTO participants(game_id, user_id) VALUES (40, 1003);
 
+                -- A solo room for C must be visible only to its own host query.
+                INSERT INTO game_sessions(id, type_id, creator_id, attributes, destroyed_at)
+                    VALUES (42, 1, 1008, '', NULL);
+                INSERT INTO participants(game_id, user_id) VALUES (42, 1008);
+
                 -- A destroyed session must never be considered.
                 INSERT INTO game_sessions(id, type_id, creator_id, attributes, destroyed_at)
                     VALUES (41, 1, 1008, '', CURRENT_TIMESTAMP);
@@ -81,6 +86,7 @@ def main() -> None:
         assert control_plane.refresh_game_session_snapshot() is True
         a = control_plane.game_session_payload("10.66.0.2")
         b = control_plane.game_session_payload("10.66.0.4")
+        c = control_plane.game_session_payload("10.66.0.8")
         unrelated = control_plane.game_session_payload("10.66.0.9")
 
         assert a["active"] is True
@@ -89,6 +95,11 @@ def main() -> None:
         assert a["participantCount"] == 2
         assert a["requesterIsHost"] is False
         assert b["requesterIsHost"] is True
+        assert c["active"] is True
+        assert c["sessionId"] == 42
+        assert c["participantCount"] == 1
+        assert c["requesterIsHost"] is True
+        assert "10.66.0.8" not in control_plane.authoritative_sessions_by_ip()
         assert unrelated["active"] is False
         assert unrelated["hostVirtualIp"] == ""
 

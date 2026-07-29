@@ -1,5 +1,13 @@
 # 更新记录
 
+## Windows Client v1.0.11 / Server Tool v1.0.7
+
+- 修复 dedicated_server PRUDP 分片顺序判定错误导致游戏首次进入“线上模式”可能长期停在“连线中”的配套发布；专用服务端二进制继续由 `caox233/5th-echelon` 独立滚动 Release 提供。
+- 控制平面允许单人房间创建者通过 `/v1/game-session` 获取本机房主状态；全局玩家拓扑仍要求至少两名参与者和两个虚拟 IP，不恢复客户端本地猜房主。
+- 客户端控制平面请求明确使用 `Connection: close`，与服务端响应语义一致，避免复用已关闭连接后的超时重试。
+- 网络已通过静默只读快检时，启动游戏前不再重复执行 PowerShell 路由绑定；失败时仍保留现有修复路径，游戏运行期间保护边界不变。
+- 修复 Server Tool 在线升级遗漏 `scbl_server_diagnostics.sh`，菜单15和 `scbl-server-diagnostics` 会被校验、备份、安装并在失败时回滚。
+
 ## Windows Client v1.0.10 / Server Tool v1.0.6
 
 - 控制平面签名改为读取当前 EasyTier 运行配置中的实际网络密钥，修复部分客户端已进入虚拟网但 `/v1/heartbeat`、`/v1/peers`、`/v1/game-session` 持续 HTTP 401 的问题。

@@ -104,6 +104,7 @@ public sealed class ControlPlaneService : IDisposable
                     Version = HttpVersion.Version11,
                     VersionPolicy = HttpVersionPolicy.RequestVersionExact
                 };
+                request.Headers.ConnectionClose = true;
                 request.Headers.TryAddWithoutValidation("X-SCBL-Timestamp", timestamp.ToString(System.Globalization.CultureInfo.InvariantCulture));
                 request.Headers.TryAddWithoutValidation("X-SCBL-Signature", signature);
                 if (payload != null)

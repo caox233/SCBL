@@ -2652,7 +2652,7 @@ update_server_tool_online() {
   load_env_if_exists; set_defaults
   local repo="${SCBL_RELEASE_REPOSITORY:-$DEFAULT_SCBL_RELEASE_REPOSITORY}"
   local version_url="${SCBL_SERVER_TOOL_VERSION_URL:-https://raw.githubusercontent.com/${repo}/main/VERSION_SERVER_TOOL}"
-  local version tag package base expected actual cmp tmpdir extract_root manager_new control_new update_new version_new
+  local version tag package base expected actual cmp tmpdir extract_root manager_new control_new update_new diagnostics_new version_new
   local backup_root control_changed=0 binary_check_new branch_new package_root
   local control_live="$SCBL_ROOT/control-plane/scbl_control_plane.py"
 
@@ -2665,6 +2665,7 @@ update_server_tool_online() {
   cmp="$(semver_compare "$SERVER_TOOL_VERSION" "$version")"
   if [[ "$cmp" == "0" ]]; then
     echo "当前服务端工具已经是 v$version。"
+    install_management_command
     download_latest_client_release || echo "警告：客户端正式版检查失败，服务器现有客户端继续使用。"
     return 0
   elif [[ "$cmp" == "1" ]]; then
@@ -2713,14 +2714,16 @@ PYEOF_SAFE_SERVER_EXTRACT
   manager_new="${package_root}/install_public_server.sh"
   control_new="${package_root}/scbl_control_plane.py"
   update_new="${package_root}/scbl_update_server.py"
+  diagnostics_new="${package_root}/scbl_server_diagnostics.sh"
   version_new="${package_root}/VERSION_SERVER_TOOL"
-  [[ -f "$manager_new" && -f "$control_new" && -f "$update_new" && -f "$version_new" ]] || {
+  [[ -f "$manager_new" && -f "$control_new" && -f "$update_new" && -f "$diagnostics_new" && -f "$version_new" ]] || {
     rm -rf "$tmpdir"; echo "服务端工具包缺少必要文件。"; return 1;
   }
   [[ "$(tr -d '[:space:]' < "$version_new")" == "$version" ]] || {
     rm -rf "$tmpdir"; echo "服务端工具包版本信息不一致。"; return 1;
   }
   validate_manager_script_file "$manager_new"
+  bash -n "$diagnostics_new"
   python3 -m py_compile "$control_new" "$update_new"
 
   backup_root="$SCBL_ROOT/backups/server-tool/$(date +%Y%m%d_%H%M%S)"
@@ -2729,6 +2732,8 @@ PYEOF_SAFE_SERVER_EXTRACT
   [[ -f "$MANAGER_DIR/VERSION_SERVER_TOOL" ]] && cp -a "$MANAGER_DIR/VERSION_SERVER_TOOL" "$backup_root/VERSION_SERVER_TOOL"
   [[ -f "$MANAGER_DIR/scbl_update_server.py" ]] && cp -a "$MANAGER_DIR/scbl_update_server.py" "$backup_root/scbl_update_server.py"
   [[ -f "$MANAGER_DIR/scbl_control_plane.py" ]] && cp -a "$MANAGER_DIR/scbl_control_plane.py" "$backup_root/scbl_control_plane.manager.py"
+  [[ -f "$MANAGER_DIR/scbl_server_diagnostics.sh" ]] && cp -a "$MANAGER_DIR/scbl_server_diagnostics.sh" "$backup_root/scbl_server_diagnostics.manager.sh"
+  [[ -f /usr/local/bin/scbl-server-diagnostics ]] && cp -a /usr/local/bin/scbl-server-diagnostics "$backup_root/scbl-server-diagnostics.command"
   [[ -f "$SCBL_ROOT/server/scbl_control_plane.py" ]] && cp -a "$SCBL_ROOT/server/scbl_control_plane.py" "$backup_root/scbl_control_plane.server.py"
   [[ -f "$control_live" ]] && cp -a "$control_live" "$backup_root/scbl_control_plane.live.py"
   [[ -f "$SCBL_ROOT/server/check_scbl_binary_release.sh" ]] && cp -a "$SCBL_ROOT/server/check_scbl_binary_release.sh" "$backup_root/check_scbl_binary_release.sh"
@@ -2743,6 +2748,8 @@ PYEOF_SAFE_SERVER_EXTRACT
     install -m 0644 "$version_new" "$MANAGER_DIR/VERSION_SERVER_TOOL"
     install -m 0644 "$update_new" "$MANAGER_DIR/scbl_update_server.py"
     install -m 0644 "$control_new" "$MANAGER_DIR/scbl_control_plane.py"
+    install -m 0755 "$diagnostics_new" "$MANAGER_DIR/scbl_server_diagnostics.sh"
+    install -m 0755 "$diagnostics_new" /usr/local/bin/scbl-server-diagnostics
     install -d -m 0755 "$SCBL_ROOT/server" "$SCBL_ROOT/control-plane"
     install -m 0644 "$control_new" "$SCBL_ROOT/server/scbl_control_plane.py"
     install -m 0755 "$control_new" "$control_live"
@@ -2769,6 +2776,16 @@ PYEOF_SERVER_TOOL_STATE
     [[ -f "$backup_root/VERSION_SERVER_TOOL" ]] && install -m 0644 "$backup_root/VERSION_SERVER_TOOL" "$MANAGER_DIR/VERSION_SERVER_TOOL"
     [[ -f "$backup_root/scbl_update_server.py" ]] && install -m 0644 "$backup_root/scbl_update_server.py" "$MANAGER_DIR/scbl_update_server.py"
     [[ -f "$backup_root/scbl_control_plane.manager.py" ]] && install -m 0644 "$backup_root/scbl_control_plane.manager.py" "$MANAGER_DIR/scbl_control_plane.py"
+    if [[ -f "$backup_root/scbl_server_diagnostics.manager.sh" ]]; then
+      install -m 0755 "$backup_root/scbl_server_diagnostics.manager.sh" "$MANAGER_DIR/scbl_server_diagnostics.sh"
+    else
+      rm -f "$MANAGER_DIR/scbl_server_diagnostics.sh"
+    fi
+    if [[ -f "$backup_root/scbl-server-diagnostics.command" ]]; then
+      install -m 0755 "$backup_root/scbl-server-diagnostics.command" /usr/local/bin/scbl-server-diagnostics
+    else
+      rm -f /usr/local/bin/scbl-server-diagnostics
+    fi
     [[ -f "$backup_root/scbl_control_plane.server.py" ]] && install -m 0644 "$backup_root/scbl_control_plane.server.py" "$SCBL_ROOT/server/scbl_control_plane.py"
     [[ -f "$backup_root/scbl_control_plane.live.py" ]] && install -m 0755 "$backup_root/scbl_control_plane.live.py" "$control_live"
     systemctl restart scbl-control-plane.service 2>/dev/null || true

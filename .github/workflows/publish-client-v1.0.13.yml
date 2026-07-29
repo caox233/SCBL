@@ -1,0 +1,78 @@
+name: Publish Client v1.0.13
+
+on:
+  pull_request:
+
+permissions:
+  contents: write
+
+jobs:
+  publish:
+    if: github.event.pull_request.head.repo.full_name == github.repository && github.head_ref == 'agent/release-client-v1.0.13'
+    runs-on: windows-2025
+    timeout-minutes: 50
+    env:
+      TAG: client-v1.0.13
+      EXPECTED_COMMIT: d90062dee92516cf1a52cb77de5eec5cf305a01e
+      EXPECTED_HOOK_SHA256: c816b06d3f651de5b6ae17dd9dd548a396b4e9e55cb802b98aa4d8fd601abbca
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: d90062dee92516cf1a52cb77de5eec5cf305a01e
+          fetch-depth: 0
+      - name: Build and verify Client v1.0.13
+        shell: pwsh
+        env:
+          SCBL_5TH_REPOSITORY: caox233/5th-echelon
+          SCBL_5TH_RELEASE_TAG: scbl-public-stable-latest
+          SCBL_GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          & ./client/build_all_windows.ps1 -Package -Clean
+          if ($LASTEXITCODE -ne 0) { throw "Client build failed with exit code $LASTEXITCODE" }
+          $dll = 'client/ScblPublicLauncher/EmbeddedFiles/uplay_r1_loader.dll'
+          $actualHook = (Get-FileHash -LiteralPath $dll -Algorithm SHA256).Hash.ToLowerInvariant()
+          if ($actualHook -ne $env:EXPECTED_HOOK_SHA256) {
+            throw "Embedded Hooks mismatch. expected=$env:EXPECTED_HOOK_SHA256 actual=$actualHook"
+          }
+          $zip = 'client/dist/SCBL-Client-v1.0.13-win-x86.zip'
+          if (!(Test-Path -LiteralPath $zip)) { throw 'Client package missing.' }
+          $zipHash = (Get-FileHash -LiteralPath $zip -Algorithm SHA256).Hash.ToLowerInvariant()
+          "$zipHash  SCBL-Client-v1.0.13-win-x86.zip" | Set-Content -LiteralPath "$zip.sha256" -Encoding ASCII
+          "$zipHash  SCBL-Client-v1.0.13-win-x86.zip" | Set-Content -LiteralPath 'client/dist/SHA256SUMS.txt' -Encoding ASCII
+          $env:CLIENT_ZIP_SHA256 = $zipHash
+          "CLIENT_ZIP_SHA256=$zipHash" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+          Write-Host "EmbeddedHooksSha256=$actualHook"
+          Write-Host "ClientZipSha256=$zipHash"
+      - name: Publish formal release
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          git tag -f $env:TAG $env:EXPECTED_COMMIT
+          git push origin "refs/tags/$env:TAG" --force
+          gh release delete $env:TAG --cleanup-tag -y 2>$null
+          git tag -f $env:TAG $env:EXPECTED_COMMIT
+          git push origin "refs/tags/$env:TAG" --force
+          @"
+          # SCBL Windows Client v1.0.13
+
+          本版本修正启动器内置 Hooks 未同步的问题。启动器单文件 EXE 已嵌入邀请修复版 `uplay_r1_loader.dll`，每次启动游戏时会自动覆盖部署该版本。
+
+          主要内容：
+          - 私人房间直接邀请；
+          - 大厅多人组队邀请基础；
+          - 中文 F5 邀请接受界面；
+          - 大厅邀请异常不再导致游戏退出；
+          - API 在线心跳，降低好友错误离线；
+          - Client 与 Route Guard 版本同步为 v1.0.13。
+
+          Embedded Hooks SHA256: `$env:EXPECTED_HOOK_SHA256`
+          Client ZIP SHA256: `$env:CLIENT_ZIP_SHA256`
+          Source commit: `$env:EXPECTED_COMMIT`
+          "@ | Set-Content -LiteralPath RELEASE_NOTES.md -Encoding utf8NoBOM
+          gh release create $env:TAG --target $env:EXPECTED_COMMIT --title 'SCBL Windows Client v1.0.13' --notes-file RELEASE_NOTES.md `
+            'client/dist/SCBL-Client-v1.0.13-win-x86.zip' `
+            'client/dist/SCBL-Client-v1.0.13-win-x86.zip.sha256' `
+            'client/dist/SHA256SUMS.txt'

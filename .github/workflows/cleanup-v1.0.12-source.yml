@@ -27,16 +27,18 @@ jobs:
           set -euo pipefail
           python3 - <<'PY'
           from pathlib import Path
+          import re
 
           control_path = Path('server/scbl_control_plane.py')
           control = control_path.read_text(encoding='utf-8')
-          bad = '''                # A one-person or one-IP record can be the ordinary online lobby\\'s
-          # personal session. It is not enough evidence to declare a playable room.'''
-          good = '''        # A one-person or one-IP record can be the ordinary online lobby's
-          # personal session. It is not enough evidence to declare a playable room.'''
-          if bad not in control:
-              raise SystemExit('Expected generated control-plane comment was not found')
-          control = control.replace(bad, good, 1)
+          control, count = re.subn(
+              r"(?m)^\s*# A one-person or one-IP record can be the ordinary online lobby\\?'s\n\s*# personal session\. It is not enough evidence to declare a playable room\.$",
+              "        # A one-person or one-IP record can be the ordinary online lobby's\n        # personal session. It is not enough evidence to declare a playable room.",
+              control,
+              count=1,
+          )
+          if count != 1:
+              raise SystemExit(f'Expected generated control-plane comment count=1, found {count}')
           control = control.replace('    return True\ndef _session_refresh_loop', '    return True\n\n\ndef _session_refresh_loop', 1)
           control_path.write_text(control, encoding='utf-8')
 

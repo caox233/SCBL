@@ -21,12 +21,13 @@ jobs:
           cache: true
           cache-dependency-path: client/scbl-process-router/go.sum
       - name: Format and validate Route Guard
-        working-directory: client/scbl-process-router
         shell: bash
         run: |
           set -euo pipefail
+          cd client/scbl-process-router
+          test -f go.mod
           gofmt -w main.go
-          go test ./...
+          go test .
           GOOS=windows GOARCH=amd64 go build -mod=readonly -trimpath -o /tmp/scbl-process-router.exe .
           test -s /tmp/scbl-process-router.exe
       - name: Commit formatting result

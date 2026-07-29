@@ -48,7 +48,11 @@ jobs:
               if len(lines) > 1 and lines[0].strip():
                   base = len(lines[0]) - len(lines[0].lstrip())
                   if base:
-                      lines = [lines[0]] + [(" " * base + line) if line else line for line in lines[1:]]
+                      repaired = [lines[0]]
+                      for line in lines[1:]:
+                          indent = len(line) - len(line.lstrip()) if line.strip() else base
+                          repaired.append((" " * base + line) if line.strip() and indent < base else line)
+                      lines = repaired
               result = "\\n".join(lines)
               return result + ("\\n" if trailing_newline else "")
 

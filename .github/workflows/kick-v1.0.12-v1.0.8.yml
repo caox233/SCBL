@@ -98,6 +98,22 @@ jobs:
           if count != 1:
               raise SystemExit(f'Unable to normalize refresh_game_session_snapshot, count={count}')
           control_path.write_text(control, encoding='utf-8')
+
+          test_path = Path('server/test_control_plane.py')
+          test_text = test_path.read_text(encoding='utf-8')
+          start_marker = '        assert b["requesterIsHost"] is True'
+          end_marker = '        assert unrelated["hostVirtualIp"] == ""'
+          start = test_text.index(start_marker)
+          end = test_text.index(end_marker, start) + len(end_marker)
+          assertions = '''        assert b["requesterIsHost"] is True
+              assert c["active"] is False
+              assert c["sessionId"] is None
+              assert c["participantCount"] == 0
+              assert c["requesterIsHost"] is False
+              assert "10.66.0.8" not in control_plane.authoritative_sessions_by_ip()
+              assert unrelated["active"] is False
+              assert unrelated["hostVirtualIp"] == ""'''
+          test_path.write_text(test_text[:start] + textwrap.dedent(assertions) + test_text[end:], encoding='utf-8')
           PY
 
       - name: Validate release source

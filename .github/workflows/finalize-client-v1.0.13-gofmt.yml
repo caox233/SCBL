@@ -27,7 +27,7 @@ jobs:
           cd client/scbl-process-router
           test -f go.mod
           gofmt -w main.go
-          go test .
+          GOOS=windows GOARCH=amd64 go test .
           GOOS=windows GOARCH=amd64 go build -mod=readonly -trimpath -o /tmp/scbl-process-router.exe .
           test -s /tmp/scbl-process-router.exe
       - name: Commit formatting result

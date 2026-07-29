@@ -1174,4 +1174,3 @@ func callIPHelperTable(procName string, tableClass int) ([]byte, error) {
 	}
 	return buf[:size], nil
 }
-

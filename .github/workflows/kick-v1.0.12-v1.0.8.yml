@@ -1,0 +1,76 @@
+name: Generate SCBL v1.0.12 release source
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - .github/scbl-v1.0.12-apply-trigger
+      - .github/workflows/kick-v1.0.12-v1.0.8.yml
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    if: >-
+      github.event.pull_request.head.repo.full_name == github.repository &&
+      github.event.pull_request.head.ref == 'agent/release-v1.0.12-v1.0.8-host-latency-ui'
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: agent/release-v1.0.12-v1.0.8-host-latency-ui
+          fetch-depth: 0
+
+      - name: Extract and apply reviewed patch
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+          import re, textwrap
+          source = Path('.github/workflows/apply-v1.0.12-v1.0.8.yml').read_text(encoding='utf-8')
+          match = re.search(r"python3 - <<'PY'\n(.*?)\n          PY", source, re.S)
+          if not match:
+              raise SystemExit('Unable to extract reviewed patch script')
+          script = textwrap.dedent(match.group(1))
+          exec(compile(script, 'apply-v1.0.12-v1.0.8.py', 'exec'), {})
+          PY
+
+      - name: Validate release source
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(tr -d '\r\n ' < VERSION_CLIENT)" = "1.0.12"
+          test "$(tr -d '\r\n ' < VERSION_SERVER_TOOL)" = "1.0.8"
+          grep -Fq 'routerVersion         = "1.0.12"' client/scbl-process-router/main.go
+          grep -Fq '本机房主 · 服务端延时' client/ScblPublicLauncher/MainWindow.xaml.cs
+          grep -Fq '与房主延时' client/ScblPublicLauncher/MainWindow.xaml.cs
+          grep -Fq 'Content="↻ 检测网络"' client/ScblPublicLauncher/MainWindow.xaml
+          ! grep -Fq '_HOST_SESSION_CACHE' server/scbl_control_plane.py
+          bash -n server/install_public_server.sh
+          bash -n server/scbl_server_diagnostics.sh
+          python3 -m py_compile server/scbl_control_plane.py server/test_control_plane.py server/test_client_network_resilience.py server/test_server_tool_runtime.py
+          python3 server/test_control_plane.py
+          python3 server/test_client_network_resilience.py
+          python3 server/test_server_tool_runtime.py
+          (
+            cd client/scbl-process-router
+            test -z "$(gofmt -l .)"
+            GOOS=windows GOARCH=amd64 go test ./...
+          )
+
+      - name: Commit clean source
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm -f \
+            .github/workflows/apply-v1.0.12-v1.0.8.yml \
+            .github/workflows/kick-v1.0.12-v1.0.8.yml \
+            .github/scbl-v1.0.12-apply-trigger
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add -A
+          git diff --cached --check
+          git commit -m 'Release client v1.0.12 and Server Tool v1.0.8'
+          git push origin HEAD:agent/release-v1.0.12-v1.0.8-host-latency-ui

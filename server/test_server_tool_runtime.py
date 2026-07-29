@@ -6,11 +6,14 @@ manager = Path("server/install_public_server.sh").read_text(encoding="utf-8")
 control = Path("server/scbl_control_plane.py").read_text(encoding="utf-8")
 release = Path(f"docs/releases/SERVER_TOOL_v{version}.md").read_text(encoding="utf-8")
 
-assert version == "1.0.7"
+assert version == "1.0.8"
 assert 'self.send_header("Connection", "close")' in control
 assert "self.close_connection = True" in control
 assert "_signed_health_probe" in control
 assert "_listener_watchdog_loop" in control
+assert "_HOST_SESSION_CACHE" not in control
+assert "requester_host_sessions_by_ip" not in control
+assert "session.participant_count < 2" in control
 assert "Restart=always" in manager
 assert "TasksMax=128" in manager
 assert "MemoryMax=256M" in manager

@@ -2673,78 +2673,82 @@ public partial class MainWindow : Window
     }
 
     private string FormatServerStatusText(ServerStatusKind kind)
+{
+    string normalText;
+    if (_gameLatencyActive)
     {
-        string serverLatency = _lastServerLatencyMs.HasValue
-            ? L($" 延迟:{_lastServerLatencyMs.Value}ms", $" Latency:{_lastServerLatencyMs.Value}ms")
-            : "";
-
-        string normalText;
-        if (_gameLatencyActive)
+        string descriptor = FormatPathDescriptor(_lastGameAddressFamily, _lastGameTransport, _lastGameHopCount);
+        string pathSuffix = string.IsNullOrWhiteSpace(descriptor) ? "" : $" · {descriptor}";
+        if (_localIsGameHost)
         {
-            if (_localIsGameHost)
-            {
-                normalText = L($"本机房主 · {_gameActivePeerCount}名玩家", $"Local host · {_gameActivePeerCount} player(s)");
-            }
-            else if (!string.IsNullOrWhiteSpace(_gamePeerIp))
-            {
-                normalText = _lastGameLatencyMs.HasValue
-                    ? L($"与房主连接 {_lastGameLatencyMs.Value}ms 延时", $"Host connection {_lastGameLatencyMs.Value}ms latency")
-                    : L("正在检测与房主连接延时", "Checking host connection latency");
-            }
-            else if (_gameActivePeerCount > 0)
-            {
-                normalText = L("正在识别房主路径", "Identifying host path");
-            }
-            else
-            {
-                normalText = L("游戏已启动 · 等待对局", "Game running · Waiting for session");
-            }
+            normalText = _lastGameLatencyMs.HasValue
+                ? L($"本机房主 · 服务端延时 {_lastGameLatencyMs.Value}ms{pathSuffix}", $"Local host · Server latency {_lastGameLatencyMs.Value}ms{pathSuffix}")
+                : L("本机房主 · 正在检测服务端延时", "Local host · Checking server latency");
+        }
+        else if (!string.IsNullOrWhiteSpace(_gamePeerIp))
+        {
+            normalText = _lastGameLatencyMs.HasValue
+                ? L($"与房主延时 {_lastGameLatencyMs.Value}ms{pathSuffix}", $"Host latency {_lastGameLatencyMs.Value}ms{pathSuffix}")
+                : L("正在检测与房主延时", "Checking host latency");
+        }
+        else if (_gameActivePeerCount > 0)
+        {
+            normalText = L("正在识别房主路径", "Identifying host path");
         }
         else
         {
-            string descriptor = FormatPathDescriptor(_lastConnectionAddressFamily, _lastConnectionTransport, null);
-            string suffix = string.IsNullOrWhiteSpace(descriptor) ? "" : IsEnglish ? $" ({descriptor})" : $"（{descriptor}）";
-            normalText = L("连接成功", "Connected") + serverLatency + suffix;
+            normalText = L("游戏已启动 · 等待房主信息", "Game running · Waiting for host information");
         }
-
-        return kind switch
-        {
-            ServerStatusKind.NetworkCreating => L("网络准备中", "Preparing network"),
-            ServerStatusKind.TunnelConnecting => L("网络连接中", "Connecting network"),
-            ServerStatusKind.ServerConnecting => L("服务连接中", "Connecting service"),
-            ServerStatusKind.TunnelReconnecting => L("网络重连中", "Reconnecting network"),
-            ServerStatusKind.Normal => normalText,
-            ServerStatusKind.NetworkFailed => L("网络创建失败", "Network creation failed"),
-            ServerStatusKind.TunnelFailed => L("网络连接失败", "Network connection failed"),
-            ServerStatusKind.ServerFailed => L("服务连接失败", "Service connection failed"),
-            _ => L("未检测", "Not checked")
-        };
     }
-
-    private string FormatPathDescriptor(string addressFamily, string transport, int? hopCount)
+    else
     {
-        string family = (addressFamily ?? "").Trim();
-        string mode = (transport ?? "").Trim();
-        bool relay = mode.Contains("多跳", StringComparison.OrdinalIgnoreCase)
-            || mode.Contains("relay", StringComparison.OrdinalIgnoreCase)
-            || (hopCount.HasValue && hopCount.Value > 1);
-
-        if (IsEnglish)
-        {
-            mode = mode
-                .Replace("多跳中继", "Relay", StringComparison.OrdinalIgnoreCase)
-                .Replace("多跳-", "Relay-", StringComparison.OrdinalIgnoreCase)
-                .Replace("UDP中继", "UDP Relay", StringComparison.OrdinalIgnoreCase);
-        }
-
-        if (string.IsNullOrWhiteSpace(family))
-            return mode;
-        if (string.IsNullOrWhiteSpace(mode))
-            return family;
-        if (relay)
-            return IsEnglish ? $"{family} first hop · {mode}" : $"{family}首跳·{mode}";
-        return $"{family}·{mode}";
+        string descriptor = FormatPathDescriptor(_lastConnectionAddressFamily, _lastConnectionTransport, null);
+        normalText = L("连接成功", "Connected");
+        if (_lastServerLatencyMs.HasValue)
+            normalText += L($" · 服务端延时 {_lastServerLatencyMs.Value}ms", $" · Server latency {_lastServerLatencyMs.Value}ms");
+        if (!string.IsNullOrWhiteSpace(descriptor))
+            normalText += $" · {descriptor}";
     }
+
+    return kind switch
+    {
+        ServerStatusKind.NetworkCreating => L("网络准备中", "Preparing network"),
+        ServerStatusKind.TunnelConnecting => L("网络连接中", "Connecting network"),
+        ServerStatusKind.ServerConnecting => L("服务连接中", "Connecting service"),
+        ServerStatusKind.TunnelReconnecting => L("网络重连中", "Reconnecting network"),
+        ServerStatusKind.Normal => normalText,
+        ServerStatusKind.NetworkFailed => L("网络创建失败", "Network creation failed"),
+        ServerStatusKind.TunnelFailed => L("网络连接失败", "Network connection failed"),
+        ServerStatusKind.ServerFailed => L("服务连接失败", "Service connection failed"),
+        _ => L("未检测", "Not checked")
+    };
+}
+
+private string FormatPathDescriptor(string addressFamily, string transport, int? hopCount)
+{
+    string family = (addressFamily ?? "").Trim();
+    string mode = (transport ?? "").Trim();
+    if (mode.Equals("udp", StringComparison.OrdinalIgnoreCase))
+        mode = "UDP";
+    else if (mode.Equals("tcp", StringComparison.OrdinalIgnoreCase))
+        mode = "TCP";
+    else if (mode.Equals("wss", StringComparison.OrdinalIgnoreCase))
+        mode = "WSS";
+
+    if (IsEnglish)
+    {
+        mode = mode
+            .Replace("多跳中继", "Relay", StringComparison.OrdinalIgnoreCase)
+            .Replace("多跳-", "Relay-", StringComparison.OrdinalIgnoreCase)
+            .Replace("UDP中继", "UDP Relay", StringComparison.OrdinalIgnoreCase);
+    }
+
+    if (string.IsNullOrWhiteSpace(family))
+        return mode;
+    if (string.IsNullOrWhiteSpace(mode))
+        return family;
+    return $"{family}/{mode}";
+}
 
     private void RefreshServerStatusTextFromKind()
     {
@@ -2839,8 +2843,8 @@ public partial class MainWindow : Window
         // Network check is independent from game state. It only enters cooldown after a manual click.
         btnCheckNetwork.IsEnabled = !_networkCheckButtonCoolingDown && !_isEndingGame;
         btnCheckNetwork.Content = _networkCheckButtonCoolingDown
-            ? L("请稍后...", "Please wait...")
-            : L("检测网络", "Check Network");
+            ? L("请稍后...", "Wait...")
+            : L("↻ 检测网络", "↻ Check");
     }
 
     private void UpdateLaunchButtonAvailability()
@@ -2852,211 +2856,246 @@ public partial class MainWindow : Window
 
 
     private void StartGameLatencyMonitor()
+{
+    if (_gameLatencyCts != null)
+        return;
+
+    _gameLatencyActive = true;
+    ResetGameQualityState();
+    _localIsGameHost = false;
+    _gamePeerIp = "";
+    _lastGameLatencyMs = null;
+    _lastGameTransport = "";
+    _lastGameAddressFamily = "";
+    _lastGameNextHop = "";
+    _lastGameHopCount = null;
+    _gameActivePeerCount = 0;
+    _gameRoleSource = "";
+    _gameHostUsername = "";
+    _gameSessionId = null;
+    RefreshServerStatusTextFromKind();
+    _gameLatencyCts = new CancellationTokenSource();
+    CancellationToken token = _gameLatencyCts.Token;
+    _ = Task.Run(async () =>
     {
-        if (_gameLatencyCts != null)
-            return;
+        int missingCycles = 0;
+        DateTime lastPathQueryUtc = DateTime.MinValue;
+        string cachedPeerIp = "";
+        EasyTierPeerPath? cachedPath = null;
 
-        _gameLatencyActive = true;
-        ResetGameQualityState();
-        _localIsGameHost = false;
-        _gamePeerIp = "";
-        _lastGameLatencyMs = null;
-        _lastGameTransport = "";
-        _lastGameAddressFamily = "";
-        _lastGameNextHop = "";
-        _lastGameHopCount = null;
-        _gameActivePeerCount = 0;
-        _gameRoleSource = "";
-        _gameHostUsername = "";
-        _gameSessionId = null;
-        RefreshServerStatusTextFromKind();
-        _gameLatencyCts = new CancellationTokenSource();
-        CancellationToken token = _gameLatencyCts.Token;
-        _ = Task.Run(async () =>
+        while (!token.IsCancellationRequested)
         {
-            int missingCycles = 0;
-            DateTime lastPathQueryUtc = DateTime.MinValue;
-            string cachedPeerIp = "";
-            EasyTierPeerPath? cachedPath = null;
-
-            while (!token.IsCancellationRequested)
+            try
             {
-                try
+                if (!_isGameStarting && !_isGameRunning)
+                    break;
+
+                string bindIp = _assignedIp;
+                ControlPlaneGameSession? authoritative = null;
+                if (PublicTunnelConfig.IsScblClientIp(bindIp))
                 {
-                    if (!_isGameStarting && !_isGameRunning)
-                        break;
+                    authoritative = await _controlPlaneService.GetGameSessionAsync(
+                        bindIp,
+                        GetControlPlaneSigningSecret(),
+                        token).ConfigureAwait(false);
+                }
 
-                    string bindIp = _assignedIp;
-                    ControlPlaneGameSession? authoritative = null;
-                    if (PublicTunnelConfig.IsScblClientIp(bindIp))
+                bool authorityActive = authoritative?.Authoritative == true && authoritative.Active;
+                bool localHost = authorityActive && authoritative!.RequesterIsHost;
+                string hostIp = authorityActive ? authoritative!.HostVirtualIp.Trim() : "";
+                string hostUsername = authorityActive ? authoritative!.HostUsername.Trim() : "";
+                int activePeers = authorityActive ? authoritative!.ParticipantCount : 0;
+                string roleSource = authorityActive ? "game-server" : "";
+
+                if (localHost)
+                {
+                    missingCycles = 0;
+                    const string targetIp = PublicServerAddress;
+                    if (!_gameQualityHostIp.Equals(targetIp, StringComparison.OrdinalIgnoreCase))
+                        ResetGameQualityState(targetIp);
+
+                    bool shouldQueryPath = !targetIp.Equals(cachedPeerIp, StringComparison.OrdinalIgnoreCase)
+                        || cachedPath == null
+                        || (DateTime.UtcNow - lastPathQueryUtc).TotalSeconds >= 3;
+                    if (shouldQueryPath)
                     {
-                        authoritative = await _controlPlaneService.GetGameSessionAsync(
-                            bindIp,
-                            GetControlPlaneSigningSecret(),
-                            token).ConfigureAwait(false);
+                        cachedPath = await _tunnelService.DetectPeerPathAsync(
+                            GetLauncherBaseDirectory(),
+                            targetIp,
+                            TimeSpan.FromMilliseconds(850)).ConfigureAwait(false);
+                        cachedPeerIp = targetIp;
+                        lastPathQueryUtc = DateTime.UtcNow;
                     }
 
-                    bool authorityActive = authoritative?.Authoritative == true && authoritative.Active;
-                    bool localHost = authorityActive && authoritative!.RequesterIsHost;
-                    string hostIp = authorityActive ? authoritative!.HostVirtualIp.Trim() : "";
-                    string hostUsername = authorityActive ? authoritative!.HostUsername.Trim() : "";
-                    int activePeers = authorityActive ? authoritative!.ParticipantCount : 0;
-                    string roleSource = authorityActive ? "game-server" : "";
+                    (bool probeOk, long? probeLatency) = await TryOpenTcpConnectionAsync(
+                        PublicServerAddress,
+                        50051,
+                        TimeSpan.FromMilliseconds(700),
+                        bindIp).ConfigureAwait(false);
+                    RecordGameQualitySample(probeOk, probeLatency);
 
-                    if (localHost)
+                    EasyTierPeerPath? path = cachedPath;
+                    long? currentLatency = probeLatency ?? path?.LatencyMs ?? _lastServerLatencyMs;
+                    await Dispatcher.InvokeAsync(() =>
                     {
-                        missingCycles = 0;
-                        ResetGameQualityState();
-                        await Dispatcher.InvokeAsync(() =>
-                        {
-                            bool changed = !_localIsGameHost
-                                || _gameActivePeerCount != activePeers
-                                || _gameSessionId != authoritative!.SessionId;
-                            _gameLatencyActive = true;
-                            _localIsGameHost = true;
-                            _gameActivePeerCount = activePeers;
-                            _gamePeerIp = "";
-                            _lastGameLatencyMs = null;
-                            _lastGameTransport = "";
-                            _lastGameAddressFamily = "";
-                            _lastGameNextHop = "";
-                            _lastGameHopCount = null;
-                            _gameRoleSource = roleSource;
-                            _gameHostUsername = hostUsername;
-                            _gameSessionId = authoritative!.SessionId;
-                            if (changed)
-                                LogService.Info($"Local game host confirmed by game server. session={_gameSessionId}, players={activePeers}.");
-                            WriteGameQualitySnapshot();
-                            RefreshServerStatusTextFromKind();
-                        });
-                    }
-                    else if (PublicTunnelConfig.IsScblClientIp(hostIp))
-                    {
-                        missingCycles = 0;
-                        if (!_gameQualityHostIp.Equals(hostIp, StringComparison.OrdinalIgnoreCase))
-                            ResetGameQualityState(hostIp);
+                        string nextTransport = !string.IsNullOrWhiteSpace(path?.TransportMode) ? path.TransportMode : "";
+                        string nextFamily = path?.UnderlayAddressFamily ?? "";
+                        bool routeChanged = !_localIsGameHost
+                            || !_lastGameTransport.Equals(nextTransport, StringComparison.OrdinalIgnoreCase)
+                            || !_lastGameAddressFamily.Equals(nextFamily, StringComparison.OrdinalIgnoreCase)
+                            || _lastGameNextHop != (path?.NextHop ?? "")
+                            || _lastGameHopCount != path?.HopCount
+                            || _gameSessionId != authoritative!.SessionId;
 
-                        bool shouldQueryPath = !hostIp.Equals(cachedPeerIp, StringComparison.OrdinalIgnoreCase)
-                            || cachedPath == null
-                            || (DateTime.UtcNow - lastPathQueryUtc).TotalSeconds >= 3;
-                        if (shouldQueryPath)
+                        _gameLatencyActive = true;
+                        _localIsGameHost = true;
+                        _gameActivePeerCount = activePeers;
+                        _gamePeerIp = "";
+                        _lastGameLatencyMs = currentLatency;
+                        _lastGameTransport = nextTransport;
+                        _lastGameAddressFamily = nextFamily;
+                        _lastGameNextHop = path?.NextHop ?? "";
+                        _lastGameHopCount = path?.HopCount;
+                        _gameRoleSource = roleSource;
+                        _gameHostUsername = hostUsername;
+                        _gameSessionId = authoritative!.SessionId;
+                        if (currentLatency.HasValue)
+                            _lastServerLatencyMs = currentLatency;
+                        if (routeChanged)
                         {
-                            cachedPath = await _tunnelService.DetectPeerPathAsync(
-                                GetLauncherBaseDirectory(),
-                                hostIp,
-                                TimeSpan.FromMilliseconds(850)).ConfigureAwait(false);
-                            cachedPeerIp = hostIp;
-                            lastPathQueryUtc = DateTime.UtcNow;
+                            LogService.Info($"Local host server path updated: source={roleSource}, session={_gameSessionId}, server={targetIp}, transport={_lastGameTransport}, underlay={_lastGameAddressFamily}, latency={_lastGameLatencyMs?.ToString() ?? "n/a"}ms, nextHop={_lastGameNextHop}, hops={_lastGameHopCount?.ToString() ?? "n/a"}.");
                         }
+                        WriteGameQualitySnapshot();
+                        RefreshServerStatusTextFromKind();
+                    });
+                }
+                else if (PublicTunnelConfig.IsScblClientIp(hostIp))
+                {
+                    missingCycles = 0;
+                    if (!_gameQualityHostIp.Equals(hostIp, StringComparison.OrdinalIgnoreCase))
+                        ResetGameQualityState(hostIp);
 
-                        string probeUsername = await Dispatcher.InvokeAsync(() => GetCurrentPeerUsername());
-                        _peerProbeService.StartOrUpdate(probeUsername, bindIp, LauncherVersion);
-                        (bool probeOk, long? probeLatency) = await PeerProbeService.ProbeLatencyAsync(
+                    bool shouldQueryPath = !hostIp.Equals(cachedPeerIp, StringComparison.OrdinalIgnoreCase)
+                        || cachedPath == null
+                        || (DateTime.UtcNow - lastPathQueryUtc).TotalSeconds >= 3;
+                    if (shouldQueryPath)
+                    {
+                        cachedPath = await _tunnelService.DetectPeerPathAsync(
+                            GetLauncherBaseDirectory(),
                             hostIp,
-                            TimeSpan.FromMilliseconds(700),
-                            token).ConfigureAwait(false);
-                        RecordGameQualitySample(probeOk, probeLatency);
-
-                        EasyTierPeerPath? path = cachedPath;
-                        long? registryLatency = _lastPeers
-                            .FirstOrDefault(p => p.VirtualIp.Equals(hostIp, StringComparison.OrdinalIgnoreCase))
-                            ?.LatencyMs;
-                        long? currentLatency = probeLatency ?? path?.LatencyMs ?? registryLatency;
-
-                        await Dispatcher.InvokeAsync(() =>
-                        {
-                            string nextTransport = !string.IsNullOrWhiteSpace(path?.TransportMode) ? path.TransportMode : "";
-                            string nextFamily = path?.UnderlayAddressFamily ?? "";
-                            bool routeChanged = !_gamePeerIp.Equals(hostIp, StringComparison.OrdinalIgnoreCase)
-                                || _localIsGameHost
-                                || !_lastGameTransport.Equals(nextTransport, StringComparison.OrdinalIgnoreCase)
-                                || !_lastGameAddressFamily.Equals(nextFamily, StringComparison.OrdinalIgnoreCase)
-                                || _lastGameNextHop != (path?.NextHop ?? "")
-                                || _lastGameHopCount != path?.HopCount
-                                || _gameSessionId != authoritative?.SessionId;
-
-                            _gameLatencyActive = true;
-                            _localIsGameHost = false;
-                            _gameActivePeerCount = activePeers;
-                            _gamePeerIp = hostIp;
-                            _lastGameLatencyMs = currentLatency;
-                            _lastGameTransport = nextTransport;
-                            _lastGameAddressFamily = nextFamily;
-                            _lastGameNextHop = path?.NextHop ?? "";
-                            _lastGameHopCount = path?.HopCount;
-                            _gameRoleSource = roleSource;
-                            _gameHostUsername = hostUsername;
-                            _gameSessionId = authoritative?.SessionId;
-                            if (routeChanged)
-                            {
-                                LogService.Info($"Game host path updated: source={roleSource}, session={_gameSessionId?.ToString() ?? "n/a"}, host={hostUsername}, peer={hostIp}, players={activePeers}, transport={_lastGameTransport}, underlay={_lastGameAddressFamily}, latency={_lastGameLatencyMs?.ToString() ?? "n/a"}ms, p50={_gameLatencyP50Ms?.ToString() ?? "n/a"}, p95={_gameLatencyP95Ms?.ToString() ?? "n/a"}, jitter={_gameJitterMs?.ToString() ?? "n/a"}, loss={_gameLossPercent?.ToString("0.0") ?? "n/a"}%, nextHop={_lastGameNextHop}, hops={_lastGameHopCount?.ToString() ?? "n/a"}.");
-                            }
-                            WriteGameQualitySnapshot();
-                            RefreshServerStatusTextFromKind();
-                        });
+                            TimeSpan.FromMilliseconds(850)).ConfigureAwait(false);
+                        cachedPeerIp = hostIp;
+                        lastPathQueryUtc = DateTime.UtcNow;
                     }
-                    else if (activePeers > 0)
+
+                    string probeUsername = await Dispatcher.InvokeAsync(() => GetCurrentPeerUsername());
+                    _peerProbeService.StartOrUpdate(probeUsername, bindIp, LauncherVersion);
+                    (bool probeOk, long? probeLatency) = await PeerProbeService.ProbeLatencyAsync(
+                        hostIp,
+                        TimeSpan.FromMilliseconds(700),
+                        token).ConfigureAwait(false);
+                    RecordGameQualitySample(probeOk, probeLatency);
+
+                    EasyTierPeerPath? path = cachedPath;
+                    long? registryLatency = _lastPeers
+                        .FirstOrDefault(p => p.VirtualIp.Equals(hostIp, StringComparison.OrdinalIgnoreCase))
+                        ?.LatencyMs;
+                    long? currentLatency = probeLatency ?? path?.LatencyMs ?? registryLatency;
+
+                    await Dispatcher.InvokeAsync(() =>
                     {
-                        missingCycles = 0;
-                        await Dispatcher.InvokeAsync(() =>
-                        {
-                            _gameLatencyActive = true;
-                            _localIsGameHost = false;
-                            _gameActivePeerCount = activePeers;
-                            _gamePeerIp = "";
-                            _lastGameLatencyMs = null;
-                            _lastGameTransport = "";
-                            _lastGameAddressFamily = "";
-                            _lastGameNextHop = "";
-                            _lastGameHopCount = null;
-                            _gameRoleSource = roleSource;
-                            _gameHostUsername = hostUsername;
-                            _gameSessionId = authoritative?.SessionId;
-                            WriteGameQualitySnapshot();
-                            RefreshServerStatusTextFromKind();
-                        });
-                    }
-                    else if (++missingCycles >= 2)
-                    {
-                        await Dispatcher.InvokeAsync(() =>
-                        {
-                            _gameLatencyActive = true;
-                            _localIsGameHost = false;
-                            _gameActivePeerCount = 0;
-                            _gamePeerIp = "";
-                            _lastGameLatencyMs = null;
-                            _lastGameTransport = "";
-                            _lastGameAddressFamily = "";
-                            _lastGameNextHop = "";
-                            _lastGameHopCount = null;
-                            _gameRoleSource = authorityActive ? "game-server" : "";
-                            _gameHostUsername = "";
-                            _gameSessionId = null;
-                            WriteGameQualitySnapshot();
-                            RefreshServerStatusTextFromKind();
-                        });
-                    }
-                }
-                catch (OperationCanceledException)
-                {
-                    break;
-                }
-                catch (Exception ex)
-                {
-                    LogService.Info("Game path monitor skipped one cycle: " + ex.Message);
-                }
+                        string nextTransport = !string.IsNullOrWhiteSpace(path?.TransportMode) ? path.TransportMode : "";
+                        string nextFamily = path?.UnderlayAddressFamily ?? "";
+                        bool routeChanged = !_gamePeerIp.Equals(hostIp, StringComparison.OrdinalIgnoreCase)
+                            || _localIsGameHost
+                            || !_lastGameTransport.Equals(nextTransport, StringComparison.OrdinalIgnoreCase)
+                            || !_lastGameAddressFamily.Equals(nextFamily, StringComparison.OrdinalIgnoreCase)
+                            || _lastGameNextHop != (path?.NextHop ?? "")
+                            || _lastGameHopCount != path?.HopCount
+                            || _gameSessionId != authoritative?.SessionId;
 
-                try
-                {
-                    await Task.Delay(TimeSpan.FromSeconds(2), token).ConfigureAwait(false);
+                        _gameLatencyActive = true;
+                        _localIsGameHost = false;
+                        _gameActivePeerCount = activePeers;
+                        _gamePeerIp = hostIp;
+                        _lastGameLatencyMs = currentLatency;
+                        _lastGameTransport = nextTransport;
+                        _lastGameAddressFamily = nextFamily;
+                        _lastGameNextHop = path?.NextHop ?? "";
+                        _lastGameHopCount = path?.HopCount;
+                        _gameRoleSource = roleSource;
+                        _gameHostUsername = hostUsername;
+                        _gameSessionId = authoritative?.SessionId;
+                        if (routeChanged)
+                        {
+                            LogService.Info($"Game host path updated: source={roleSource}, session={_gameSessionId?.ToString() ?? "n/a"}, host={hostUsername}, peer={hostIp}, players={activePeers}, transport={_lastGameTransport}, underlay={_lastGameAddressFamily}, latency={_lastGameLatencyMs?.ToString() ?? "n/a"}ms, p50={_gameLatencyP50Ms?.ToString() ?? "n/a"}, p95={_gameLatencyP95Ms?.ToString() ?? "n/a"}, jitter={_gameJitterMs?.ToString() ?? "n/a"}, loss={_gameLossPercent?.ToString("0.0") ?? "n/a"}%, nextHop={_lastGameNextHop}, hops={_lastGameHopCount?.ToString() ?? "n/a"}.");
+                        }
+                        WriteGameQualitySnapshot();
+                        RefreshServerStatusTextFromKind();
+                    });
                 }
-                catch (OperationCanceledException)
+                else if (activePeers > 0)
                 {
-                    break;
+                    missingCycles = 0;
+                    await Dispatcher.InvokeAsync(() =>
+                    {
+                        _gameLatencyActive = true;
+                        _localIsGameHost = false;
+                        _gameActivePeerCount = activePeers;
+                        _gamePeerIp = "";
+                        _lastGameLatencyMs = null;
+                        _lastGameTransport = "";
+                        _lastGameAddressFamily = "";
+                        _lastGameNextHop = "";
+                        _lastGameHopCount = null;
+                        _gameRoleSource = roleSource;
+                        _gameHostUsername = hostUsername;
+                        _gameSessionId = authoritative?.SessionId;
+                        WriteGameQualitySnapshot();
+                        RefreshServerStatusTextFromKind();
+                    });
+                }
+                else if (++missingCycles >= 2)
+                {
+                    await Dispatcher.InvokeAsync(() =>
+                    {
+                        _gameLatencyActive = true;
+                        _localIsGameHost = false;
+                        _gameActivePeerCount = 0;
+                        _gamePeerIp = "";
+                        _lastGameLatencyMs = null;
+                        _lastGameTransport = "";
+                        _lastGameAddressFamily = "";
+                        _lastGameNextHop = "";
+                        _lastGameHopCount = null;
+                        _gameRoleSource = authorityActive ? "game-server" : "";
+                        _gameHostUsername = "";
+                        _gameSessionId = null;
+                        WriteGameQualitySnapshot();
+                        RefreshServerStatusTextFromKind();
+                    });
                 }
             }
-        }, token);
-    }
+            catch (OperationCanceledException)
+            {
+                break;
+            }
+            catch (Exception ex)
+            {
+                LogService.Info("Game path monitor skipped one cycle: " + ex.Message);
+            }
+
+            try
+            {
+                await Task.Delay(TimeSpan.FromSeconds(2), token).ConfigureAwait(false);
+            }
+            catch (OperationCanceledException)
+            {
+                break;
+            }
+        }
+    }, token);
+}
 
     private void ResetGameQualityState(string hostIp = "")
     {

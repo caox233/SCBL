@@ -629,58 +629,67 @@
                 </Grid>
 
                 <Border x:Name="bdStatusPanel" Background="{StaticResource CardLightBrush}"
-                        BorderBrush="#243850"
+                BorderBrush="#243850"
+                BorderThickness="1"
+                CornerRadius="14"
+                Padding="12"
+                Margin="0,0,0,15">
+            <Grid>
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="Auto"/>
+                    <ColumnDefinition Width="*"/>
+                </Grid.ColumnDefinitions>
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="Auto"/>
+                    <RowDefinition Height="Auto"/>
+                </Grid.RowDefinitions>
+
+                <Border Grid.Column="0"
+                        Grid.RowSpan="2"
+                        Width="24"
+                        Height="24"
+                        Background="#0B141D"
+                        BorderBrush="#334961"
                         BorderThickness="1"
-                        CornerRadius="14"
-                        Padding="12"
-                        Margin="0,0,0,15">
-                    <Grid>
-                        <Grid.ColumnDefinitions>
-                            <ColumnDefinition Width="Auto"/>
-                            <ColumnDefinition Width="*"/>
-                            <ColumnDefinition Width="Auto"/>
-                        </Grid.ColumnDefinitions>
-
-                        <Border Grid.Column="0"
-                                Width="24"
-                                Height="24"
-                                Background="#0B141D"
-                                BorderBrush="#334961"
-                                BorderThickness="1"
-                                CornerRadius="12"
-                                Margin="0,0,10,0">
-                            <Ellipse x:Name="serverStatusLight"
-                                     Width="10"
-                                     Height="10"
-                                     Fill="Gray"
-                                     HorizontalAlignment="Center"
-                                     VerticalAlignment="Center"/>
-                        </Border>
-
-                        <StackPanel Grid.Column="1"
-                                    VerticalAlignment="Center">
-                            <TextBlock x:Name="txtConnectionStatusCaption" Text="连接状态"
-                                       Foreground="{StaticResource TextMutedBrush}"
-                                       FontSize="10"
-                                       Margin="0,0,0,1"/>
-                            <TextBlock x:Name="txtServerStatus"
-                                       Text="未检测"
-                                       Foreground="#D7E6F7"
-                                       FontSize="13"
-                                       FontWeight="SemiBold"
-                                       TextTrimming="CharacterEllipsis"/>
-                        </StackPanel>
-
-                        <Button Grid.Column="2"
-                                x:Name="btnCheckNetwork"
-                                MinWidth="86"
-                                Content="检测网络"
-                                Style="{StaticResource SmallButton}"
-                                Click="CheckNetworkButton_Click"
-                                Margin="12,0,0,0"/>
-
-                    </Grid>
+                        CornerRadius="12"
+                        Margin="0,0,10,0"
+                        VerticalAlignment="Center">
+                    <Ellipse x:Name="serverStatusLight"
+                             Width="10"
+                             Height="10"
+                             Fill="Gray"
+                             HorizontalAlignment="Center"
+                             VerticalAlignment="Center"/>
                 </Border>
+
+                <Grid Grid.Column="1" Grid.Row="0">
+                    <TextBlock x:Name="txtConnectionStatusCaption" Text="连接状态"
+                               Foreground="{StaticResource TextMutedBrush}"
+                               FontSize="10"
+                               VerticalAlignment="Center"/>
+                    <Button x:Name="btnCheckNetwork"
+                            HorizontalAlignment="Right"
+                            MinWidth="74"
+                            Height="27"
+                            Padding="9,0"
+                            Content="↻ 检测网络"
+                            Style="{StaticResource SmallButton}"
+                            Click="CheckNetworkButton_Click"
+                            Margin="8,0,0,0"/>
+                </Grid>
+
+                <TextBlock x:Name="txtServerStatus"
+                           Grid.Column="1"
+                           Grid.Row="1"
+                           Text="未检测"
+                           Foreground="#D7E6F7"
+                           FontSize="13"
+                           FontWeight="SemiBold"
+                           Margin="0,2,0,0"
+                           TextWrapping="NoWrap"
+                           TextTrimming="CharacterEllipsis"/>
+            </Grid>
+        </Border>
 
                 <TextBlock x:Name="txtLaunchModeLabel" Text="启动模式" Style="{StaticResource FieldLabel}"/>
                 <ListBox x:Name="cmbGameExecutable"

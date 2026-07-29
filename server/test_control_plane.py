@@ -54,7 +54,7 @@ def main() -> None:
                     VALUES (40, 1, 1003, '', NULL);
                 INSERT INTO participants(game_id, user_id) VALUES (40, 1003);
 
-                -- A solo room for C must be visible only to its own host query.
+                -- A solo lobby/personal session for C must not be treated as a room.
                 INSERT INTO game_sessions(id, type_id, creator_id, attributes, destroyed_at)
                     VALUES (42, 1, 1008, '', NULL);
                 INSERT INTO participants(game_id, user_id) VALUES (42, 1008);
@@ -95,10 +95,10 @@ def main() -> None:
         assert a["participantCount"] == 2
         assert a["requesterIsHost"] is False
         assert b["requesterIsHost"] is True
-        assert c["active"] is True
-        assert c["sessionId"] == 42
-        assert c["participantCount"] == 1
-        assert c["requesterIsHost"] is True
+        assert c["active"] is False
+        assert c["sessionId"] is None
+        assert c["participantCount"] == 0
+        assert c["requesterIsHost"] is False
         assert "10.66.0.8" not in control_plane.authoritative_sessions_by_ip()
         assert unrelated["active"] is False
         assert unrelated["hostVirtualIp"] == ""
@@ -182,7 +182,7 @@ def main() -> None:
             server.server_close()
             thread.join(timeout=1.0)
 
-        print("control-plane authoritative snapshot and HTTP lifecycle tests passed")
+        print("control-plane multiplayer evidence and HTTP lifecycle tests passed")
 
 
 if __name__ == "__main__":

@@ -201,7 +201,6 @@ class AuthoritativeGameSession:
 _OVERLAY_IP_REGEX = re.compile(r"(?<![0-9])10\.66\.0\.(?:[2-9]|[1-9][0-9]|1[0-9]{2}|2[0-4][0-9]|25[0-4])(?![0-9])")
 _SESSION_LOCK = threading.RLock()
 _SESSION_CACHE: dict[str, AuthoritativeGameSession] = {}
-_HOST_SESSION_CACHE: dict[str, AuthoritativeGameSession] = {}
 _SESSION_SNAPSHOT_AT_MS = 0
 _SESSION_SNAPSHOT_ERROR = ""
 _HEALTH_LOCK = threading.RLock()
@@ -214,9 +213,9 @@ def extract_overlay_ips(value: str) -> list[str]:
     return [ip for ip in dict.fromkeys(_OVERLAY_IP_REGEX.findall(value or "")) if is_client_overlay_ip(ip)]
 
 
-def _load_authoritative_sessions() -> tuple[dict[str, AuthoritativeGameSession], dict[str, AuthoritativeGameSession]]:
+def _load_authoritative_sessions() -> dict[str, AuthoritativeGameSession]:
     if not DB_PATH.exists():
-        return {}, {}
+        return {}
     with sqlite3.connect(f"file:{DB_PATH}?mode=ro", uri=True, timeout=0.35) as conn:
         conn.execute("PRAGMA query_only=ON")
         conn.execute("PRAGMA busy_timeout=350")
@@ -251,7 +250,6 @@ def _load_authoritative_sessions() -> tuple[dict[str, AuthoritativeGameSession],
         user_ips.setdefault((sid, uid), set()).update(extract_overlay_ips(str(url or "")))
 
     result: dict[str, AuthoritativeGameSession] = {}
-    host_result: dict[str, AuthoritativeGameSession] = {}
     for session in sessions.values():
         session.participant_count = len(session.participant_user_ids)
         for user_id in session.participant_user_ids:
@@ -260,40 +258,30 @@ def _load_authoritative_sessions() -> tuple[dict[str, AuthoritativeGameSession],
             if user_id == session.host_user_id and ips and not session.host_virtual_ip:
                 session.host_virtual_ip = sorted(ips, key=lambda x: int(x.rsplit(".", 1)[-1]))[0]
 
-        if not session.host_virtual_ip:
-            continue
-        current_host = host_result.get(session.host_virtual_ip)
-        if current_host is None or session.score() > current_host.score():
-            host_result[session.host_virtual_ip] = session
-
-        # A one-person or one-IP record is not enough evidence to decorate the
-        # global multiplayer topology. Solo sessions remain available only to
-        # their own host through /v1/game-session.
-        if session.participant_count < 2 or len(session.participant_ips) < 2:
+                # A one-person or one-IP record can be the ordinary online lobby's
+        # personal session. It is not enough evidence to declare a playable room.
+        if not session.host_virtual_ip or session.participant_count < 2 or len(session.participant_ips) < 2:
             continue
         for ip in session.participant_ips:
             current = result.get(ip)
             if current is None or session.score() > current.score():
                 result[ip] = session
-    return result, host_result
+    return result
 
 
 def refresh_game_session_snapshot() -> bool:
-    global _SESSION_CACHE, _HOST_SESSION_CACHE, _SESSION_SNAPSHOT_AT_MS, _SESSION_SNAPSHOT_ERROR
+    global _SESSION_CACHE, _SESSION_SNAPSHOT_AT_MS, _SESSION_SNAPSHOT_ERROR
     try:
-        snapshot, host_snapshot = _load_authoritative_sessions()
+        snapshot = _load_authoritative_sessions()
     except Exception as exc:
         with _SESSION_LOCK:
             _SESSION_SNAPSHOT_ERROR = clean_text(exc, 256)
         return False
     with _SESSION_LOCK:
         _SESSION_CACHE = snapshot
-        _HOST_SESSION_CACHE = host_snapshot
         _SESSION_SNAPSHOT_AT_MS = utc_ms()
         _SESSION_SNAPSHOT_ERROR = ""
     return True
-
-
 def _session_refresh_loop() -> None:
     while True:
         refresh_game_session_snapshot()
@@ -305,11 +293,6 @@ def authoritative_sessions_by_ip() -> dict[str, AuthoritativeGameSession]:
         return dict(_SESSION_CACHE)
 
 
-def requester_host_sessions_by_ip() -> dict[str, AuthoritativeGameSession]:
-    with _SESSION_LOCK:
-        return dict(_HOST_SESSION_CACHE)
-
-
 def session_snapshot_metadata() -> tuple[int | None, str]:
     with _SESSION_LOCK:
         age = utc_ms() - _SESSION_SNAPSHOT_AT_MS if _SESSION_SNAPSHOT_AT_MS else None
@@ -318,8 +301,6 @@ def session_snapshot_metadata() -> tuple[int | None, str]:
 
 def game_session_payload(source_ip: str) -> dict[str, Any]:
     session = authoritative_sessions_by_ip().get(source_ip)
-    if session is None:
-        session = requester_host_sessions_by_ip().get(source_ip)
     snapshot_age, snapshot_error = session_snapshot_metadata()
     if session is None:
         return {

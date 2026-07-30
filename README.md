@@ -2,17 +2,17 @@
 
 SCBL 是面向《细胞分裂：黑名单》社区联机环境的自建客户端、Linux 服务端部署和客户端更新管理项目。
 
-> 当前 Windows 客户端：**v1.0.13**<br>
-> 当前 Linux 服务端工具：**v1.0.8**
+> 当前 Windows 客户端：**v1.0.14**<br>
+> 当前 Linux 服务端工具：**v1.0.9**
 
 ## 快速开始
 
 ### Windows 客户端
 
-前往仓库的 Releases 页面，下载标题为 **[CLIENT] Windows Client v1.0.13** 的版本：
+前往仓库的 Releases 页面，下载标题为 **[CLIENT] Windows Client v1.0.14** 的版本：
 
 ```text
-SCBL-Client-v1.0.13-win-x86.zip
+SCBL-Client-v1.0.14-win-x86.zip
 ```
 
 解压后运行 `SplinterCellCNLauncher.exe`。启动器会先确认服务器当前正式版本；版本不一致时必须更新或退出。
@@ -52,11 +52,13 @@ updater       SCBL.Updater.exe
 
 Hooks 在游戏启动前部署。Route Guard、EasyTier 和 Updater 先下载到版本化缓存，并在下一次相同更新通道启动、网络和游戏尚未运行时原子应用。切换回 `stable` 时不会使用 `test` 通道缓存。
 
-`test` 通道用于确定二进制的实机验证：
+普通启动默认使用正式 `stable` 通道。需要测试确定二进制时，在正式版快捷方式的“目标”末尾增加 `--test`：
 
-```powershell
-SplinterCellCNLauncher.exe --update-channel test
+```text
+"D:\SCBL\SplinterCellCNLauncher.exe" --test
 ```
+
+`--test` 等价于 `--update-channel test`，参数会在 UAC 提权重启后保留。关闭测试版启动器，再用不带参数的原快捷方式启动，即恢复正式通道。
 
 `stable` 外置组件替换在组件清单签名验证完成前保持关闭；正式客户端继续使用完整包自带、经过 SHA256 校验的 bootstrap 组件。
 

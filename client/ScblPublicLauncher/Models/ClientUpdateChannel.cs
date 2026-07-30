@@ -21,6 +21,7 @@ public sealed record ClientUpdateChannelSelection(
 public static class ClientUpdateChannelParser
 {
     private const string OptionName = "--update-channel";
+    private const string TestAlias = "--test";
 
     public static ClientUpdateChannelSelection Parse(IEnumerable<string>? args)
     {
@@ -31,6 +32,12 @@ public static class ClientUpdateChannelParser
         for (int index = 0; index < values.Length; index++)
         {
             string argument = values[index] ?? "";
+            if (argument.Equals(TestAlias, StringComparison.OrdinalIgnoreCase))
+            {
+                requestedValues.Add("test");
+                continue;
+            }
+
             if (argument.Equals(OptionName, StringComparison.OrdinalIgnoreCase))
             {
                 if (index + 1 >= values.Length || values[index + 1].StartsWith("--", StringComparison.Ordinal))
@@ -64,7 +71,7 @@ public static class ClientUpdateChannelParser
             return new ClientUpdateChannelSelection(
                 ClientUpdateChannel.Stable,
                 true,
-                "Conflicting --update-channel values; falling back to stable.");
+                "Conflicting update-channel values; falling back to stable.");
         }
 
         return normalized[0] switch

@@ -44,10 +44,11 @@ jobs:
           set -euo pipefail
           client_version="$(tr -d '\r\n ' < VERSION_CLIENT)"
           server_version="$(tr -d '\r\n ' < VERSION_SERVER_TOOL)"
+          router_version="$(sed -n 's/.*routerVersion[[:space:]]*=[[:space:]]*"\([0-9][0-9.]*\)".*/\1/p' client/scbl-process-router/main.go | head -n1)"
           [[ "$client_version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]
           [[ "$server_version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]
+          [[ "$router_version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]
           grep -Fq 'VERSION_CLIENT' client/SCBL.Version.props
-          grep -Fq "routerVersion         = \"${client_version}\"" client/scbl-process-router/main.go
           grep -Fq 'read_server_tool_version' server/install_public_server.sh
           grep -Fq 'SCBLControlPlane/{SERVER_TOOL_VERSION}' server/scbl_control_plane.py
           grep -Fq "Windows 客户端：**v${client_version}**" README.md

@@ -5,7 +5,6 @@ on:
     paths:
       - "client/scbl-process-router/**"
       - "client/WINDIVERT_NOTICE.txt"
-      - "VERSION_CLIENT"
       - ".github/workflows/route-guard-component.yml"
   push:
     branches:
@@ -13,7 +12,6 @@ on:
     paths:
       - "client/scbl-process-router/**"
       - "client/WINDIVERT_NOTICE.txt"
-      - "VERSION_CLIENT"
       - ".github/workflows/route-guard-component.yml"
   workflow_dispatch:
 
@@ -54,7 +52,12 @@ jobs:
           $hash = (Get-FileHash "$out/route-guard.zip" -Algorithm SHA256).Hash.ToLowerInvariant()
           "$hash  route-guard.zip" | Set-Content "$out/route-guard.zip.sha256" -Encoding ASCII
           "${{ github.event.pull_request.head.sha || github.sha }}" | Set-Content "$out/commit_sha.txt" -Encoding ASCII
-          $version = (Get-Content VERSION_CLIENT -Raw).Trim() + ".${{ github.run_number }}"
+
+          $source = Get-Content client/scbl-process-router/main.go -Raw
+          $match = [regex]::Match($source, 'routerVersion\s*=\s*"(?<version>[0-9]+\.[0-9]+\.[0-9]+)"')
+          if (!$match.Success) { throw "Route Guard semantic version was not found in main.go" }
+          $routerVersion = $match.Groups['version'].Value
+          $version = $routerVersion + ".${{ github.run_number }}"
           [ordered]@{
             schemaVersion = 2
             component = "route-guard"

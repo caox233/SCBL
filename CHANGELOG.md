@@ -1,5 +1,16 @@
 # 更新记录
 
+## Windows Client v1.0.14 / Server Tool v1.0.9
+
+- 客户端统一核对 Hooks、Route Guard、EasyTier 和 Updater，只有缺失、大小不符或 SHA256 不一致的组件才会下载。
+- Hooks 从 Launcher 内嵌资源移出；正式完整包改为携带独立校验的 bootstrap Hooks，Hooks 更新不再触发 Launcher 重编。
+- 新增 `--test` 快捷参数；在正式版快捷方式目标末尾添加该参数即可进入测试组件通道，普通启动仍默认 stable。
+- Route Guard、EasyTier 和 Updater 使用版本化缓存，并在下一次同通道启动、相关进程未运行时原子应用和回滚。
+- 客户端、Updater、Route Guard、EasyTier、Hooks 和 dedicated server 采用独立构建流水线；正式完整包只组装已验证产物。
+- Server Tool 组件仓库扩展为四类客户端组件，支持不可变 test 发布、同二进制 stable 提升、历史回滚和完整 SHA256 校验。
+- Route Guard 源码未发生功能变化，继续保留独立版本 v1.0.13；其组件构建不再由客户端版本号变化触发。
+- stable 外置组件在签名清单验证完成前仍保持关闭；本版本不修改数据库、EasyTier 拓扑或 Route Guard 数据包策略。
+
 ## Windows Client v1.0.12 / Server Tool v1.0.8
 
 - 房主状态栏改为延时与实际 EasyTier 底层线路展示，不再显示没有诊断价值的玩家数量。

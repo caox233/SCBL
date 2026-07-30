@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+import re
 from pathlib import Path
 
 version = Path("VERSION_CLIENT").read_text(encoding="utf-8").strip()
@@ -10,7 +11,7 @@ probe = Path("client/ScblPublicLauncher/Services/PeerProbeService.cs").read_text
 diagnostic = Path("client/ScblPublicLauncher/Services/DiagnosticExportService.cs").read_text(encoding="utf-8")
 xaml = Path("client/ScblPublicLauncher/MainWindow.xaml").read_text(encoding="utf-8")
 
-assert version == "1.0.13"
+assert re.fullmatch(r"[0-9]+\.[0-9]+\.[0-9]+", version)
 assert "private const int MaxAttempts = 2;" in control
 assert '"heartbeat"' in control and '"peers"' in control and '"game-session"' in control
 assert "InvalidateClient(localBindIp, channel, client)" in control

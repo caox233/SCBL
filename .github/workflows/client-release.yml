@@ -60,7 +60,7 @@ jobs:
     needs: metadata
     if: needs.metadata.outputs.skip != 'true'
     runs-on: windows-2022
-    timeout-minutes: 35
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-dotnet@v4
@@ -69,7 +69,7 @@ jobs:
         with:
           go-version: 1.23.2
           cache: true
-          cache-dependency-path: client/scbl-process-router/go.sum
+          cache-dependency-path: client/scbl-process-router/go.mod
       - uses: actions/cache@v4
         with:
           path: ~/.nuget/packages
@@ -83,19 +83,25 @@ jobs:
             client/scbl-process-router/WinDivert.dll
             client/scbl-process-router/WinDivert64.sys
           key: client-runtime-${{ runner.os }}-${{ hashFiles('client/easytier/download_easytier_windows.ps1', 'client/scbl-process-router/download_windivert.ps1') }}
-      - uses: actions/cache@v4
-        with:
-          path: client/ScblPublicLauncher/EmbeddedFiles/uplay_r1_loader.dll
-          key: hooks-win-x86-${{ hashFiles('client/ScblPublicLauncher/EmbeddedFiles/SCBL_EMBEDDED_SHA256.txt') }}
       - name: Build client v${{ needs.metadata.outputs.version }}
         shell: powershell
         run: |
           $ErrorActionPreference = 'Stop'
-          .\client\build_all_windows.ps1 -Fast -Package -OutputDir "$env:GITHUB_WORKSPACE\dist"
+          .\client\build_all_windows.ps1 -Fast -Package -GitHubToken '${{ github.token }}' -OutputDir "$env:GITHUB_WORKSPACE\dist"
           $version = '${{ needs.metadata.outputs.version }}'
           $zip = Get-Item ".\dist\SCBL-Client-v$version-win-x86.zip"
           $hash = (Get-FileHash $zip.FullName -Algorithm SHA256).Hash.ToLowerInvariant()
           "$hash  $($zip.Name)" | Set-Content -Encoding ascii "$($zip.FullName).sha256"
+
+          $bootstrap = '.\client\ScblPublicLauncher\publish-single\bootstrap-components\hooks\uplay_r1_loader.dll'
+          $bootstrapSidecar = "$bootstrap.sha256"
+          foreach ($required in @($bootstrap, $bootstrapSidecar)) {
+            if (!(Test-Path -LiteralPath $required)) { throw "Bootstrap Hooks asset missing: $required" }
+          }
+          $bootstrapHash = (Get-FileHash -LiteralPath $bootstrap -Algorithm SHA256).Hash.ToLowerInvariant()
+          $sidecarHash = ((Get-Content -LiteralPath $bootstrapSidecar -Raw -Encoding ASCII).Trim() -split '\s+')[0].ToLowerInvariant()
+          if ($bootstrapHash -ne $sidecarHash) { throw "Bootstrap Hooks checksum mismatch: actual=$bootstrapHash sidecar=$sidecarHash" }
+          "BOOTSTRAP_HOOKS_SHA256=$bootstrapHash" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
       - uses: actions/upload-artifact@v4
         with:
           name: scbl-client-release

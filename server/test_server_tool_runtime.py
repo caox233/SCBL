@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+import re
 from pathlib import Path
 
 version = Path("VERSION_SERVER_TOOL").read_text(encoding="utf-8").strip()
@@ -6,7 +7,7 @@ manager = Path("server/install_public_server.sh").read_text(encoding="utf-8")
 control = Path("server/scbl_control_plane.py").read_text(encoding="utf-8")
 release = Path(f"docs/releases/SERVER_TOOL_v{version}.md").read_text(encoding="utf-8")
 
-assert version == "1.0.8"
+assert re.fullmatch(r"[0-9]+\.[0-9]+\.[0-9]+", version)
 assert 'self.send_header("Connection", "close")' in control
 assert "self.close_connection = True" in control
 assert "_signed_health_probe" in control

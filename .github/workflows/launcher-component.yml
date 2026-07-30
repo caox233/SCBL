@@ -1,0 +1,68 @@
+name: Launcher component
+
+on:
+  pull_request:
+    paths:
+      - "client/ScblPublicLauncher/**"
+      - "client/SCBL.Version.props"
+      - "client/build_launcher_incremental.ps1"
+      - "VERSION_CLIENT"
+      - ".github/workflows/launcher-component.yml"
+  push:
+    branches:
+      - main
+    paths:
+      - "client/ScblPublicLauncher/**"
+      - "client/SCBL.Version.props"
+      - "client/build_launcher_incremental.ps1"
+      - "VERSION_CLIENT"
+      - ".github/workflows/launcher-component.yml"
+  workflow_dispatch:
+
+concurrency:
+  group: launcher-component-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  launcher-win-x86:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 8.0.x
+      - uses: actions/cache@v4
+        with:
+          path: ~/.nuget/packages
+          key: nuget-launcher-${{ runner.os }}-${{ hashFiles('client/ScblPublicLauncher/**/*.csproj', 'client/SCBL.Version.props') }}
+          restore-keys: |
+            nuget-launcher-${{ runner.os }}-
+      - name: Restore Launcher
+        shell: pwsh
+        run: dotnet restore client/ScblPublicLauncher/SplinterCellCNLauncher.csproj --runtime win-x86 --nologo
+      - name: Compile Launcher without single-file packaging
+        if: github.event_name == 'pull_request'
+        shell: pwsh
+        run: |
+          $elapsed = Measure-Command {
+            dotnet build client/ScblPublicLauncher/SplinterCellCNLauncher.csproj -c Release -r win-x86 --no-restore --nologo /p:PublishSingleFile=false /p:SelfContained=false
+          }
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          "Launcher compile-only validation: $([math]::Round($elapsed.TotalSeconds, 1))s" | Tee-Object -FilePath $env:GITHUB_STEP_SUMMARY -Append
+      - name: Publish Launcher component
+        if: github.event_name != 'pull_request'
+        shell: pwsh
+        run: |
+          $elapsed = Measure-Command { ./client/build_launcher_incremental.ps1 -Fast -SkipRuntimeStop }
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          "Launcher publish: $([math]::Round($elapsed.TotalSeconds, 1))s" | Tee-Object -FilePath $env:GITHUB_STEP_SUMMARY -Append
+      - uses: actions/upload-artifact@v4
+        if: github.event_name != 'pull_request'
+        with:
+          name: scbl-launcher-win-x86
+          path: client/ScblPublicLauncher/publish-single/SplinterCellCNLauncher.exe
+          if-no-files-found: error
+          retention-days: 14

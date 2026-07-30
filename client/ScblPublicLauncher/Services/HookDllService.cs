@@ -5,6 +5,7 @@ using System.IO;
 using System.Linq;
 using System.Security.Cryptography;
 using System.Text.Json;
+using System.Text.RegularExpressions;
 
 namespace SplinterCellCNLauncher.Services;
 
@@ -12,7 +13,6 @@ public sealed class HookDllService
 {
     private static readonly string[] RequiredEmbeddedFiles =
     [
-        "uplay_r1_loader.dll",
         "00000001.meta",
         "00000001.sav",
         "00000002.meta",
@@ -30,8 +30,8 @@ public sealed class HookDllService
         if (missing.Count > 0)
         {
             throw new Exception(
-                "缺少内置资源：" + string.Join(", ", missing) + Environment.NewLine +
-                "请重新下载完整客户端。内置 Hooks 仍作为离线恢复资源保留。 ");
+                "缺少内置存档资源：" + string.Join(", ", missing) + Environment.NewLine +
+                "请重新下载完整客户端。");
         }
     }
 
@@ -59,14 +59,15 @@ public sealed class HookDllService
         }
 
         VerifiedClientComponent? external = _componentUpdateService.ResolveHooksForSelectedChannel();
-        string embeddedHash = ComputeEmbeddedSha256BestEffort("uplay_r1_loader.dll");
-        string expectedHash = external?.Sha256 ?? embeddedHash;
+        BootstrapHook bootstrap = external == null ? ResolveBootstrapHook() : BootstrapHook.Empty;
+        string expectedHash = external?.Sha256 ?? bootstrap.Sha256;
+        string sourcePath = external?.FilePath ?? bootstrap.FilePath;
         string sourceDescription = external == null
-            ? "embedded-recovery"
+            ? "bootstrap-package"
             : $"component:{external.Channel}/{external.Version}";
 
-        if (string.IsNullOrWhiteSpace(expectedHash))
-            throw new Exception("专用联机组件部署失败：无法计算可信 Hooks SHA256。");
+        if (string.IsNullOrWhiteSpace(expectedHash) || !File.Exists(sourcePath))
+            throw new Exception("专用联机组件部署失败：没有可用且已校验的 Hooks 组件。请使用完整客户端修复安装。");
 
         string beforeHash = ComputeFileSha256BestEffort(dllPath);
         if (beforeHash.Equals(expectedHash, StringComparison.OrdinalIgnoreCase))
@@ -81,19 +82,36 @@ public sealed class HookDllService
         DeployAtomically(
             dllPath,
             expectedHash,
-            temporaryPath =>
-            {
-                if (external == null)
-                    EmbeddedResourceService.ExtractEmbeddedFileStrict("uplay_r1_loader.dll", temporaryPath);
-                else
-                    File.Copy(external.FilePath, temporaryPath, overwrite: true);
-            });
+            temporaryPath => File.Copy(sourcePath, temporaryPath, overwrite: true));
 
         string afterHash = ComputeFileSha256BestEffort(dllPath);
         if (!afterHash.Equals(expectedHash, StringComparison.OrdinalIgnoreCase))
             throw new Exception("专用联机组件部署失败：写入后的 uplay_r1_loader.dll 校验不一致。请检查杀软或文件权限。");
 
         WriteDeployMarker(gameDir, afterHash, external, sourceDescription);
+    }
+
+    private static BootstrapHook ResolveBootstrapHook()
+    {
+        string root = AppContext.BaseDirectory.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+        string directory = Path.Combine(root, "bootstrap-components", "hooks");
+        string dll = Path.Combine(directory, "uplay_r1_loader.dll");
+        string sidecar = dll + ".sha256";
+
+        if (!File.Exists(dll) || !File.Exists(sidecar))
+            throw new FileNotFoundException("完整客户端缺少 bootstrap Hooks 或 SHA256 校验文件。", dll);
+
+        string text = File.ReadAllText(sidecar);
+        Match match = Regex.Match(text, "(?i)\\b[0-9a-f]{64}\\b", RegexOptions.CultureInvariant);
+        if (!match.Success)
+            throw new InvalidDataException("bootstrap Hooks SHA256 文件格式无效。");
+
+        string expected = match.Value.ToUpperInvariant();
+        string actual = ComputeFileSha256BestEffort(dll);
+        if (!actual.Equals(expected, StringComparison.OrdinalIgnoreCase))
+            throw new CryptographicException($"bootstrap Hooks SHA256 不一致。expected={expected}, actual={actual}");
+
+        return new BootstrapHook(dll, actual);
     }
 
     private static void DeployAtomically(string targetPath, string expectedHash, Action<string> writeTemporary)
@@ -146,13 +164,13 @@ public sealed class HookDllService
                 return;
 
             string currentHash = File.Exists(dllPath) ? ComputeFileSha256BestEffort(dllPath) : "";
-            string embeddedHash = ComputeEmbeddedSha256BestEffort("uplay_r1_loader.dll");
             string markerHash = ReadDeployMarkerHash(gameDir);
+            string bootstrapHash = TryGetBootstrapHash();
             bool isScblHook = !string.IsNullOrWhiteSpace(currentHash)
                 && ((!string.IsNullOrWhiteSpace(markerHash)
                      && currentHash.Equals(markerHash, StringComparison.OrdinalIgnoreCase))
-                    || (!string.IsNullOrWhiteSpace(embeddedHash)
-                        && currentHash.Equals(embeddedHash, StringComparison.OrdinalIgnoreCase)));
+                    || (!string.IsNullOrWhiteSpace(bootstrapHash)
+                        && currentHash.Equals(bootstrapHash, StringComparison.OrdinalIgnoreCase)));
 
             if (isScblHook)
             {
@@ -170,6 +188,18 @@ public sealed class HookDllService
         }
     }
 
+    private static string TryGetBootstrapHash()
+    {
+        try
+        {
+            return ResolveBootstrapHook().Sha256;
+        }
+        catch
+        {
+            return "";
+        }
+    }
+
     private static bool IsGameRunning()
     {
         return Process.GetProcessesByName("Blacklist_game").Any()
@@ -181,19 +211,6 @@ public sealed class HookDllService
         try
         {
             using var stream = File.OpenRead(path);
-            return Convert.ToHexString(SHA256.HashData(stream));
-        }
-        catch
-        {
-            return "";
-        }
-    }
-
-    private static string ComputeEmbeddedSha256BestEffort(string fileName)
-    {
-        try
-        {
-            using Stream stream = EmbeddedResourceService.OpenEmbeddedFileStrict(fileName);
             return Convert.ToHexString(SHA256.HashData(stream));
         }
         catch
@@ -233,7 +250,7 @@ public sealed class HookDllService
             Dll = "uplay_r1_loader.dll",
             Sha256 = dllSha256,
             Channel = external?.Channel ?? "stable",
-            Version = external?.Version ?? "embedded-recovery",
+            Version = external?.Version ?? "bootstrap-package",
             Source = sourceDescription
         };
 
@@ -252,5 +269,10 @@ public sealed class HookDllService
         {
             // Replacement or rollback reports the actual error.
         }
+    }
+
+    private sealed record BootstrapHook(string FilePath, string Sha256)
+    {
+        public static BootstrapHook Empty { get; } = new("", "");
     }
 }

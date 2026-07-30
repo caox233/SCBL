@@ -12,6 +12,15 @@ public sealed class WinDivertBootstrapService
 
     public async Task<bool> EnsureCurrentDriverAsync()
     {
+        try
+        {
+            await Task.Run(StagedComponentBootstrapService.ApplyRouteGuard).ConfigureAwait(true);
+        }
+        catch (Exception ex)
+        {
+            LogService.Error("Staged Route Guard component application failed; packaged files remain active: " + ex.Message);
+        }
+
         string baseDir = AppContext.BaseDirectory.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
         string payload = Path.Combine(baseDir, PayloadRelativePath.Replace('/', Path.DirectorySeparatorChar));
         string driver = Path.Combine(baseDir, DriverRelativePath.Replace('/', Path.DirectorySeparatorChar));

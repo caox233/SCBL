@@ -1,0 +1,74 @@
+name: Route Guard component
+
+on:
+  pull_request:
+    paths:
+      - "client/scbl-process-router/**"
+      - "client/WINDIVERT_NOTICE.txt"
+      - "VERSION_CLIENT"
+      - ".github/workflows/route-guard-component.yml"
+  push:
+    branches:
+      - main
+    paths:
+      - "client/scbl-process-router/**"
+      - "client/WINDIVERT_NOTICE.txt"
+      - "VERSION_CLIENT"
+      - ".github/workflows/route-guard-component.yml"
+  workflow_dispatch:
+
+concurrency:
+  group: route-guard-component-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  route-guard-win-x86:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: stable
+          cache: true
+          cache-dependency-path: client/scbl-process-router/go.mod
+      - name: Build Route Guard
+        shell: pwsh
+        run: |
+          $elapsed = Measure-Command { ./client/scbl-process-router/build_windows.ps1 }
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          "Route Guard component build: $([math]::Round($elapsed.TotalSeconds, 1))s" | Tee-Object -FilePath $env:GITHUB_STEP_SUMMARY -Append
+      - name: Assemble immutable Route Guard component
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $stage = "component-stage"
+          $out = "component-output"
+          New-Item -ItemType Directory -Force -Path $stage,$out | Out-Null
+          Copy-Item client/scbl-process-router/scbl-process-router.exe "$stage/scbl-process-router.exe"
+          Copy-Item client/scbl-process-router/WinDivert.dll "$stage/WinDivert.dll"
+          Copy-Item client/scbl-process-router/WinDivert64.sys "$stage/WinDivert64.sys"
+          Compress-Archive -Path "$stage/*" -DestinationPath "$out/route-guard.zip" -Force
+          $hash = (Get-FileHash "$out/route-guard.zip" -Algorithm SHA256).Hash.ToLowerInvariant()
+          "$hash  route-guard.zip" | Set-Content "$out/route-guard.zip.sha256" -Encoding ASCII
+          "${{ github.event.pull_request.head.sha || github.sha }}" | Set-Content "$out/commit_sha.txt" -Encoding ASCII
+          $version = (Get-Content VERSION_CLIENT -Raw).Trim() + ".${{ github.run_number }}"
+          [ordered]@{
+            schemaVersion = 2
+            component = "route-guard"
+            version = $version
+            commit = "${{ github.event.pull_request.head.sha || github.sha }}"
+            file = "route-guard.zip"
+            sha256 = $hash
+            size = (Get-Item "$out/route-guard.zip").Length
+            minLauncherVersion = (Get-Content VERSION_CLIENT -Raw).Trim()
+            updateMode = "next-launch"
+          } | ConvertTo-Json -Depth 5 | Set-Content "$out/component.json" -Encoding UTF8
+      - uses: actions/upload-artifact@v4
+        with:
+          name: scbl-route-guard-win-x86
+          path: component-output/*
+          if-no-files-found: error
+          retention-days: 14

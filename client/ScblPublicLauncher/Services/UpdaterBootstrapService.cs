@@ -17,6 +17,15 @@ public sealed class UpdaterBootstrapService
 
     public async Task EnsureCurrentUpdaterAsync()
     {
+        try
+        {
+            await Task.Run(StagedComponentBootstrapService.ApplyUpdaterAndEasyTier).ConfigureAwait(true);
+        }
+        catch (Exception ex)
+        {
+            LogService.Error("Staged Updater/EasyTier component application failed; packaged files remain active: " + ex.Message);
+        }
+
         string baseDir = AppContext.BaseDirectory.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
         string payload = Path.Combine(baseDir, PayloadRelativePath.Replace('/', Path.DirectorySeparatorChar));
         string updater = Path.Combine(baseDir, UpdaterRelativePath);
@@ -46,8 +55,6 @@ public sealed class UpdaterBootstrapService
         string temp = updater + ".new";
         Exception? lastError = null;
 
-        // The old updater starts the new launcher immediately before it exits. Retry briefly
-        // until Windows releases SCBL.Updater.exe, then replace it atomically.
         for (int attempt = 1; attempt <= 24; attempt++)
         {
             try

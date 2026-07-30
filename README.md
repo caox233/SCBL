@@ -2,17 +2,17 @@
 
 SCBL 是面向《细胞分裂：黑名单》社区联机环境的自建客户端、Linux 服务端部署和客户端更新管理项目。
 
-> 当前 Windows 客户端：**v1.0.12**<br>
+> 当前 Windows 客户端：**v1.0.13**<br>
 > 当前 Linux 服务端工具：**v1.0.8**
 
 ## 快速开始
 
 ### Windows 客户端
 
-前往仓库的 Releases 页面，下载标题为 **[CLIENT] Windows Client v1.0.12** 的版本：
+前往仓库的 Releases 页面，下载标题为 **[CLIENT] Windows Client v1.0.13** 的版本：
 
 ```text
-SCBL-Client-v1.0.12-win-x86.zip
+SCBL-Client-v1.0.13-win-x86.zip
 ```
 
 解压后运行 `SplinterCellCNLauncher.exe`。启动器会先确认服务器当前正式版本；版本不一致时必须更新或退出。
@@ -23,28 +23,79 @@ SCBL-Client-v1.0.12-win-x86.zip
 curl -fsSL https://raw.githubusercontent.com/caox233/SCBL/main/scripts/install-server.sh | sudo bash
 ```
 
-安装脚本读取 `VERSION_SERVER_TOOL`，下载对应的 **[SERVER] Server Tool vX.Y.Z** 完整包并校验文件。
+安装脚本读取 `VERSION_SERVER_TOOL`，下载对应的 **[SERVER] Server Tool vX.Y.Z** 完整包并校验文件。服务端管理工具与 dedicated server 二进制保持独立版本和独立更新边界。
 
 ## 版本和更新
 
-- `VERSION_CLIENT` 是 Windows 客户端版本来源。
+- `VERSION_CLIENT` 是 Windows 客户端正式版本来源。
 - `VERSION_SERVER_TOOL` 是 Linux 服务端工具版本来源。
 - Release 标签分别为 `client-vX.Y.Z` 和 `server-tool-vX.Y.Z`。
 - Release 标题分别以 `[CLIENT]` 和 `[SERVER]` 开头，便于在同一列表中区分。
-- 每个组件仅保留当前版本和上一版本，不再创建 Stable Release。
+- Hooks 与 dedicated server 由 `caox233/5th-echelon` 独立构建和发布。
 
-服务端首次部署或升级后会自动检查正式客户端：
+正式客户端版本门禁仍然优先执行，组件清单不能绕过或替代该门禁。客户端通过服务器更新服务读取组件清单，并逐项核对本地组件：
 
 ```text
-没有客户端包        → 下载最新版完整包
-本地版本较旧        → 下载最新版完整包
-版本和 SHA256 一致  → 不重复下载
-本地版本较高        → 保留现有版本
-检查失败且已有包    → 继续使用现有版本
-检查失败且没有包    → 提示部署未完成
+本地文件不存在          → 下载该组件
+本地大小或 SHA256 不同  → 重新下载该组件
+本地文件与清单一致      → 直接复用，不重复下载
 ```
 
-服务器把当前正式客户端版本写入更新信息。Launcher 启动时先读取该信息：版本一致才继续初始化游戏目录、网络和其他功能；版本不一致只能更新或退出。
+当前组件目录包括：
+
+```text
+hooks         uplay_r1_loader.dll
+route-guard   Route Guard + WinDivert 原子组件包
+easytier      EasyTier Windows 运行时组件包
+updater       SCBL.Updater.exe
+```
+
+Hooks 在游戏启动前部署。Route Guard、EasyTier 和 Updater 先下载到版本化缓存，并在下一次相同更新通道启动、网络和游戏尚未运行时原子应用。切换回 `stable` 时不会使用 `test` 通道缓存。
+
+`test` 通道用于确定二进制的实机验证：
+
+```powershell
+SplinterCellCNLauncher.exe --update-channel test
+```
+
+`stable` 外置组件替换在组件清单签名验证完成前保持关闭；正式客户端继续使用完整包自带、经过 SHA256 校验的 bootstrap 组件。
+
+## 构建方式
+
+日常开发采用“改什么、编译什么、上传什么”：
+
+```powershell
+# 自动识别最近变更的 Windows 组件
+powershell -ExecutionPolicy Bypass -File .\client\build_all_windows.ps1 -Auto -Fast
+
+# 只构建 Launcher，不下载或嵌入 Hooks
+powershell -ExecutionPolicy Bypass -File .\client\build_launcher_incremental.ps1 -Fast
+
+# 仅正式发布或修复包时组装完整客户端
+powershell -ExecutionPolicy Bypass -File .\client\build_all_windows.ps1 -Fast -Package
+```
+
+组件拥有独立 GitHub Actions 工作流和缓存。普通 PR 只验证受影响组件，不组装完整客户端；正式完整包工作流并行获取 Launcher、Updater、Route Guard、EasyTier 产物，加入已验证的 bootstrap Hooks 后组装 ZIP，不重新编译已经测试过的组件。
+
+完整客户端包主要用于：
+
+- 首次安装；
+- 离线安装；
+- 修复安装；
+- Launcher 或平台级正式升级；
+- 灾难恢复。
+
+## 服务端组件仓库
+
+服务端在更新根目录维护不可变组件版本及 `stable` / `test` 清单。组件管理器支持：
+
+- 发布确定 SHA256 的组件到 `test`；
+- 将同一个已测试二进制提升到 `stable`，不重新编译；
+- 回滚到现有不可变版本；
+- 校验所有清单、组件大小和 SHA256；
+- 拒绝同版本覆盖为不同内容。
+
+组件仓库不会覆盖 dedicated server 数据库、EasyTier 配置、DDNS 配置、客户端包或运行时密钥。
 
 ## 网络路径
 
@@ -53,30 +104,20 @@ curl -fsSL https://raw.githubusercontent.com/caox233/SCBL/main/scripts/install-s
 - 普通客户端不承担第三方数据中继；固定服务器使用 UDP 主入口和 WSS 兜底。
 - 使用稳定的一跳优先策略，不为很小的延迟差异切换到多跳路径。
 
-## 本地编译
-
-```powershell
-git clone https://github.com/caox233/SCBL.git
-cd SCBL\client
-powershell -ExecutionPolicy Bypass -File .\build_all_windows.ps1 -Fast -Package
-```
-
-客户端构建从 `caox233/5th-echelon` 的已验证 Release 获取 Hooks DLL；SCBL 仓库不保存 Hooks 源码或预编译 Hooks 文件。
-
 ## 目录
 
 ```text
 client/      Windows Launcher、Updater、EasyTier 准备脚本和 Route Guard
-server/      Linux 服务端管理器和控制平面
+server/      Linux 服务端管理器、组件仓库和控制平面
 scripts/     服务端安装入口和维护脚本
 docs/        发布说明和技术文档
-.github/     验证、构建和发布工作流
+.github/     组件验证、完整包组装和发布工作流
 ```
 
 ## 安全说明
 
 客户端的严格进程路由使用 WinDivert 2.2.2；虚拟网广播保持原样交给 EasyTier 处理。少数安全软件可能基于驱动的数据包处理能力显示风险提示。请只从本仓库正式 Release 下载，并核对 SHA256。
 
-SCBL 不会自动关闭安全软件、添加排除项或绕过安全检测。`dedicated_server`、Hooks 源码和 Hooks DLL 由 5th 项目独立构建和发布，SCBL 只下载经校验的正式资产。
+SCBL 不会自动关闭安全软件、添加排除项或绕过安全检测。`dedicated_server`、Hooks 源码和 Hooks DLL 由 5th 项目独立构建和发布，SCBL 只消费经校验的确定资产。
 
 SCBL 是非官方社区项目，与 Ubisoft 无隶属或授权关系。本仓库不包含游戏本体文件。

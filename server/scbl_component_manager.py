@@ -4,8 +4,7 @@
 This tool never touches the dedicated-server database or runtime configuration. It only
 writes beneath the update server root (normally /opt/scbl-public/client-updates).
 Stable external component activation remains blocked in the launcher until signed
-manifest verification is implemented; the manager nevertheless supports immutable
-promotion/rollback so the server-side workflow can be tested now.
+manifest verification is implemented.
 """
 from __future__ import annotations
 
@@ -18,13 +17,29 @@ import re
 import shutil
 import sys
 import tempfile
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
 SCHEMA_VERSION = 2
-SUPPORTED_COMPONENTS = {"hooks"}
 SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
 VERSION_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._+-]{0,79}$")
+
+
+@dataclass(frozen=True)
+class ComponentSpec:
+    filename: str
+    update_mode: str
+    bundle: bool = False
+
+
+COMPONENT_SPECS: dict[str, ComponentSpec] = {
+    "hooks": ComponentSpec("uplay_r1_loader.dll", "before-game-start"),
+    "route-guard": ComponentSpec("route-guard.zip", "next-launch", bundle=True),
+    "easytier": ComponentSpec("easytier-windows-x86_64.zip", "next-launch", bundle=True),
+    "updater": ComponentSpec("SCBL.Updater.exe", "next-launch"),
+}
+SUPPORTED_COMPONENTS = frozenset(COMPONENT_SPECS)
 
 
 def utc_now() -> str:
@@ -61,10 +76,15 @@ def ensure_within(root: Path, path: Path) -> Path:
     return path
 
 
+def component_spec(component: str) -> ComponentSpec:
+    try:
+        return COMPONENT_SPECS[component]
+    except KeyError as exc:
+        raise ValueError(f"不支持的组件：{component}") from exc
+
+
 def component_filename(component: str) -> str:
-    if component == "hooks":
-        return "uplay_r1_loader.dll"
-    raise ValueError(f"不支持的组件：{component}")
+    return component_spec(component).filename
 
 
 class ComponentStore:
@@ -122,8 +142,7 @@ class ComponentStore:
         if not isinstance(components, dict):
             raise ValueError("组件清单 components 必须是对象。")
         for name, entry in components.items():
-            if name not in SUPPORTED_COMPONENTS:
-                raise ValueError(f"清单包含不支持的组件：{name}")
+            spec = component_spec(name)
             if not isinstance(entry, dict):
                 raise ValueError(f"组件 {name} 记录无效。")
             validate_version(str(entry.get("version", "")))
@@ -132,12 +151,23 @@ class ComponentStore:
             if not isinstance(size, int) or size < 0:
                 raise ValueError(f"组件 {name} size 无效。")
             url = str(entry.get("url", ""))
-            if not url.startswith("/components/artifacts/") or ".." in url:
+            expected_suffix = "/" + spec.filename
+            if (
+                not url.startswith(f"/components/artifacts/{name}/")
+                or not url.endswith(expected_suffix)
+                or ".." in url
+            ):
                 raise ValueError(f"组件 {name} url 无效。")
+            if entry.get("updateMode") != spec.update_mode:
+                raise ValueError(
+                    f"组件 {name} updateMode 无效：expected={spec.update_mode}, "
+                    f"actual={entry.get('updateMode')}"
+                )
+            if entry.get("required") is not True:
+                raise ValueError(f"组件 {name} 必须标记 required=true。")
 
     def artifact_dir(self, component: str, version: str) -> Path:
-        if component not in SUPPORTED_COMPONENTS:
-            raise ValueError(f"不支持的组件：{component}")
+        component_spec(component)
         version = validate_version(version)
         return ensure_within(self.artifacts_root, self.artifacts_root / component / version)
 
@@ -154,6 +184,7 @@ class ComponentStore:
         min_launcher_version: str,
     ) -> dict[str, Any]:
         self.initialize()
+        spec = component_spec(component)
         version = validate_version(version)
         expected_sha256 = validate_sha256(expected_sha256)
         source_file = source_file.resolve()
@@ -163,7 +194,7 @@ class ComponentStore:
         if actual_sha256 != expected_sha256:
             raise ValueError(f"组件 SHA256 不一致：expected={expected_sha256}, actual={actual_sha256}")
 
-        filename = component_filename(component)
+        filename = spec.filename
         directory = self.artifact_dir(component, version)
         destination = directory / filename
         metadata_path = directory / "component.json"
@@ -174,7 +205,7 @@ class ComponentStore:
             "size": source_file.stat().st_size,
             "url": relative_url,
             "minLauncherVersion": min_launcher_version.strip(),
-            "updateMode": "before-game-start" if component == "hooks" else "launcher-managed",
+            "updateMode": spec.update_mode,
             "required": True,
         }
         metadata = {
@@ -213,6 +244,7 @@ class ComponentStore:
 
     def promote(self, component: str) -> dict[str, Any]:
         self.initialize()
+        component_spec(component)
         test_manifest = self.load_manifest("test")
         entry = test_manifest["components"].get(component)
         if not isinstance(entry, dict):
@@ -225,6 +257,7 @@ class ComponentStore:
 
     def rollback(self, component: str, version: str) -> dict[str, Any]:
         self.initialize()
+        component_spec(component)
         version = validate_version(version)
         metadata_path = self.metadata_path(component, version)
         if not metadata_path.is_file():
@@ -240,9 +273,10 @@ class ComponentStore:
         return entry
 
     def verify_entry(self, component: str, entry: dict[str, Any]) -> None:
+        spec = component_spec(component)
         version = validate_version(str(entry.get("version", "")))
         expected = validate_sha256(str(entry.get("sha256", "")))
-        path = self.artifact_dir(component, version) / component_filename(component)
+        path = self.artifact_dir(component, version) / spec.filename
         if not path.is_file():
             raise FileNotFoundError(f"组件文件不存在：{path}")
         actual = sha256_file(path)
@@ -315,7 +349,7 @@ def build_parser() -> argparse.ArgumentParser:
     promote = sub.add_parser("promote", help="将测试通道同一产物提升到正式通道")
     promote.add_argument("--component", choices=sorted(SUPPORTED_COMPONENTS), required=True)
 
-    rollback = sub.add_parser("rollback", help="正式通道回滚到已保存的不可变版本")
+    rollback = sub.add_parser("rollback", help="将正式通道回滚到现有不可变版本")
     rollback.add_argument("--component", choices=sorted(SUPPORTED_COMPONENTS), required=True)
     rollback.add_argument("--version", required=True)
     return parser
@@ -355,7 +389,7 @@ def main() -> int:
         else:
             raise AssertionError(args.command)
         return 0
-    except Exception as exc:  # noqa: BLE001 - CLI must produce one clear failure
+    except Exception as exc:
         print(f"错误：{exc}", file=sys.stderr)
         return 1
 

@@ -1,0 +1,180 @@
+name: Assemble full client package
+
+on:
+  workflow_dispatch:
+    inputs:
+      fast:
+        description: Use fast ZIP compression
+        required: false
+        default: true
+        type: boolean
+      hooks_release_tag:
+        description: 5th-echelon Hooks release tag
+        required: false
+        default: scbl-public-stable-latest
+        type: string
+
+concurrency:
+  group: assemble-client-package-${{ github.ref }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  launcher:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 8.0.x
+      - uses: actions/cache@v4
+        with:
+          path: ~/.nuget/packages
+          key: nuget-launcher-publish-${{ runner.os }}-${{ hashFiles('client/ScblPublicLauncher/**/*.csproj', 'client/SCBL.Version.props') }}
+          restore-keys: |
+            nuget-launcher-publish-${{ runner.os }}-
+      - name: Publish Launcher component
+        shell: pwsh
+        run: ./client/build_launcher_incremental.ps1 -Fast -SkipRuntimeStop
+      - uses: actions/upload-artifact@v4
+        with:
+          name: client-launcher-win-x86
+          path: client/ScblPublicLauncher/publish-single/SplinterCellCNLauncher.exe
+          if-no-files-found: error
+          retention-days: 7
+
+  updater:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 8.0.x
+      - uses: actions/cache@v4
+        with:
+          path: ~/.nuget/packages
+          key: nuget-updater-publish-${{ runner.os }}-${{ hashFiles('client/SCBL.Updater/**/*.csproj', 'client/SCBL.Version.props') }}
+          restore-keys: |
+            nuget-updater-publish-${{ runner.os }}-
+      - name: Build Updater component
+        shell: pwsh
+        run: ./client/SCBL.Updater/build_windows.ps1
+      - name: Stage Updater component
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force component-output/tools | Out-Null
+          Copy-Item client/SCBL.Updater/publish/SCBL.Updater.exe component-output/SCBL.Updater.exe
+          Copy-Item client/SCBL.Updater/publish/SCBL.Updater.exe component-output/tools/SCBL.Updater.payload.exe
+      - uses: actions/upload-artifact@v4
+        with:
+          name: client-updater-win-x86
+          path: component-output/**
+          if-no-files-found: error
+          retention-days: 7
+
+  route-guard:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: stable
+          cache: true
+          cache-dependency-path: client/scbl-process-router/go.mod
+      - name: Build Route Guard component
+        shell: pwsh
+        run: ./client/scbl-process-router/build_windows.ps1
+      - name: Stage Route Guard component
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force component-output/tools | Out-Null
+          Copy-Item client/scbl-process-router/scbl-process-router.exe component-output/tools/
+          Copy-Item client/scbl-process-router/WinDivert.dll component-output/tools/
+          Copy-Item client/scbl-process-router/WinDivert64.sys component-output/tools/WinDivert64.payload.sys
+          Copy-Item client/WINDIVERT_NOTICE.txt component-output/WINDIVERT_NOTICE.txt
+      - uses: actions/upload-artifact@v4
+        with:
+          name: client-route-guard-win-x86
+          path: component-output/**
+          if-no-files-found: error
+          retention-days: 7
+
+  easytier:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Prepare pinned EasyTier runtime
+        shell: pwsh
+        run: ./client/easytier/download_easytier_windows.ps1
+      - name: Stage EasyTier runtime
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force component-output/tools | Out-Null
+          Copy-Item client/easytier/bin/* component-output/tools/
+          Copy-Item THIRD_PARTY_LICENSES/EasyTier-LGPL-3.0.txt component-output/tools/EasyTier-LGPL-3.0.txt
+      - uses: actions/upload-artifact@v4
+        with:
+          name: client-easytier-win-x86
+          path: component-output/**
+          if-no-files-found: error
+          retention-days: 7
+
+  package:
+    needs: [launcher, updater, route-guard, easytier]
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: client-launcher-win-x86
+          path: client/ScblPublicLauncher/publish-single
+      - uses: actions/download-artifact@v4
+        with:
+          name: client-updater-win-x86
+          path: client/ScblPublicLauncher/publish-single
+      - uses: actions/download-artifact@v4
+        with:
+          name: client-route-guard-win-x86
+          path: client/ScblPublicLauncher/publish-single
+      - uses: actions/download-artifact@v4
+        with:
+          name: client-easytier-win-x86
+          path: client/ScblPublicLauncher/publish-single
+      - name: Add verified bootstrap Hooks
+        shell: pwsh
+        run: |
+          ./client/prepare_bootstrap_hooks.ps1 `
+            -FifthRepository caox233/5th-echelon `
+            -FifthReleaseTag "${{ inputs.hooks_release_tag }}" `
+            -PublishRoot client/ScblPublicLauncher/publish-single
+      - name: Verify assembled component layout
+        shell: pwsh
+        run: |
+          $required = @(
+            "client/ScblPublicLauncher/publish-single/SplinterCellCNLauncher.exe",
+            "client/ScblPublicLauncher/publish-single/SCBL.Updater.exe",
+            "client/ScblPublicLauncher/publish-single/tools/SCBL.Updater.payload.exe",
+            "client/ScblPublicLauncher/publish-single/tools/scbl-process-router.exe",
+            "client/ScblPublicLauncher/publish-single/tools/WinDivert.dll",
+            "client/ScblPublicLauncher/publish-single/tools/WinDivert64.payload.sys",
+            "client/ScblPublicLauncher/publish-single/tools/easytier-core.exe",
+            "client/ScblPublicLauncher/publish-single/tools/easytier-cli.exe",
+            "client/ScblPublicLauncher/publish-single/bootstrap-components/hooks/uplay_r1_loader.dll"
+          )
+          foreach ($file in $required) { if (!(Test-Path $file)) { throw "Missing assembled component: $file" } }
+      - name: Create full client ZIP
+        shell: pwsh
+        run: |
+          $packageArgs = @()
+          if ([System.Convert]::ToBoolean("${{ inputs.fast }}")) { $packageArgs += "-Fast" }
+          ./client/create_client_full_package.ps1 @packageArgs
+      - uses: actions/upload-artifact@v4
+        with:
+          name: scbl-client-full-package
+          path: |
+            client/dist/SCBL-Client-v*-win-x86.zip
+            client/dist/SCBL-Client-v*-win-x86.zip.sha256
+          if-no-files-found: error
+          retention-days: 14

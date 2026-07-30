@@ -1,0 +1,68 @@
+name: EasyTier component
+
+on:
+  pull_request:
+    paths:
+      - "client/easytier/**"
+      - "THIRD_PARTY_LICENSES/EasyTier-LGPL-3.0.txt"
+      - "VERSION_CLIENT"
+      - ".github/workflows/easytier-component.yml"
+  push:
+    branches:
+      - main
+    paths:
+      - "client/easytier/**"
+      - "THIRD_PARTY_LICENSES/EasyTier-LGPL-3.0.txt"
+      - "VERSION_CLIENT"
+      - ".github/workflows/easytier-component.yml"
+  workflow_dispatch:
+
+concurrency:
+  group: easytier-component-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  easytier-win-x86_64:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Prepare pinned EasyTier runtime
+        shell: pwsh
+        run: |
+          $elapsed = Measure-Command { ./client/easytier/download_easytier_windows.ps1 }
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          "EasyTier runtime preparation: $([math]::Round($elapsed.TotalSeconds, 1))s" | Tee-Object -FilePath $env:GITHUB_STEP_SUMMARY -Append
+      - name: Assemble immutable EasyTier component
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $stage = "component-stage"
+          $out = "component-output"
+          New-Item -ItemType Directory -Force -Path $stage,$out | Out-Null
+          Copy-Item client/easytier/bin/easytier-core.exe "$stage/easytier-core.exe"
+          Copy-Item client/easytier/bin/easytier-cli.exe "$stage/easytier-cli.exe"
+          Compress-Archive -Path "$stage/*" -DestinationPath "$out/easytier-windows-x86_64.zip" -Force
+          $hash = (Get-FileHash "$out/easytier-windows-x86_64.zip" -Algorithm SHA256).Hash.ToLowerInvariant()
+          "$hash  easytier-windows-x86_64.zip" | Set-Content "$out/easytier-windows-x86_64.zip.sha256" -Encoding ASCII
+          "${{ github.event.pull_request.head.sha || github.sha }}" | Set-Content "$out/commit_sha.txt" -Encoding ASCII
+          $version = "easytier-" + (Get-Date).ToUniversalTime().ToString("yyyy.MM.dd") + ".${{ github.run_number }}"
+          [ordered]@{
+            schemaVersion = 2
+            component = "easytier"
+            version = $version
+            commit = "${{ github.event.pull_request.head.sha || github.sha }}"
+            file = "easytier-windows-x86_64.zip"
+            sha256 = $hash
+            size = (Get-Item "$out/easytier-windows-x86_64.zip").Length
+            minLauncherVersion = (Get-Content VERSION_CLIENT -Raw).Trim()
+            updateMode = "next-launch"
+          } | ConvertTo-Json -Depth 5 | Set-Content "$out/component.json" -Encoding UTF8
+      - uses: actions/upload-artifact@v4
+        with:
+          name: scbl-easytier-win-x86_64
+          path: component-output/*
+          if-no-files-found: error
+          retention-days: 14

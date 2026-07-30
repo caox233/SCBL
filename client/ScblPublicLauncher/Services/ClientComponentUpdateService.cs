@@ -1,5 +1,6 @@
 using SplinterCellCNLauncher.Models;
 using System;
+using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
 using System.Linq;
@@ -13,9 +14,10 @@ namespace SplinterCellCNLauncher.Services;
 
 /// <summary>
 /// Resolves immutable client components from the selected stable/test manifest.
-/// The current phase activates external replacement only for an explicitly selected
-/// test channel. Stable manifests are parsed and logged read-only until signed-manifest
-/// verification is added; stable clients therefore retain the embedded recovery Hook.
+/// Test-channel components are downloaded into a versioned verified cache. Hooks can be
+/// activated immediately before game start; next-launch components are staged for the
+/// startup bootstrap layer. Stable remains read-only until signed-manifest verification
+/// is implemented.
 /// </summary>
 public sealed class ClientComponentUpdateService
 {
@@ -25,10 +27,34 @@ public sealed class ClientComponentUpdateService
     private static readonly HttpClient Http = CreateHttpClient();
     private static readonly JsonSerializerOptions JsonOptions = new()
     {
-        PropertyNameCaseInsensitive = true
+        PropertyNameCaseInsensitive = true,
+        WriteIndented = true
     };
 
+    private sealed record ComponentSpec(string FileName, string UpdateMode);
+
+    private static readonly IReadOnlyDictionary<string, ComponentSpec> SupportedComponents =
+        new Dictionary<string, ComponentSpec>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["hooks"] = new("uplay_r1_loader.dll", "before-game-start"),
+            ["route-guard"] = new("route-guard.zip", "next-launch"),
+            ["easytier"] = new("easytier-windows-x86_64.zip", "next-launch"),
+            ["updater"] = new("SCBL.Updater.exe", "next-launch")
+        };
+
     public VerifiedClientComponent? ResolveHooksForSelectedChannel()
+    {
+        IReadOnlyDictionary<string, VerifiedClientComponent> components = ReconcileSelectedChannel();
+        if (components.TryGetValue(HooksComponentName, out VerifiedClientComponent? hooks))
+            return hooks;
+
+        if (App.ComponentUpdateChannel == ClientUpdateChannel.Test)
+            throw new InvalidDataException("测试通道组件清单缺少必需的 hooks 组件。");
+
+        return null;
+    }
+
+    public IReadOnlyDictionary<string, VerifiedClientComponent> ReconcileSelectedChannel()
     {
         string channel = App.ComponentUpdateChannelName;
         Uri manifestUri = BuildManifestUri(channel);
@@ -39,42 +65,42 @@ public sealed class ClientComponentUpdateService
             byte[] manifestBytes = Http.GetByteArrayAsync(manifestUri).GetAwaiter().GetResult();
             ClientComponentManifest manifest = ParseAndValidateManifest(manifestBytes, manifestUri, channel);
 
-            // Security boundary for the first implementation: the test shortcut is an
-            // explicit opt-in used by the two validation machines. Stable remains on the
-            // embedded recovery binary until the manifest signature verifier is merged.
             if (!testChannel)
             {
-                if (manifest.Components.TryGetValue(HooksComponentName, out ClientComponentDefinition? stableHooks)
-                    && stableHooks != null)
+                foreach ((string name, ClientComponentDefinition definition) in manifest.Components)
                 {
-                    ValidateHooksDefinition(stableHooks, manifestUri);
+                    ValidateDefinition(name, definition, manifestUri);
                     LogService.Info(
-                        $"Stable Hooks manifest observed read-only: version={stableHooks.Version}, sha256={stableHooks.Sha256.ToLowerInvariant()}, source={manifestUri}");
+                        $"Stable component manifest observed read-only: component={name}, version={definition.Version}, sha256={definition.Sha256.ToLowerInvariant()}, source={manifestUri}");
                 }
-                else
-                {
-                    LogService.Info("Stable component manifest has no Hooks entry yet; using the embedded recovery binary.");
-                }
-                return null;
+                return new Dictionary<string, VerifiedClientComponent>(StringComparer.OrdinalIgnoreCase);
             }
 
-            ClientComponentDefinition hooks = GetRequiredHooksDefinition(manifest, manifestUri);
+            var verified = new Dictionary<string, VerifiedClientComponent>(StringComparer.OrdinalIgnoreCase);
+            foreach ((string name, ClientComponentDefinition definition) in manifest.Components.OrderBy(pair => pair.Key, StringComparer.OrdinalIgnoreCase))
+            {
+                ValidateDefinition(name, definition, manifestUri);
+                EnsureLauncherCompatibility(definition.MinLauncherVersion);
+                VerifiedClientComponent component = EnsureCachedComponent(name, definition, channel, manifestUri);
+                verified[name] = component;
+            }
+
+            WriteState(verified, channel, manifestUri);
             LogService.Info(
-                $"Component manifest accepted: channel={channel}, component=hooks, version={hooks.Version}, sha256={hooks.Sha256.ToLowerInvariant()}, source={manifestUri}");
-            EnsureLauncherCompatibility(hooks.MinLauncherVersion);
-            return EnsureCachedComponent(HooksComponentName, hooks, channel, manifestUri);
+                $"Component reconciliation completed: channel={channel}, count={verified.Count}, components={string.Join(',', verified.Keys.OrderBy(x => x, StringComparer.OrdinalIgnoreCase))}");
+            return verified;
         }
         catch (Exception ex)
         {
             if (testChannel)
             {
                 throw new InvalidOperationException(
-                    "测试通道 Hooks 组件检查失败。为避免误用正式或旧版 DLL，已阻止启动游戏。\n\n" + ex.Message,
+                    "测试通道客户端组件检查失败。为避免混用旧版或未知文件，已阻止启动游戏。\n\n" + ex.Message,
                     ex);
             }
 
-            LogService.Warning("Stable component manifest check skipped; embedded Hooks fallback remains active: " + ex.Message);
-            return null;
+            LogService.Warning("Stable component manifest check skipped; packaged bootstrap components remain active: " + ex.Message);
+            return new Dictionary<string, VerifiedClientComponent>(StringComparer.OrdinalIgnoreCase);
         }
     }
 
@@ -82,7 +108,7 @@ public sealed class ClientComponentUpdateService
     {
         var client = new HttpClient
         {
-            Timeout = TimeSpan.FromSeconds(12)
+            Timeout = TimeSpan.FromSeconds(20)
         };
         client.DefaultRequestHeaders.UserAgent.ParseAdd("SCBL-Component-Updater/2");
         return client;
@@ -108,50 +134,42 @@ public sealed class ClientComponentUpdateService
             throw new InvalidDataException("组件清单 components 无效。");
 
         LogService.Info(
-            $"Component manifest parsed: uri={manifestUri}, schema={manifest.SchemaVersion}, channel={manifest.Channel}, generatedAt={manifest.GeneratedAt}");
+            $"Component manifest parsed: uri={manifestUri}, schema={manifest.SchemaVersion}, channel={manifest.Channel}, generatedAt={manifest.GeneratedAt}, count={manifest.Components.Count}");
         return manifest;
     }
 
-    private static ClientComponentDefinition GetRequiredHooksDefinition(ClientComponentManifest manifest, Uri manifestUri)
+    private static void ValidateDefinition(string name, ClientComponentDefinition definition, Uri manifestUri)
     {
-        if (!manifest.Components.TryGetValue(HooksComponentName, out ClientComponentDefinition? hooks) || hooks == null)
-            throw new InvalidDataException("组件清单缺少 hooks 记录。");
-        ValidateHooksDefinition(hooks, manifestUri);
-        return hooks;
-    }
+        if (!SupportedComponents.TryGetValue(name, out ComponentSpec? spec))
+            throw new InvalidDataException("组件清单包含当前启动器不支持的组件：" + name);
+        if (string.IsNullOrWhiteSpace(definition.Version))
+            throw new InvalidDataException($"组件 {name} 版本为空。");
 
-    private static void ValidateHooksDefinition(ClientComponentDefinition hooks, Uri manifestUri)
-    {
-        if (string.IsNullOrWhiteSpace(hooks.Version))
-            throw new InvalidDataException("Hooks 组件版本为空。");
-        hooks.Sha256 = hooks.Sha256.Trim();
-        if (!Sha256Pattern.IsMatch(hooks.Sha256))
-            throw new InvalidDataException("Hooks SHA256 格式无效。");
-        if (hooks.Size < 0)
-            throw new InvalidDataException("Hooks 组件大小无效。");
-        if (string.IsNullOrWhiteSpace(hooks.Url))
-            throw new InvalidDataException("Hooks 下载地址为空。");
+        definition.Sha256 = definition.Sha256.Trim();
+        if (!Sha256Pattern.IsMatch(definition.Sha256))
+            throw new InvalidDataException($"组件 {name} SHA256 格式无效。");
+        if (definition.Size < 0)
+            throw new InvalidDataException($"组件 {name} 大小无效。");
+        if (string.IsNullOrWhiteSpace(definition.Url))
+            throw new InvalidDataException($"组件 {name} 下载地址为空。");
+        if (!definition.Required)
+            throw new InvalidDataException($"组件 {name} 必须标记 required=true。");
+        if (!definition.UpdateMode.Equals(spec.UpdateMode, StringComparison.OrdinalIgnoreCase))
+            throw new InvalidDataException(
+                $"组件 {name} updateMode 不匹配：expected={spec.UpdateMode}, actual={definition.UpdateMode}。");
 
-        Uri source = ResolveAndValidateSourceUri(manifestUri, hooks.Url);
-        if (!source.AbsolutePath.EndsWith("/uplay_r1_loader.dll", StringComparison.OrdinalIgnoreCase))
-            throw new InvalidDataException("Hooks 下载地址不是 uplay_r1_loader.dll。");
+        Uri source = ResolveAndValidateSourceUri(manifestUri, definition.Url);
+        if (!source.AbsolutePath.EndsWith("/" + spec.FileName, StringComparison.OrdinalIgnoreCase))
+            throw new InvalidDataException($"组件 {name} 下载文件名无效，必须为 {spec.FileName}。");
     }
 
     private static Uri ResolveAndValidateSourceUri(Uri manifestUri, string value)
     {
         string trimmed = value.Trim();
-        Uri source;
-        if (trimmed.StartsWith("http://", StringComparison.OrdinalIgnoreCase)
-            || trimmed.StartsWith("https://", StringComparison.OrdinalIgnoreCase))
-        {
-            source = new Uri(trimmed, UriKind.Absolute);
-        }
-        else
-        {
-            // Root-relative values such as /components/artifacts/... must resolve
-            // against the update server, not be interpreted as a local file URI.
-            source = new Uri(manifestUri, trimmed);
-        }
+        Uri source = trimmed.StartsWith("http://", StringComparison.OrdinalIgnoreCase)
+            || trimmed.StartsWith("https://", StringComparison.OrdinalIgnoreCase)
+            ? new Uri(trimmed, UriKind.Absolute)
+            : new Uri(manifestUri, trimmed);
 
         if (!source.Scheme.Equals(manifestUri.Scheme, StringComparison.OrdinalIgnoreCase)
             || !source.Host.Equals(manifestUri.Host, StringComparison.OrdinalIgnoreCase)
@@ -170,7 +188,7 @@ public sealed class ClientComponentUpdateService
         Version required = ParseVersion(minimumVersion);
         Version current = ParseVersion(GetLauncherVersion());
         if (current < required)
-            throw new InvalidDataException($"当前启动器版本 {current} 低于 Hooks 要求的最低版本 {required}。");
+            throw new InvalidDataException($"当前启动器版本 {current} 低于组件要求的最低版本 {required}。");
     }
 
     private static string GetLauncherVersion()
@@ -201,23 +219,27 @@ public sealed class ClientComponentUpdateService
         string channel,
         Uri manifestUri)
     {
+        ComponentSpec spec = SupportedComponents[name];
         Uri source = ResolveAndValidateSourceUri(manifestUri, definition.Url);
         string versionDirectory = SanitizePathSegment(definition.Version);
         string cacheDirectory = Path.Combine(LogService.PersistentDataDirectory, "components", name, versionDirectory);
         Directory.CreateDirectory(cacheDirectory);
-        string targetPath = Path.Combine(cacheDirectory, "uplay_r1_loader.dll");
+        string targetPath = Path.Combine(cacheDirectory, spec.FileName);
         string expectedHash = definition.Sha256.ToUpperInvariant();
 
         if (File.Exists(targetPath))
         {
             string existingHash = ComputeSha256(targetPath);
-            if (existingHash.Equals(expectedHash, StringComparison.OrdinalIgnoreCase))
+            long existingSize = new FileInfo(targetPath).Length;
+            if (existingHash.Equals(expectedHash, StringComparison.OrdinalIgnoreCase)
+                && (definition.Size <= 0 || existingSize == definition.Size))
             {
-                LogService.Info($"Reusing verified Hooks component: channel={channel}, version={definition.Version}, path={targetPath}, sha256={existingHash}");
-                WriteState(name, definition, channel, targetPath, source);
+                LogService.Info(
+                    $"Reusing verified component: component={name}, channel={channel}, version={definition.Version}, path={targetPath}, sha256={existingHash}");
                 return new VerifiedClientComponent(name, definition.Version, existingHash, targetPath, channel, source);
             }
-            LogService.Warning($"Cached Hooks hash mismatch; redownloading. expected={expectedHash}, actual={existingHash}, path={targetPath}");
+            LogService.Warning(
+                $"Cached component mismatch; redownloading. component={name}, expectedSha={expectedHash}, actualSha={existingHash}, expectedSize={definition.Size}, actualSize={existingSize}, path={targetPath}");
         }
 
         string temporaryPath = targetPath + ".download";
@@ -225,16 +247,16 @@ public sealed class ClientComponentUpdateService
         TryDelete(temporaryPath);
         byte[] payload = Http.GetByteArrayAsync(source).GetAwaiter().GetResult();
         if (definition.Size > 0 && payload.LongLength != definition.Size)
-            throw new InvalidDataException($"Hooks 文件大小不一致：expected={definition.Size}, actual={payload.LongLength}。");
+            throw new InvalidDataException($"组件 {name} 文件大小不一致：expected={definition.Size}, actual={payload.LongLength}。");
 
         string actualHash = Convert.ToHexString(SHA256.HashData(payload));
         if (!actualHash.Equals(expectedHash, StringComparison.OrdinalIgnoreCase))
-            throw new CryptographicException($"Hooks SHA256 校验失败：expected={expectedHash}, actual={actualHash}。");
+            throw new CryptographicException($"组件 {name} SHA256 校验失败：expected={expectedHash}, actual={actualHash}。");
 
         File.WriteAllBytes(temporaryPath, payload);
         string diskHash = ComputeSha256(temporaryPath);
         if (!diskHash.Equals(expectedHash, StringComparison.OrdinalIgnoreCase))
-            throw new CryptographicException("Hooks 临时文件写入后校验不一致。");
+            throw new CryptographicException($"组件 {name} 临时文件写入后校验不一致。");
 
         try
         {
@@ -244,10 +266,10 @@ public sealed class ClientComponentUpdateService
             File.Move(temporaryPath, targetPath, overwrite: true);
             string finalHash = ComputeSha256(targetPath);
             if (!finalHash.Equals(expectedHash, StringComparison.OrdinalIgnoreCase))
-                throw new CryptographicException("Hooks 原子替换后校验不一致。");
+                throw new CryptographicException($"组件 {name} 原子替换后校验不一致。");
             TryDelete(backupPath);
-            WriteState(name, definition, channel, targetPath, source);
-            LogService.Info($"Hooks component downloaded and verified: channel={channel}, version={definition.Version}, bytes={payload.LongLength}, sha256={finalHash}, source={source}");
+            LogService.Info(
+                $"Component downloaded and verified: component={name}, channel={channel}, version={definition.Version}, bytes={payload.LongLength}, sha256={finalHash}, source={source}");
             return new VerifiedClientComponent(name, definition.Version, finalHash, targetPath, channel, source);
         }
         catch
@@ -260,11 +282,9 @@ public sealed class ClientComponentUpdateService
     }
 
     private static void WriteState(
-        string name,
-        ClientComponentDefinition definition,
+        IReadOnlyDictionary<string, VerifiedClientComponent> components,
         string channel,
-        string path,
-        Uri source)
+        Uri manifestUri)
     {
         string statePath = Path.Combine(LogService.PersistentDataDirectory, "components", "component_state.json");
         Directory.CreateDirectory(Path.GetDirectoryName(statePath)!);
@@ -273,13 +293,21 @@ public sealed class ClientComponentUpdateService
             SchemaVersion = SupportedSchemaVersion,
             UpdatedAt = DateTimeOffset.Now,
             Channel = channel,
-            Component = name,
-            definition.Version,
-            Sha256 = definition.Sha256.ToLowerInvariant(),
-            FilePath = path,
-            Source = source.ToString()
+            Manifest = manifestUri.ToString(),
+            Components = components.ToDictionary(
+                pair => pair.Key,
+                pair => new
+                {
+                    pair.Value.Version,
+                    Sha256 = pair.Value.Sha256.ToLowerInvariant(),
+                    pair.Value.FilePath,
+                    Source = pair.Value.SourceUri.ToString()
+                },
+                StringComparer.OrdinalIgnoreCase)
         };
-        File.WriteAllText(statePath, JsonSerializer.Serialize(state, new JsonSerializerOptions { WriteIndented = true }), Encoding.UTF8);
+        string temporary = statePath + ".tmp";
+        File.WriteAllText(temporary, JsonSerializer.Serialize(state, JsonOptions), Encoding.UTF8);
+        File.Move(temporary, statePath, overwrite: true);
     }
 
     private static string ComputeSha256(string path)

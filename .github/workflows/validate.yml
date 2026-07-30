@@ -50,6 +50,7 @@ jobs:
           grep -Fq "routerVersion         = \"${client_version}\"" client/scbl-process-router/main.go
           grep -Fq 'read_server_tool_version' server/install_public_server.sh
           grep -Fq 'SCBLControlPlane/{SERVER_TOOL_VERSION}' server/scbl_control_plane.py
+          grep -Fq "Windows 客户端：**v${client_version}**" README.md
           python3 - "$client_version" "$server_version" <<'PY'
           import json, sys
           client_version, server_version = sys.argv[1:3]
@@ -62,7 +63,7 @@ jobs:
           PY
           ! grep -RIl $'\r' server .github docs scripts --include='*.sh' --include='*.py' --include='*.yml' --include='*.yaml'
 
-      - name: Validate external Hooks ownership and embedded files
+      - name: Validate external Hooks ownership and bootstrap packaging
         shell: bash
         run: |
           set -euo pipefail
@@ -70,8 +71,13 @@ jobs:
           test ! -f client/ScblPublicLauncher/EmbeddedFiles/uplay_r1_loader.dll
           manifest=client/ScblPublicLauncher/EmbeddedFiles/SCBL_EMBEDDED_SHA256.txt
           test -f "$manifest"
-          grep -Eq '^[0-9a-fA-F]{64}[[:space:]]+\*?uplay_r1_loader\.dll$' "$manifest"
-          grep -Ev 'uplay_r1_loader\.dll$' "$manifest" | (cd client/ScblPublicLauncher/EmbeddedFiles && sha256sum -c -)
+          ! grep -Eq 'uplay_r1_loader\.dll$' "$manifest"
+          (cd client/ScblPublicLauncher/EmbeddedFiles && sha256sum -c SCBL_EMBEDDED_SHA256.txt)
+          grep -Fq 'Exclude="EmbeddedFiles\uplay_r1_loader.dll"' client/ScblPublicLauncher/SplinterCellCNLauncher.csproj
+          grep -Fq 'bootstrap-components\hooks' client/prepare_bootstrap_hooks.ps1
+          grep -Fq 'uplay_r1_loader.dll.sha256' client/prepare_bootstrap_hooks.ps1
+          grep -Fq 'bootstrap-components/hooks/uplay_r1_loader.dll' client/create_client_full_package.ps1
+          grep -Fq 'Hooks must not be listed in the embedded resource manifest' client/build_launcher_incremental.ps1
 
       - name: Validate server shell, Python and release routing
         shell: bash
@@ -111,7 +117,7 @@ jobs:
         with:
           go-version: '1.23.2'
           cache: true
-          cache-dependency-path: client/scbl-process-router/go.sum
+          cache-dependency-path: client/scbl-process-router/go.mod
 
       - name: Validate Go Route Guard
         if: steps.changes.outputs.router == 'true'

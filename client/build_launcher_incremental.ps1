@@ -1,8 +1,7 @@
 param(
     [switch]$Fast,
     [switch]$Clean,
-    [switch]$SkipRuntimeStop,
-    [string]$RecoveryHooksUrl = "https://github.com/caox233/5th-echelon/releases/download/scbl-public-stable-latest/uplay_r1_loader.dll"
+    [switch]$SkipRuntimeStop
 )
 
 $ErrorActionPreference = "Stop"
@@ -14,42 +13,9 @@ $Manifest = Join-Path $EmbeddedDir "SCBL_EMBEDDED_SHA256.txt"
 if ($Fast) { $env:SCBL_FAST_BUILD = "1" }
 if ($Clean) { $env:SCBL_CLEAN_BUILD = "1" }
 
-function Get-EmbeddedExpectedHash {
-    param([Parameter(Mandatory=$true)][string]$Name)
+function Test-EmbeddedSaveFiles {
     if (!(Test-Path -LiteralPath $Manifest)) {
-        throw "Embedded recovery checksum manifest is missing: $Manifest"
-    }
-    foreach ($Line in Get-Content -LiteralPath $Manifest -Encoding ASCII) {
-        $Match = [regex]::Match($Line.Trim(), '^([0-9a-fA-F]{64})\s+\*?(.+)$')
-        if ($Match.Success -and $Match.Groups[2].Value.Trim() -ieq $Name) {
-            return $Match.Groups[1].Value.ToLowerInvariant()
-        }
-    }
-    throw "Embedded recovery checksum is missing for $Name"
-}
-
-function Ensure-EmbeddedRecoveryHooks {
-    $DllPath = Join-Path $EmbeddedDir "uplay_r1_loader.dll"
-    if (Test-Path -LiteralPath $DllPath) { return }
-
-    $Expected = Get-EmbeddedExpectedHash -Name "uplay_r1_loader.dll"
-    New-Item -ItemType Directory -Force -Path $EmbeddedDir | Out-Null
-    $Temporary = "$DllPath.download"
-    Remove-Item -Force $Temporary -ErrorAction SilentlyContinue
-    Write-Host "Clean checkout has no binary recovery Hook; downloading the pinned stable fallback once..."
-    Invoke-WebRequest -Uri $RecoveryHooksUrl -OutFile $Temporary -UseBasicParsing
-    $Actual = (Get-FileHash -LiteralPath $Temporary -Algorithm SHA256).Hash.ToLowerInvariant()
-    if ($Actual -ne $Expected) {
-        Remove-Item -Force $Temporary -ErrorAction SilentlyContinue
-        throw "Downloaded recovery Hooks checksum mismatch. expected=$Expected actual=$Actual"
-    }
-    Move-Item -Force $Temporary $DllPath
-    Write-Host "Embedded recovery Hook prepared: $Expected"
-}
-
-function Test-EmbeddedRecoveryFiles {
-    if (!(Test-Path -LiteralPath $Manifest)) {
-        throw "Embedded recovery checksum manifest is missing: $Manifest"
+        throw "Embedded save checksum manifest is missing: $Manifest"
     }
 
     foreach ($Line in Get-Content -LiteralPath $Manifest -Encoding ASCII) {
@@ -59,11 +25,14 @@ function Test-EmbeddedRecoveryFiles {
         if (!$Match.Success) { throw "Invalid embedded checksum line: $Text" }
         $Expected = $Match.Groups[1].Value.ToLowerInvariant()
         $Name = $Match.Groups[2].Value.Trim()
+        if ($Name -ieq "uplay_r1_loader.dll") {
+            throw "Hooks must not be listed in the embedded resource manifest."
+        }
         $File = Join-Path $EmbeddedDir $Name
-        if (!(Test-Path -LiteralPath $File)) { throw "Missing embedded recovery file: $File" }
+        if (!(Test-Path -LiteralPath $File)) { throw "Missing embedded save file: $File" }
         $Actual = (Get-FileHash -LiteralPath $File -Algorithm SHA256).Hash.ToLowerInvariant()
         if ($Actual -ne $Expected) {
-            throw "Embedded recovery checksum mismatch: $Name expected=$Expected actual=$Actual"
+            throw "Embedded save checksum mismatch: $Name expected=$Expected actual=$Actual"
         }
     }
 }
@@ -73,16 +42,15 @@ if (!$SkipRuntimeStop) {
     if ($LASTEXITCODE -ne 0) { throw "Failed to stop SCBL runtime processes." }
 }
 
-Ensure-EmbeddedRecoveryHooks
-Test-EmbeddedRecoveryFiles
+Test-EmbeddedSaveFiles
 
-Write-Host "Building launcher incrementally without refreshing the Hooks source component..."
-Write-Host "The embedded DLL is an offline recovery fallback; test/stable Hooks are resolved by the component manifest at runtime."
+Write-Host "Building Launcher incrementally without downloading or embedding Hooks..."
+Write-Host "Hooks is a server-managed component; full packages carry a separate bootstrap copy."
 & powershell -ExecutionPolicy Bypass -File (Join-Path $LauncherRoot "build_publish.ps1")
 if ($LASTEXITCODE -ne 0) { throw "Launcher build failed." }
 
 $Output = Join-Path $LauncherRoot "publish-single\SplinterCellCNLauncher.exe"
 if (!(Test-Path -LiteralPath $Output)) { throw "Launcher output is missing: $Output" }
 $Hash = (Get-FileHash -LiteralPath $Output -Algorithm SHA256).Hash.ToLowerInvariant()
-Write-Host "Incremental launcher build complete: $Output"
+Write-Host "Incremental Launcher build complete: $Output"
 Write-Host "SHA256: $Hash"

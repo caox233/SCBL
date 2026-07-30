@@ -1,10 +1,8 @@
-name: Validate component updates
+name: Server component management
 
 on:
   pull_request:
     paths:
-      - "client/ScblPublicLauncher/**"
-      - "client/build_launcher_incremental.ps1"
       - "server/scbl_component_manager.py"
       - "server/scbl_publish_hooks_bundle.py"
       - "server/scbl_invite_test_manager.py"
@@ -21,8 +19,6 @@ on:
     branches:
       - main
     paths:
-      - "client/ScblPublicLauncher/**"
-      - "client/build_launcher_incremental.ps1"
       - "server/scbl_component_manager.py"
       - "server/scbl_publish_hooks_bundle.py"
       - "server/scbl_invite_test_manager.py"
@@ -36,6 +32,10 @@ on:
       - "scripts/install-server.sh"
       - ".github/workflows/validate-component-updates.yml"
   workflow_dispatch:
+
+concurrency:
+  group: server-component-management-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
 
 permissions:
   contents: read
@@ -72,6 +72,12 @@ jobs:
               compile(source, f'{path}:{marker}', 'exec')
           print(f'validated embedded Python heredocs: {len(blocks)}')
           PYEOF
+      - name: Exercise an empty component store
+        run: |
+          root="$RUNNER_TEMP/scbl-components"
+          python3 server/scbl_component_manager.py --root "$root" init
+          python3 server/scbl_component_manager.py --root "$root" status
+          python3 server/scbl_component_manager.py --root "$root" verify
       - uses: actions/upload-artifact@v4
         with:
           name: scbl-component-manager-linux
@@ -81,36 +87,5 @@ jobs:
             server/scbl_invite_test_manager.py
             server/install_component_manager.sh
             server/scbl_server_diagnostics.sh
-          if-no-files-found: error
-          retention-days: 14
-      - uses: actions/upload-artifact@v4
-        with:
-          name: scbl-invite-test-server-tool-linux
-          path: |
-            server/install_public_server.sh
-            server/scbl_component_manager.py
-            server/scbl_publish_hooks_bundle.py
-            server/scbl_invite_test_manager.py
-            server/install_component_manager.sh
-            server/install_invite_test_menu.sh
-            server/scbl_server_diagnostics.sh
-          if-no-files-found: error
-          retention-days: 14
-
-  windows-launcher-build:
-    runs-on: windows-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-dotnet@v4
-        with:
-          dotnet-version: 8.0.x
-      - name: Build launcher incrementally
-        shell: powershell
-        run: |
-          ./client/build_launcher_incremental.ps1 -Fast -SkipRuntimeStop
-      - uses: actions/upload-artifact@v4
-        with:
-          name: scbl-launcher-component-test-win-x86
-          path: client/ScblPublicLauncher/publish-single/SplinterCellCNLauncher.exe
           if-no-files-found: error
           retention-days: 14

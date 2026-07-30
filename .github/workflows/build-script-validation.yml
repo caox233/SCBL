@@ -1,0 +1,76 @@
+name: Build script validation
+
+on:
+  pull_request:
+    paths:
+      - "client/build_all_windows.ps1"
+      - "client/build_launcher_incremental.ps1"
+      - "client/prepare_bootstrap_hooks.ps1"
+      - "client/create_client_full_package.ps1"
+      - ".github/workflows/*component*.yml"
+      - ".github/workflows/assemble-client-package.yml"
+      - ".github/workflows/build-script-validation.yml"
+  push:
+    branches:
+      - main
+    paths:
+      - "client/build_all_windows.ps1"
+      - "client/build_launcher_incremental.ps1"
+      - "client/prepare_bootstrap_hooks.ps1"
+      - "client/create_client_full_package.ps1"
+      - ".github/workflows/*component*.yml"
+      - ".github/workflows/assemble-client-package.yml"
+      - ".github/workflows/build-script-validation.yml"
+  workflow_dispatch:
+
+concurrency:
+  group: build-script-validation-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  powershell-syntax:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Parse build scripts
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $files = @(
+            "client/build_all_windows.ps1",
+            "client/build_launcher_incremental.ps1",
+            "client/prepare_bootstrap_hooks.ps1",
+            "client/create_client_full_package.ps1"
+          )
+          foreach ($file in $files) {
+            $tokens = $null
+            $errors = $null
+            [void][System.Management.Automation.Language.Parser]::ParseFile((Resolve-Path $file), [ref]$tokens, [ref]$errors)
+            if ($errors.Count -gt 0) {
+              $errors | Format-List | Out-String | Write-Error
+              throw "PowerShell parse failed: $file"
+            }
+            Write-Host "PowerShell syntax OK: $file"
+          }
+
+  yaml-parse:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install YAML parser
+        run: python3 -m pip install --disable-pip-version-check PyYAML==6.0.2
+      - name: Parse workflow YAML
+        run: |
+          python3 - <<'PY'
+          import pathlib
+          import yaml
+
+          files = sorted(pathlib.Path('.github/workflows').glob('*.yml'))
+          for path in files:
+              with path.open('r', encoding='utf-8') as stream:
+                  yaml.safe_load(stream)
+              print(f'YAML syntax OK: {path}')
+          PY

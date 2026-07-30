@@ -1,0 +1,76 @@
+name: Updater component
+
+on:
+  pull_request:
+    paths:
+      - "client/SCBL.Updater/**"
+      - "client/SCBL.Version.props"
+      - "VERSION_CLIENT"
+      - ".github/workflows/updater-component.yml"
+  push:
+    branches:
+      - main
+    paths:
+      - "client/SCBL.Updater/**"
+      - "client/SCBL.Version.props"
+      - "VERSION_CLIENT"
+      - ".github/workflows/updater-component.yml"
+  workflow_dispatch:
+
+concurrency:
+  group: updater-component-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  updater-win-x86:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 8.0.x
+      - uses: actions/cache@v4
+        with:
+          path: ~/.nuget/packages
+          key: nuget-updater-${{ runner.os }}-${{ hashFiles('client/SCBL.Updater/**/*.csproj', 'client/SCBL.Version.props') }}
+          restore-keys: |
+            nuget-updater-${{ runner.os }}-
+      - name: Build Updater
+        shell: pwsh
+        run: |
+          $elapsed = Measure-Command { ./client/SCBL.Updater/build_windows.ps1 }
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          "Updater component build: $([math]::Round($elapsed.TotalSeconds, 1))s" | Tee-Object -FilePath $env:GITHUB_STEP_SUMMARY -Append
+      - name: Assemble immutable Updater component
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $out = "component-output"
+          New-Item -ItemType Directory -Force -Path $out | Out-Null
+          $source = "client/SCBL.Updater/publish/SCBL.Updater.exe"
+          if (!(Test-Path $source)) { throw "Updater output is missing: $source" }
+          Copy-Item $source "$out/SCBL.Updater.exe"
+          $hash = (Get-FileHash "$out/SCBL.Updater.exe" -Algorithm SHA256).Hash.ToLowerInvariant()
+          "$hash  SCBL.Updater.exe" | Set-Content "$out/SCBL.Updater.exe.sha256" -Encoding ASCII
+          "${{ github.event.pull_request.head.sha || github.sha }}" | Set-Content "$out/commit_sha.txt" -Encoding ASCII
+          $version = (Get-Content VERSION_CLIENT -Raw).Trim() + ".${{ github.run_number }}"
+          [ordered]@{
+            schemaVersion = 2
+            component = "updater"
+            version = $version
+            commit = "${{ github.event.pull_request.head.sha || github.sha }}"
+            file = "SCBL.Updater.exe"
+            sha256 = $hash
+            size = (Get-Item "$out/SCBL.Updater.exe").Length
+            minLauncherVersion = (Get-Content VERSION_CLIENT -Raw).Trim()
+            updateMode = "next-launch"
+          } | ConvertTo-Json -Depth 5 | Set-Content "$out/component.json" -Encoding UTF8
+      - uses: actions/upload-artifact@v4
+        with:
+          name: scbl-updater-win-x86
+          path: component-output/*
+          if-no-files-found: error
+          retention-days: 14

@@ -17,6 +17,7 @@ PUBLISHER_TARGET="$TARGET_DIR/scbl_publish_hooks_bundle.py"
 INVITE_TEST_TARGET="$TARGET_DIR/scbl_invite_test_manager.py"
 COMMAND="/usr/local/bin/scbl-component-manager"
 PUBLISH_COMMAND="/usr/local/bin/scbl-publish-hooks-test"
+TEST_COMMAND="/usr/local/bin/scbl-test-manager"
 INVITE_TEST_COMMAND="/usr/local/bin/scbl-invite-test"
 UPDATE_ROOT="$SCBL_ROOT/client-updates"
 
@@ -53,12 +54,14 @@ cat >"$PUBLISH_COMMAND" <<EOF
 set -euo pipefail
 exec python3 "$PUBLISHER_TARGET" --root "$UPDATE_ROOT" "\$@"
 EOF
-cat >"$INVITE_TEST_COMMAND" <<EOF
+for target in "$TEST_COMMAND" "$INVITE_TEST_COMMAND"; do
+  cat >"$target" <<EOF
 #!/usr/bin/env bash
 set -euo pipefail
 exec python3 "$INVITE_TEST_TARGET" --root "$SCBL_ROOT" "\$@"
 EOF
-chmod 0755 "$COMMAND" "$PUBLISH_COMMAND" "$INVITE_TEST_COMMAND"
+done
+chmod 0755 "$COMMAND" "$PUBLISH_COMMAND" "$TEST_COMMAND" "$INVITE_TEST_COMMAND"
 
 "$COMMAND" init
 "$COMMAND" verify
@@ -66,11 +69,13 @@ chmod 0755 "$COMMAND" "$PUBLISH_COMMAND" "$INVITE_TEST_COMMAND"
 
 echo "组件管理命令已安装：$COMMAND"
 echo "Hooks 测试包发布命令已安装：$PUBLISH_COMMAND"
-echo "邀请/组队测试一键命令已安装：$INVITE_TEST_COMMAND"
-echo "测试包上传目录：$SCBL_ROOT/incoming/invite-test/"
-echo "一键部署最新测试包：sudo scbl-invite-test deploy"
-echo "查看测试状态：sudo scbl-invite-test status"
-echo "一键恢复测试前状态：sudo scbl-invite-test rollback"
-echo "收集最近一小时日志：sudo scbl-invite-test diagnostics"
+echo "测试管理命令已安装：$TEST_COMMAND"
+echo "兼容命令已保留：$INVITE_TEST_COMMAND"
+echo "查看 GitHub 测试候选：sudo scbl-test-manager releases"
+echo "交互选择并部署：sudo scbl-test-manager install --select"
+echo "部署最新测试候选：sudo scbl-test-manager install --latest"
+echo "查看测试状态：sudo scbl-test-manager status"
+echo "一键恢复测试前状态：sudo scbl-test-manager rollback"
+echo "收集最近一小时日志：sudo scbl-test-manager diagnostics"
 echo "提升同一测试产物：sudo scbl-component-manager promote --component hooks"
 echo "回滚正式引用：sudo scbl-component-manager rollback --component hooks --version <版本>"

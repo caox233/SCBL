@@ -3654,8 +3654,10 @@ collect_server_diagnostics_menu() {
 }
 
 
-ensure_invite_test_command() {
-  if [[ -x /usr/local/bin/scbl-invite-test ]]; then
+ensure_test_management_command() {
+  TEST_MANAGER_COMMAND=""
+  if [[ -x /usr/local/bin/scbl-test-manager ]]; then
+    TEST_MANAGER_COMMAND="/usr/local/bin/scbl-test-manager"
     return 0
   fi
   if [[ -f "$MANAGER_DIR/install_component_manager.sh" \
@@ -3664,79 +3666,91 @@ ensure_invite_test_command() {
         && -f "$MANAGER_DIR/scbl_invite_test_manager.py" ]]; then
     SCBL_ROOT="$SCBL_ROOT" bash "$MANAGER_DIR/install_component_manager.sh"
   fi
-  if [[ ! -x /usr/local/bin/scbl-invite-test ]]; then
-    echo "邀请/组队测试管理命令尚未安装，请先执行菜单14升级 Server Tool。"
-    return 1
+  if [[ -x /usr/local/bin/scbl-test-manager ]]; then
+    TEST_MANAGER_COMMAND="/usr/local/bin/scbl-test-manager"
+    return 0
   fi
+  if [[ -x /usr/local/bin/scbl-invite-test ]]; then
+    TEST_MANAGER_COMMAND="/usr/local/bin/scbl-invite-test"
+    return 0
+  fi
+  echo "测试管理命令尚未安装，请先执行菜单14升级 Server Tool。"
+  return 1
 }
 
-invite_test_client_help() {
-  cat <<'INVITECLIENTHELP'
+test_management_client_help() {
+  cat <<'TESTCLIENTHELP'
 
 两台 Windows 测试机：
-  1. 解压同一份 SCBL-Invite-Party-Test-*.zip。
-  2. 各运行 Windows/Create-Test-Shortcut.ps1 一次。
-  3. 完全退出普通启动器和游戏。
-  4. 只使用桌面的“SCBL 测试通道”快捷方式启动。
-  5. 测试顺序：在线5分钟 -> 私房直邀 -> 大厅组队后建私房 -> 大厅组队后快速匹配。
+  1. 使用同一个支持“测试通道”的 SCBL Launcher，不再从服务端测试包手工复制 DLL。
+  2. 完全退出普通启动器和游戏。
+  3. 只使用桌面的“SCBL 测试通道”快捷方式启动。
+  4. Launcher 会自动下载本次 test Hooks；两台机器确认 DLL SHA256 一致。
+  5. 测试顺序：基础联网并在线5分钟 -> 私房直邀 -> 大厅组队后建私房 -> 大厅组队后快速匹配。
 
 测试失败后不要连续重启：
   - 两台电脑各生成一次客户端诊断包；
   - 服务端在本菜单选择“收集最近一小时测试日志”。
-INVITECLIENTHELP
+TESTCLIENTHELP
 }
 
-invite_test_menu() {
+test_management_menu() {
   load_env_if_exists; set_defaults
   mkdir -p "$SCBL_ROOT/incoming/invite-test"
   while true; do
-    cat <<INVITETESTMENU
+    cat <<TESTMANAGEMENTMENU
 
-邀请 / 组队测试版本管理：
-  测试包目录：$SCBL_ROOT/incoming/invite-test/
-  1. 显示上传目录和已有测试包
-  2. 一键部署最新测试包（自动备份、校验、失败回滚）
-  3. 查看当前测试版本状态
-  4. 一键恢复测试前状态
-  5. 收集最近一小时测试日志
-  6. 查看两台 Windows 客户端测试方法
+测试管理：
+  GitHub 测试仓库：${SCBL_TEST_REPOSITORY:-caox233/5th-echelon}
+  1. 查看 GitHub 可用测试候选
+  2. 选择候选并自动下载、校验、部署
+  3. 下载并部署最新测试候选
+  4. 查看当前测试版本状态
+  5. 一键恢复测试前状态
+  6. 收集最近一小时测试日志
+  7. 查看两台 Windows 客户端测试方法
   0. 返回
-INVITETESTMENU
+TESTMANAGEMENTMENU
     read -e -r -p "请选择: " c || true
     case "$c" in
       1)
-        echo "请通过 Xshell/SFTP 将完整 SCBL-Invite-Party-Test-*.zip 上传到："
-        echo "  $SCBL_ROOT/incoming/invite-test/"
-        echo
-        ls -lah "$SCBL_ROOT/incoming/invite-test/" 2>/dev/null || true
+        if ensure_test_management_command; then
+          "$TEST_MANAGER_COMMAND" releases || true
+        fi
         pause
         ;;
       2)
-        if ensure_invite_test_command; then
-          /usr/local/bin/scbl-invite-test deploy || true
+        if ensure_test_management_command; then
+          "$TEST_MANAGER_COMMAND" install --select || true
         fi
         pause
         ;;
       3)
-        if ensure_invite_test_command; then
-          /usr/local/bin/scbl-invite-test status || true
+        if ensure_test_management_command; then
+          "$TEST_MANAGER_COMMAND" install --latest || true
         fi
         pause
         ;;
       4)
-        if ensure_invite_test_command; then
-          /usr/local/bin/scbl-invite-test rollback || true
+        if ensure_test_management_command; then
+          "$TEST_MANAGER_COMMAND" status || true
         fi
         pause
         ;;
       5)
-        if ensure_invite_test_command; then
-          /usr/local/bin/scbl-invite-test diagnostics --since "1 hour ago" || true
+        if ensure_test_management_command; then
+          "$TEST_MANAGER_COMMAND" rollback || true
         fi
         pause
         ;;
       6)
-        invite_test_client_help
+        if ensure_test_management_command; then
+          "$TEST_MANAGER_COMMAND" diagnostics --since "1 hour ago" || true
+        fi
+        pause
+        ;;
+      7)
+        test_management_client_help
         pause
         ;;
       0) return 0 ;;
@@ -3768,7 +3782,7 @@ main_menu() {
 13. 客户端公告管理
 14. SCBL 服务端工具在线升级
 15. 一键收集服务端诊断日志
-16. 邀请 / 组队测试版本管理
+16. 测试管理
 0. 退出
 MENU
     read -e -r -p "请选择: " choice || true
@@ -3788,7 +3802,7 @@ MENU
       13) configure_client_announcements; pause ;;
       14) server_tool_update_menu ;;
       15) collect_server_diagnostics_menu ;;
-      16) invite_test_menu ;;
+      16) test_management_menu ;;
       0) exit 0 ;;
       *) echo "无效选择。" ;;
     esac

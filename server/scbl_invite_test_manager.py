@@ -24,6 +24,9 @@ import sys
 import tempfile
 import time
 import zipfile
+import urllib.error
+import urllib.parse
+import urllib.request
 from pathlib import Path, PurePosixPath
 from typing import Any
 
@@ -34,6 +37,130 @@ MAX_BUNDLE_BYTES = 256 * 1024 * 1024
 MAX_UNCOMPRESSED_BYTES = 512 * 1024 * 1024
 MAX_ENTRY_BYTES = 160 * 1024 * 1024
 DEFAULT_SERVICE = "scbl-dedicated.service"
+DEFAULT_TEST_REPOSITORY = "caox233/5th-echelon"
+GITHUB_API_ROOT = "https://api.github.com"
+MAX_GITHUB_RESPONSE_BYTES = 4 * 1024 * 1024
+MAX_CHECKSUM_BYTES = 64 * 1024
+TEST_BUNDLE_RE = re.compile(r"^SCBL-(?:Invite-Party-)?Test-[A-Za-z0-9][A-Za-z0-9._-]*\.zip$")
+REPOSITORY_RE = re.compile(r"^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$")
+TRUSTED_GITHUB_HOSTS = {
+    "api.github.com",
+    "github.com",
+    "objects.githubusercontent.com",
+    "release-assets.githubusercontent.com",
+}
+
+
+def validate_repository(value: str) -> str:
+    value = value.strip()
+    if not REPOSITORY_RE.fullmatch(value):
+        raise ValueError(f"GitHub 仓库格式无效：{value!r}")
+    return value
+
+
+def validate_github_url(value: str) -> str:
+    parsed = urllib.parse.urlparse(value)
+    if parsed.scheme != "https" or parsed.hostname not in TRUSTED_GITHUB_HOSTS:
+        raise ValueError(f"拒绝非受信任的 GitHub 下载地址：{value}")
+    if parsed.username or parsed.password:
+        raise ValueError("GitHub 下载地址不得包含用户名或密码。")
+    return value
+
+
+def parse_release_checksum(text: str, expected_name: str) -> str:
+    line = text.strip()
+    match = re.fullmatch(rf"([0-9a-fA-F]{{64}})\s+\*?{re.escape(expected_name)}", line)
+    if not match:
+        raise ValueError(f"Release SHA256 文件格式无效，必须校验 {expected_name}。")
+    return match.group(1).lower()
+
+
+def release_candidates_from_payload(release: dict[str, Any]) -> list[dict[str, Any]]:
+    if bool(release.get("draft")):
+        return []
+    tag = str(release.get("tag_name", "")).strip()
+    if not tag:
+        return []
+    raw_assets = release.get("assets", [])
+    if not isinstance(raw_assets, list):
+        return []
+
+    assets: dict[str, dict[str, Any]] = {}
+    duplicates: set[str] = set()
+    for raw in raw_assets:
+        if not isinstance(raw, dict):
+            continue
+        name = str(raw.get("name", "")).strip()
+        if not name:
+            continue
+        if name in assets:
+            duplicates.add(name)
+        assets[name] = raw
+
+    candidates: list[dict[str, Any]] = []
+    for bundle_name, bundle_asset in sorted(assets.items()):
+        if bundle_name in duplicates or not TEST_BUNDLE_RE.fullmatch(bundle_name):
+            continue
+        checksum_name = bundle_name + ".sha256"
+        checksum_asset = assets.get(checksum_name)
+        if checksum_asset is None or checksum_name in duplicates:
+            continue
+
+        try:
+            bundle_url = validate_github_url(str(bundle_asset.get("browser_download_url", "")).strip())
+            checksum_url = validate_github_url(str(checksum_asset.get("browser_download_url", "")).strip())
+            bundle_size = int(bundle_asset.get("size", 0))
+            checksum_size = int(checksum_asset.get("size", 0))
+        except (TypeError, ValueError):
+            continue
+        if bundle_size <= 0 or bundle_size > MAX_BUNDLE_BYTES:
+            continue
+        if checksum_size <= 0 or checksum_size > MAX_CHECKSUM_BYTES:
+            continue
+        candidates.append(
+            {
+                "tag": tag,
+                "releaseName": str(release.get("name") or tag),
+                "prerelease": bool(release.get("prerelease")),
+                "publishedAt": str(release.get("published_at") or release.get("created_at") or ""),
+                "htmlUrl": str(release.get("html_url") or ""),
+                "bundleName": bundle_name,
+                "bundleUrl": bundle_url,
+                "bundleSize": bundle_size,
+                "checksumName": checksum_name,
+                "checksumUrl": checksum_url,
+                "checksumSize": checksum_size,
+            }
+        )
+    return candidates
+
+
+def print_release_candidates(candidates: list[dict[str, Any]]) -> None:
+    if not candidates:
+        print("GitHub Release 中没有可用的 SCBL 测试候选。")
+        return
+    for index, candidate in enumerate(candidates, start=1):
+        marker = "预发布" if candidate["prerelease"] else "正式 Release"
+        size_mb = candidate["bundleSize"] / (1024 * 1024)
+        print(f"[{index}] {candidate['tag']}  ({marker})")
+        print(f"    {candidate['releaseName']}")
+        print(f"    {candidate['bundleName']}  {size_mb:.2f} MiB")
+        if candidate["publishedAt"]:
+            print(f"    发布时间：{candidate['publishedAt']}")
+
+
+def choose_release_candidate(candidates: list[dict[str, Any]]) -> dict[str, Any]:
+    if not candidates:
+        raise FileNotFoundError("GitHub Release 中没有可下载的测试候选。")
+    print_release_candidates(candidates)
+    answer = input(f"请选择要下载并部署的候选 [1-{len(candidates)}，0取消]：").strip()
+    if answer == "0":
+        raise RuntimeError("已取消。")
+    if not answer.isdigit() or not 1 <= int(answer) <= len(candidates):
+        raise ValueError("选择无效。")
+    return candidates[int(answer) - 1]
+
+
 
 
 def utc_now() -> str:
@@ -255,9 +382,12 @@ def validate_candidate(root: Path) -> dict[str, Any]:
 
 
 class InviteTestManager:
-    def __init__(self, scbl_root: Path, service: str = DEFAULT_SERVICE) -> None:
+    def __init__(self, scbl_root: Path, service: str = DEFAULT_SERVICE, repository: str | None = None) -> None:
         self.root = scbl_root.resolve()
         self.service = service
+        self.repository = validate_repository(
+            repository or os.environ.get("SCBL_TEST_REPOSITORY", DEFAULT_TEST_REPOSITORY)
+        )
         self.incoming = self.root / "incoming/invite-test"
         self.update_root = self.root / "client-updates"
         self.server_dir = self.root / "server"
@@ -279,15 +409,173 @@ class InviteTestManager:
     def latest_bundle(self) -> Path:
         self.initialize()
         candidates = sorted(
-            (item for item in self.incoming.glob("SCBL-Invite-Party-Test-*.zip") if item.is_file()),
+            (
+                item
+                for item in self.incoming.glob("SCBL-*.zip")
+                if item.is_file() and TEST_BUNDLE_RE.fullmatch(item.name)
+            ),
             key=lambda item: item.stat().st_mtime,
             reverse=True,
         )
         if not candidates:
             raise FileNotFoundError(
-                f"未找到测试包。请把 SCBL-Invite-Party-Test-*.zip 上传到：{self.incoming}"
+                f"本地下载缓存中没有测试包：{self.incoming}。请先从 GitHub 下载测试候选。"
             )
         return candidates[0]
+
+    def _github_headers(self) -> dict[str, str]:
+        headers = {
+            "Accept": "application/vnd.github+json",
+            "User-Agent": "SCBL-Test-Manager/1",
+            "X-GitHub-Api-Version": "2022-11-28",
+        }
+        token = os.environ.get("SCBL_GITHUB_TOKEN") or os.environ.get("GITHUB_TOKEN")
+        if token:
+            headers["Authorization"] = f"Bearer {token.strip()}"
+        return headers
+
+    def _read_github_url(self, url: str, *, max_bytes: int) -> bytes:
+        validate_github_url(url)
+        request = urllib.request.Request(url, headers=self._github_headers())
+        try:
+            with urllib.request.urlopen(request, timeout=45) as response:
+                final_url = response.geturl()
+                validate_github_url(final_url)
+                length = response.headers.get("Content-Length")
+                if length and int(length) > max_bytes:
+                    raise ValueError(f"GitHub 响应超过大小限制：{length} bytes")
+                data = response.read(max_bytes + 1)
+        except urllib.error.HTTPError as exc:
+            detail = exc.read(4096).decode("utf-8", errors="replace").strip()
+            raise RuntimeError(f"GitHub 请求失败：HTTP {exc.code} {detail}") from exc
+        except urllib.error.URLError as exc:
+            raise RuntimeError(f"无法连接 GitHub：{exc.reason}") from exc
+        if len(data) > max_bytes:
+            raise ValueError(f"GitHub 响应超过大小限制：>{max_bytes} bytes")
+        return data
+
+    def _github_json(self, url: str) -> Any:
+        raw = self._read_github_url(url, max_bytes=MAX_GITHUB_RESPONSE_BYTES)
+        try:
+            return json.loads(raw.decode("utf-8"))
+        except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+            raise ValueError("GitHub API 返回的 JSON 无效。") from exc
+
+    def release_candidates(self, *, limit: int = 30) -> list[dict[str, Any]]:
+        if limit < 1 or limit > 100:
+            raise ValueError("Release 查询数量必须在 1 到 100 之间。")
+        repository = urllib.parse.quote(self.repository, safe="/")
+        payload = self._github_json(
+            f"{GITHUB_API_ROOT}/repos/{repository}/releases?per_page={limit}"
+        )
+        if not isinstance(payload, list):
+            raise ValueError("GitHub Releases API 返回格式无效。")
+        candidates: list[dict[str, Any]] = []
+        for release in payload:
+            if isinstance(release, dict):
+                candidates.extend(release_candidates_from_payload(release))
+        return candidates
+
+    def release_candidate_by_tag(self, tag: str) -> dict[str, Any]:
+        tag = tag.strip()
+        if not tag or len(tag) > 120:
+            raise ValueError("Release 标签无效。")
+        repository = urllib.parse.quote(self.repository, safe="/")
+        encoded_tag = urllib.parse.quote(tag, safe="")
+        payload = self._github_json(
+            f"{GITHUB_API_ROOT}/repos/{repository}/releases/tags/{encoded_tag}"
+        )
+        if not isinstance(payload, dict):
+            raise ValueError("GitHub Release API 返回格式无效。")
+        candidates = release_candidates_from_payload(payload)
+        if not candidates:
+            raise FileNotFoundError(
+                f"Release {tag} 不包含测试 ZIP 及同名 .sha256 文件。"
+            )
+        if len(candidates) != 1:
+            names = ", ".join(candidate["bundleName"] for candidate in candidates)
+            raise RuntimeError(f"Release {tag} 包含多个测试候选，请从列表选择：{names}")
+        return candidates[0]
+
+    def _download_asset(self, asset: dict[str, Any], key: str, destination: Path, max_bytes: int) -> None:
+        url = validate_github_url(str(asset[key]))
+        request = urllib.request.Request(url, headers=self._github_headers())
+        copied = 0
+        try:
+            with urllib.request.urlopen(request, timeout=90) as response, destination.open("xb") as output:
+                validate_github_url(response.geturl())
+                length = response.headers.get("Content-Length")
+                if length and int(length) > max_bytes:
+                    raise ValueError(f"GitHub 下载文件超过大小限制：{length} bytes")
+                while True:
+                    chunk = response.read(min(1024 * 1024, max_bytes - copied + 1))
+                    if not chunk:
+                        break
+                    copied += len(chunk)
+                    if copied > max_bytes:
+                        raise ValueError(f"GitHub 下载文件超过大小限制：>{max_bytes} bytes")
+                    output.write(chunk)
+        except urllib.error.HTTPError as exc:
+            detail = exc.read(4096).decode("utf-8", errors="replace").strip()
+            raise RuntimeError(f"GitHub 下载失败：HTTP {exc.code} {detail}") from exc
+        except urllib.error.URLError as exc:
+            raise RuntimeError(f"无法从 GitHub 下载测试候选：{exc.reason}") from exc
+        if copied == 0:
+            raise ValueError("GitHub 下载文件为空。")
+
+    def download_candidate(self, candidate: dict[str, Any]) -> dict[str, Any]:
+        self.initialize()
+        bundle_name = str(candidate["bundleName"])
+        checksum_name = str(candidate["checksumName"])
+        final_bundle = self.incoming / bundle_name
+        final_checksum = self.incoming / checksum_name
+        metadata_path = self.incoming / f"{bundle_name}.release.json"
+        if final_bundle.is_symlink() or final_checksum.is_symlink() or metadata_path.is_symlink():
+            raise ValueError("测试候选缓存路径不得是符号链接。")
+
+        with tempfile.TemporaryDirectory(prefix="scbl-test-download-") as temporary_name:
+            temporary = Path(temporary_name)
+            checksum_file = temporary / checksum_name
+            self._download_asset(candidate, "checksumUrl", checksum_file, MAX_CHECKSUM_BYTES)
+            expected = parse_release_checksum(
+                checksum_file.read_text(encoding="ascii", errors="strict"),
+                bundle_name,
+            )
+
+            reused = final_bundle.is_file() and sha256_file(final_bundle) == expected
+            if not reused:
+                downloaded = temporary / bundle_name
+                self._download_asset(candidate, "bundleUrl", downloaded, MAX_BUNDLE_BYTES)
+                actual = sha256_file(downloaded)
+                if actual != expected:
+                    raise ValueError(
+                        f"GitHub 测试包 SHA256 不一致：expected={expected}, actual={actual}"
+                    )
+                os.replace(downloaded, final_bundle)
+            actual = sha256_file(final_bundle)
+            if actual != expected:
+                raise ValueError("测试包写入缓存后 SHA256 不一致。")
+            os.replace(checksum_file, final_checksum)
+
+        metadata = {
+            "schemaVersion": 1,
+            "repository": self.repository,
+            "downloadedAt": utc_now(),
+            "sha256": expected,
+            "reused": reused,
+            **candidate,
+            "bundle": str(final_bundle),
+        }
+        atomic_write_json(metadata_path, metadata)
+        return metadata
+
+    def download_latest_candidate(self) -> dict[str, Any]:
+        candidates = self.release_candidates()
+        if not candidates:
+            raise FileNotFoundError(
+                f"{self.repository} 的 GitHub Releases 中没有可用测试候选。"
+            )
+        return self.download_candidate(candidates[0])
 
     def _require_runtime(self) -> None:
         if os.geteuid() != 0:
@@ -349,7 +637,7 @@ class InviteTestManager:
                 if active.get("status") == "active":
                     raise RuntimeError("已有测试候选处于启用状态。请先执行回滚，再部署新的测试包。")
 
-            print("准备一键部署邀请/组队测试候选：")
+            print("准备部署 SCBL 测试候选：")
             print(f"  测试包：{bundle}")
             print(f"  来源提交：{candidate['sourceCommit']}")
             print(f"  Hooks：{candidate['hooksVersion']}  {candidate['hooksSha256']}")
@@ -418,7 +706,7 @@ class InviteTestManager:
     def rollback(self, *, assume_yes: bool) -> dict[str, Any]:
         self._require_runtime()
         if not self.state_path.is_file():
-            raise FileNotFoundError("没有处于启用状态的邀请测试候选。")
+            raise FileNotFoundError("没有处于启用状态的测试候选。")
         state = json.loads(self.state_path.read_text(encoding="utf-8"))
         if state.get("status") != "active":
             raise RuntimeError("最近的测试候选已经回滚。")
@@ -490,39 +778,79 @@ class InviteTestManager:
 
 
 def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(description="SCBL 邀请/组队测试候选一键管理")
+    parser = argparse.ArgumentParser(description="SCBL 测试候选管理")
     parser.add_argument("--root", type=Path, default=Path(os.environ.get("SCBL_ROOT", "/opt/scbl-public")))
     parser.add_argument("--service", default=DEFAULT_SERVICE)
+    parser.add_argument(
+        "--repository",
+        default=os.environ.get("SCBL_TEST_REPOSITORY", DEFAULT_TEST_REPOSITORY),
+        help=f"测试 Release 仓库，默认 {DEFAULT_TEST_REPOSITORY}",
+    )
     sub = parser.add_subparsers(dest="command", required=True)
 
-    deploy = sub.add_parser("deploy", help="校验并一键部署最新测试包")
-    deploy.add_argument("--bundle", type=Path, help="测试包路径；省略时自动选择 incoming/invite-test 中最新 ZIP")
+    releases = sub.add_parser("releases", help="查看 GitHub 可用测试候选")
+    releases.add_argument("--limit", type=int, default=30)
+
+    install = sub.add_parser("install", help="从 GitHub 下载并部署测试候选")
+    source = install.add_mutually_exclusive_group(required=True)
+    source.add_argument("--select", action="store_true", help="交互选择 GitHub 测试候选")
+    source.add_argument("--latest", action="store_true", help="使用最新 GitHub 测试候选")
+    source.add_argument("--tag", help="使用指定 GitHub Release 标签")
+    install.add_argument("--yes", action="store_true", help="跳过 DEPLOY-TEST 二次输入")
+    install.add_argument("--dry-run", action="store_true", help="下载并校验，但不修改服务器")
+
+    deploy = sub.add_parser("deploy", help="校验并部署本地缓存测试包")
+    deploy.add_argument("--bundle", type=Path, help="测试包路径；省略时使用下载缓存中最新 ZIP")
     deploy.add_argument("--yes", action="store_true", help="跳过 DEPLOY-TEST 二次输入")
     deploy.add_argument("--dry-run", action="store_true", help="只校验测试包，不修改服务器")
 
     sub.add_parser("status", help="显示当前测试候选和 test Hooks 状态")
     rollback = sub.add_parser("rollback", help="一键恢复测试前二进制、数据库和 test 清单")
     rollback.add_argument("--yes", action="store_true", help="跳过 ROLLBACK 二次输入")
-    diagnostics = sub.add_parser("diagnostics", help="收集邀请测试服务端诊断包")
+    diagnostics = sub.add_parser("diagnostics", help="收集测试服务端诊断包")
     diagnostics.add_argument("--since", default="1 hour ago")
-    sub.add_parser("incoming", help="显示测试包上传目录")
+    sub.add_parser("incoming", help="显示测试候选本地下载缓存")
     return parser
 
 
 def main() -> int:
     args = build_parser().parse_args()
-    manager = InviteTestManager(args.root, args.service)
+    manager = InviteTestManager(args.root, args.service, args.repository)
     try:
-        if args.command == "deploy":
-            result = manager.deploy(args.bundle, assume_yes=args.yes, dry_run=args.dry_run)
-            if args.dry_run:
-                print("测试包校验通过：")
+        if args.command == "releases":
+            candidates = manager.release_candidates(limit=args.limit)
+            print(f"测试 Release 仓库：{manager.repository}")
+            print_release_candidates(candidates)
+        elif args.command == "install":
+            if args.select:
+                candidate = choose_release_candidate(manager.release_candidates())
+                downloaded = manager.download_candidate(candidate)
+            elif args.tag:
+                downloaded = manager.download_candidate(manager.release_candidate_by_tag(args.tag))
             else:
-                print("邀请/组队测试候选已一键部署。")
+                downloaded = manager.download_latest_candidate()
+            print("测试候选已从 GitHub 下载并通过外层 SHA256 校验：")
+            print(json.dumps(downloaded, ensure_ascii=False, indent=2))
+            result = manager.deploy(
+                Path(str(downloaded["bundle"])),
+                assume_yes=args.yes,
+                dry_run=args.dry_run,
+            )
+            if args.dry_run:
+                print("测试候选完整校验通过，未修改服务器。")
+            else:
+                print("SCBL 测试候选已部署。")
             print(json.dumps(result, ensure_ascii=False, indent=2))
             if not args.dry_run:
                 print("两台 Windows 测试机请使用“SCBL 测试通道”快捷方式。")
                 print("尚未证明游戏内成功，必须完成双人实测。")
+        elif args.command == "deploy":
+            result = manager.deploy(args.bundle, assume_yes=args.yes, dry_run=args.dry_run)
+            if args.dry_run:
+                print("测试包校验通过：")
+            else:
+                print("SCBL 测试候选已部署。")
+            print(json.dumps(result, ensure_ascii=False, indent=2))
         elif args.command == "rollback":
             result = manager.rollback(assume_yes=args.yes)
             print("已恢复测试前 dedicated server、数据库和 test 组件清单。")
@@ -535,6 +863,10 @@ def main() -> int:
         elif args.command == "incoming":
             manager.initialize()
             print(manager.incoming)
+            for path in sorted(manager.incoming.glob("SCBL-*.zip")):
+                if not TEST_BUNDLE_RE.fullmatch(path.name):
+                    continue
+                print(f"  {path.name}  {path.stat().st_size} bytes")
         else:
             raise AssertionError(args.command)
         return 0

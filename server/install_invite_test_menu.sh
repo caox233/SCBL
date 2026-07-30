@@ -25,6 +25,7 @@ COMMANDS=(
   /usr/local/bin/scbl
   /usr/local/bin/scbl-component-manager
   /usr/local/bin/scbl-publish-hooks-test
+  /usr/local/bin/scbl-test-manager
   /usr/local/bin/scbl-invite-test
   /usr/local/bin/scbl-server-diagnostics
 )
@@ -52,7 +53,7 @@ restore_path() {
 validate_sources() {
   local name
   for name in "${FILES[@]}"; do
-    [[ -f "$SCRIPT_DIR/$name" ]] || { echo "测试菜单包缺少文件：$name" >&2; return 1; }
+    [[ -f "$SCRIPT_DIR/$name" ]] || { echo "测试管理安装包缺少文件：$name" >&2; return 1; }
   done
   bash -n "$SCRIPT_DIR/install_public_server.sh"
   bash -n "$SCRIPT_DIR/install_component_manager.sh"
@@ -71,8 +72,8 @@ if not blocks:
     raise SystemExit('manager script has no embedded Python heredocs')
 for marker, source in blocks:
     compile(source, f'{path}:{marker}', 'exec')
-if '16. 邀请 / 组队测试版本管理' not in text or 'invite_test_menu()' not in text:
-    raise SystemExit('manager script does not contain the invitation test menu')
+if '16. 测试管理' not in text or 'test_management_menu()' not in text:
+    raise SystemExit('manager script does not contain the test management menu')
 PYEOF_VALIDATE_INVITE_MENU_INSTALLER
 }
 
@@ -92,12 +93,12 @@ rollback_backup() {
     restore_path "$target" "$backup/commands/$name" "$backup/commands/$name.present"
     index=$((index + 1))
   done
-  echo "邀请/组队测试菜单已恢复到安装前状态。"
+  echo "测试管理菜单已恢复到安装前状态。"
 }
 
 if [[ "${1:-}" == "--rollback" ]]; then
   latest="$(find "$BACKUP_BASE" -mindepth 1 -maxdepth 1 -type d -printf '%T@ %p\n' 2>/dev/null | sort -nr | head -1 | cut -d' ' -f2-)"
-  [[ -n "$latest" ]] || { echo "没有可用的测试菜单安装备份。" >&2; exit 1; }
+  [[ -n "$latest" ]] || { echo "没有可用的测试管理菜单安装备份。" >&2; exit 1; }
   rollback_backup "$latest"
   exit 0
 fi
@@ -155,10 +156,10 @@ ln -sfn /usr/local/bin/SCBL /usr/local/bin/scbl
 trap - ERR
 
 echo
-echo "邀请/组队测试菜单已安装到当前 SCBL 一键管理工具。"
+echo "测试管理菜单已安装到当前 SCBL 一键管理工具。"
 echo "原文件备份：$backup"
 echo "下一步："
-echo "  1. 将完整 SCBL-Invite-Party-Test-*.zip 上传到 $SCBL_ROOT/incoming/invite-test/"
-echo "  2. 执行 SCBL"
-echo "  3. 选择 16 -> 2 一键部署"
+echo "  1. 执行 SCBL"
+echo "  2. 选择 16. 测试管理"
+echo "  3. 查看并选择 GitHub 测试候选，脚本会自动下载、校验和部署"
 echo "恢复本次菜单安装：sudo bash $SCRIPT_DIR/install_invite_test_menu.sh --rollback"

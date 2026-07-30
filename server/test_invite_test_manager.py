@@ -7,9 +7,10 @@ import os
 import tempfile
 import unittest
 import zipfile
+from unittest import mock
 from pathlib import Path
 
-from server.scbl_invite_test_manager import InviteTestManager, safe_extract_zip, validate_candidate
+from server.scbl_invite_test_manager import InviteTestManager, release_candidates_from_payload, safe_extract_zip, validate_candidate
 
 
 class InviteTestManagerTests(unittest.TestCase):
@@ -137,6 +138,78 @@ class InviteTestManagerTests(unittest.TestCase):
         os.utime(older, (1_000, 1_000))
         os.utime(newer, (2_000, 2_000))
         self.assertEqual(manager.latest_bundle(), newer)
+
+    @staticmethod
+    def release_payload(bundle_name: str = "SCBL-Invite-Party-Test-20990101.zip") -> dict[str, object]:
+        return {
+            "draft": False,
+            "prerelease": True,
+            "tag_name": "test-2099.01.01.1",
+            "name": "SCBL test candidate",
+            "published_at": "2099-01-01T00:00:00Z",
+            "html_url": "https://github.com/caox233/5th-echelon/releases/tag/test-2099.01.01.1",
+            "assets": [
+                {
+                    "name": bundle_name,
+                    "size": 1234,
+                    "browser_download_url": f"https://github.com/caox233/5th-echelon/releases/download/test/{bundle_name}",
+                },
+                {
+                    "name": bundle_name + ".sha256",
+                    "size": 100,
+                    "browser_download_url": f"https://github.com/caox233/5th-echelon/releases/download/test/{bundle_name}.sha256",
+                },
+            ],
+        }
+
+    def test_release_candidates_require_matching_checksum_sidecar(self) -> None:
+        release = self.release_payload()
+        candidates = release_candidates_from_payload(release)
+        self.assertEqual(len(candidates), 1)
+        self.assertEqual(candidates[0]["tag"], "test-2099.01.01.1")
+        release["assets"] = release["assets"][:1]
+        self.assertEqual(release_candidates_from_payload(release), [])
+
+    def test_download_candidate_verifies_outer_release_checksum(self) -> None:
+        payload = b"immutable-test-candidate"
+        expected = hashlib.sha256(payload).hexdigest()
+        candidate = release_candidates_from_payload(self.release_payload())[0]
+        manager = InviteTestManager(self.base / "scbl")
+
+        def fake_download(asset: dict[str, object], key: str, destination: Path, max_bytes: int) -> None:
+            del key, max_bytes
+            if str(asset["checksumName"]) == destination.name:
+                destination.write_text(
+                    f"{expected}  {asset['bundleName']}\n",
+                    encoding="ascii",
+                )
+            else:
+                destination.write_bytes(payload)
+
+        with mock.patch.object(manager, "_download_asset", side_effect=fake_download):
+            result = manager.download_candidate(candidate)
+        bundle = Path(str(result["bundle"]))
+        self.assertEqual(bundle.read_bytes(), payload)
+        self.assertEqual(result["sha256"], expected)
+        self.assertFalse(result["reused"])
+
+    def test_download_candidate_rejects_bad_release_checksum(self) -> None:
+        candidate = release_candidates_from_payload(self.release_payload())[0]
+        manager = InviteTestManager(self.base / "scbl")
+
+        def fake_download(asset: dict[str, object], key: str, destination: Path, max_bytes: int) -> None:
+            del key, max_bytes
+            if str(asset["checksumName"]) == destination.name:
+                destination.write_text(
+                    f"{'0' * 64}  {asset['bundleName']}\n",
+                    encoding="ascii",
+                )
+            else:
+                destination.write_bytes(b"not-the-expected-file")
+
+        with mock.patch.object(manager, "_download_asset", side_effect=fake_download):
+            with self.assertRaisesRegex(ValueError, "SHA256 不一致"):
+                manager.download_candidate(candidate)
 
     def test_dry_run_validates_outer_bundle_without_runtime_changes(self) -> None:
         root = self.build_candidate_tree()

@@ -1,6 +1,13 @@
 name: Publish SCBL server tool
 
 on:
+  pull_request:
+    paths:
+      - VERSION_SERVER_TOOL
+      - server/**
+      - scripts/install-server.sh
+      - docs/releases/SERVER_TOOL_v*.md
+      - .github/workflows/server-tool-release.yml
   push:
     branches: [main]
     paths:
@@ -20,8 +27,8 @@ permissions:
   contents: write
 
 concurrency:
-  group: scbl-server-tool-release
-  cancel-in-progress: false
+  group: scbl-server-tool-release-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   metadata:
@@ -147,13 +154,16 @@ jobs:
             "stage/$root/scbl_invite_test_manager.py"
           package="${root}.tar.gz"
           tar -C stage -czf "dist/$package" "$root"
+          archive_list="$(mktemp)"
+          trap 'rm -f "$archive_list"' EXIT
+          tar -tzf "dist/$package" > "$archive_list"
           for required in \
             scbl_update_server.py \
             scbl_component_manager.py \
             scbl_publish_hooks_bundle.py \
             scbl_invite_test_manager.py \
             install_component_manager.sh; do
-            tar -tzf "dist/$package" | grep -Fxq "$root/$required"
+            grep -Fxq "$root/$required" "$archive_list"
           done
           package_sha="$(sha256sum "dist/$package" | awk '{print $1}')"
           printf '%s  %s\n' "$package_sha" "$package" > "dist/${package}.sha256"
@@ -167,7 +177,7 @@ jobs:
 
   publish:
     needs: [metadata, build]
-    if: needs.metadata.outputs.skip != 'true'
+    if: github.event_name != 'pull_request' && needs.metadata.outputs.skip != 'true'
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4

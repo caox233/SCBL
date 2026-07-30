@@ -33,7 +33,8 @@ for name in required_runtime_files:
     assert f"server/{name}" in server_release
     assert name in bootstrap
 
-assert 'tar -tzf "dist/$package" | grep -Fxq "$root/$required"' in server_release
+assert 'tar -tzf "dist/$package" > "$archive_list"' in server_release
+assert 'grep -Fxq "$root/$required" "$archive_list"' in server_release
 assert 'update_server_file="$package_root/scbl_update_server.py"' in bootstrap
 assert 'component_manager_file="$package_root/scbl_component_manager.py"' in bootstrap
 assert 'invite_test_file="$package_root/scbl_invite_test_manager.py"' in bootstrap

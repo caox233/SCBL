@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
   "clientVersion": "1.0.14",
-  "serverToolVersion": "1.0.10",
+  "serverToolVersion": "1.0.11",
   "controlApiVersion": 1,
   "dedicatedServer": {
     "repository": "caox233/5th-echelon",

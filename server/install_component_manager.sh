@@ -20,6 +20,8 @@ PUBLISH_COMMAND="/usr/local/bin/scbl-publish-hooks-test"
 TEST_COMMAND="/usr/local/bin/scbl-test-manager"
 INVITE_TEST_COMMAND="/usr/local/bin/scbl-invite-test"
 UPDATE_ROOT="$SCBL_ROOT/client-updates"
+TEST_INCOMING="$SCBL_ROOT/incoming/invite-test"
+TEST_TMP="$TEST_INCOMING/.tmp"
 
 for source in "$MANAGER_SOURCE" "$PUBLISHER_SOURCE" "$INVITE_TEST_SOURCE"; do
   [[ -f "$source" ]] || {
@@ -40,7 +42,8 @@ install_source() {
   fi
 }
 
-install -d -m 0755 "$TARGET_DIR" "$UPDATE_ROOT" "$SCBL_ROOT/incoming/invite-test"
+install -d -m 0755 "$TARGET_DIR" "$UPDATE_ROOT" "$TEST_INCOMING"
+install -d -m 0700 "$TEST_TMP"
 install_source "$MANAGER_SOURCE" "$MANAGER_TARGET" 0755
 install_source "$PUBLISHER_SOURCE" "$PUBLISHER_TARGET" 0755
 install_source "$INVITE_TEST_SOURCE" "$INVITE_TEST_TARGET" 0755
@@ -58,6 +61,9 @@ for target in "$TEST_COMMAND" "$INVITE_TEST_COMMAND"; do
   cat >"$target" <<EOF
 #!/usr/bin/env bash
 set -euo pipefail
+export TMPDIR="$TEST_TMP"
+mkdir -p "\$TMPDIR"
+chmod 0700 "\$TMPDIR"
 exec python3 "$INVITE_TEST_TARGET" --root "$SCBL_ROOT" "\$@"
 EOF
 done
@@ -71,6 +77,7 @@ echo "组件管理命令已安装：$COMMAND"
 echo "Hooks 测试包发布命令已安装：$PUBLISH_COMMAND"
 echo "测试管理命令已安装：$TEST_COMMAND"
 echo "兼容命令已保留：$INVITE_TEST_COMMAND"
+echo "测试下载临时目录：$TEST_TMP"
 echo "查看 GitHub 测试候选：sudo scbl-test-manager releases"
 echo "交互选择并部署：sudo scbl-test-manager install --select"
 echo "部署最新测试候选：sudo scbl-test-manager install --latest"

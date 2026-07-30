@@ -1,5 +1,12 @@
 # 更新记录
 
+## Linux Server Tool v1.0.11
+
+- 修复菜单16从 GitHub 下载测试候选后，在 `/tmp` 与 `/opt` 位于不同文件系统时因 `os.replace` 返回 `Invalid cross-device link` 而无法写入缓存的问题。
+- `scbl-test-manager` 与兼容命令 `scbl-invite-test` 固定使用 `/opt/scbl-public/incoming/invite-test/.tmp` 作为下载临时目录，临时文件与最终缓存始终处于同一文件系统。
+- 临时目录权限固定为 `0700`；外层 SHA256、同名 `.sha256`、内部 `CHECKSUMS.sha256`、组件来源提交、大小和 SHA256 校验保持不变。
+- 该错误发生在正式部署之前，无需回滚；升级后重新选择同一测试候选即可。Windows Client 继续保持 v1.0.14。
+
 ## Linux Server Tool v1.0.10
 
 - 主菜单第16项由“邀请 / 组队测试版本管理”升级为通用“测试管理”，不再要求通过 Xshell/SFTP 手工上传测试 ZIP。

@@ -129,7 +129,7 @@ elseif ($Auto) {
             '^client/build_all_windows\.ps1$' { $BuildLauncher = $true; $BuildUpdater = $true; $BuildRouter = $true; $PrepareRuntime = $true; continue }
             '^client/WINDIVERT_NOTICE\.txt$' { $BuildRouter = $true; continue }
             '^THIRD_PARTY_LICENSES/' { $PrepareRuntime = $true; continue }
-            '^VERSION(_CLIENT)?$' { $BuildLauncher = $true; $BuildUpdater = $true; $BuildRouter = $true; continue }
+            '^VERSION_CLIENT$' { $BuildLauncher = $true; $BuildUpdater = $true; $BuildRouter = $true; continue }
         }
     }
     if (!$BuildLauncher -and !$BuildUpdater -and !$BuildRouter -and !$PrepareRuntime) {

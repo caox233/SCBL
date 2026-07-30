@@ -103,7 +103,7 @@ jobs:
         with:
           go-version: '1.23.2'
           cache: true
-          cache-dependency-path: client/scbl-process-router/go.sum
+          cache-dependency-path: client/scbl-process-router/go.mod
 
       - name: Test Route Guard without client packaging
         if: steps.changes.outputs.router == 'true' || github.event_name == 'workflow_dispatch'

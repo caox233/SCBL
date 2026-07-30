@@ -60,3 +60,11 @@ __pycache__/
 
 # Rust Hooks snapshot build output
 client/hooks-source/**/target/
+
+# One-time audit and legacy status output
+/release/
+/.github/release-status/
+/.github/*_STATUS.md
+/scripts/maintenance/*.trigger
+/RELEASE_NOTES_v*.md
+/VALIDATION_v*.txt

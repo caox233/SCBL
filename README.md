@@ -109,12 +109,16 @@ powershell -ExecutionPolicy Bypass -File .\client\build_all_windows.ps1 -Fast -P
 ## 目录
 
 ```text
-client/      Windows Launcher、Updater、EasyTier 准备脚本和 Route Guard
-server/      Linux 服务端管理器、组件仓库和控制平面
-scripts/     服务端安装入口和维护脚本
-docs/        发布说明和技术文档
-.github/     组件验证、完整包组装和发布工作流
+client/          Windows Launcher、Updater、EasyTier 与 Route Guard
+server/          Linux 服务端管理器、组件仓库、控制平面与回归测试
+scripts/         一键安装入口及长期维护脚本
+docs/design/     当前设计文档
+docs/changes/    重要架构变更基线
+docs/releases/   当前与上一代正式发布说明
+.github/         持续验证、组件构建、完整包和正式发布工作流
 ```
+
+根目录只保留项目入口、版本源、许可证和协作规范。更早的版本说明查看 GitHub Releases、对应标签或 `CHANGELOG.md`；一次性验证结果保存在 Actions 日志和 Artifact 中，不提交状态快照文件。
 
 ## 安全说明
 

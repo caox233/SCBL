@@ -97,7 +97,16 @@ install_management_command() {
   fi
 
   # Preserve the files required when the manager is launched later through SCBL.
-  for asset in scbl_control_plane.py scbl_update_server.py scbl_server_diagnostics.sh service.toml.template check_scbl_udp_11010.sh; do
+  for asset in \
+    scbl_control_plane.py \
+    scbl_update_server.py \
+    scbl_server_diagnostics.sh \
+    scbl_component_manager.py \
+    scbl_publish_hooks_bundle.py \
+    scbl_invite_test_manager.py \
+    install_component_manager.sh \
+    service.toml.template \
+    check_scbl_udp_11010.sh; do
     if [[ -f "$source_dir/$asset" && "$source_dir/$asset" != "$MANAGER_DIR/$asset" ]]; then
       install -m 0755 "$source_dir/$asset" "$MANAGER_DIR/$asset"
     fi
@@ -124,6 +133,9 @@ SCBL_COMMAND
   ln -sfn /usr/local/bin/SCBL /usr/local/bin/scbl
   if [[ -f "$MANAGER_DIR/scbl_server_diagnostics.sh" ]]; then
     install -m 0755 "$MANAGER_DIR/scbl_server_diagnostics.sh" /usr/local/bin/scbl-server-diagnostics
+  fi
+  if [[ -f "$MANAGER_DIR/install_component_manager.sh"         && -f "$MANAGER_DIR/scbl_component_manager.py"         && -f "$MANAGER_DIR/scbl_publish_hooks_bundle.py"         && -f "$MANAGER_DIR/scbl_invite_test_manager.py" ]]; then
+    SCBL_ROOT="$SCBL_ROOT" bash "$MANAGER_DIR/install_component_manager.sh" >/dev/null ||       echo "警告：客户端组件/邀请测试管理命令安装失败，可稍后重新运行 SCBL 修复。"
   fi
 }
 
@@ -2653,6 +2665,7 @@ update_server_tool_online() {
   local repo="${SCBL_RELEASE_REPOSITORY:-$DEFAULT_SCBL_RELEASE_REPOSITORY}"
   local version_url="${SCBL_SERVER_TOOL_VERSION_URL:-https://raw.githubusercontent.com/${repo}/main/VERSION_SERVER_TOOL}"
   local version tag package base expected actual cmp tmpdir extract_root manager_new control_new update_new diagnostics_new version_new
+  local component_manager_new component_publisher_new invite_test_new component_installer_new
   local backup_root control_changed=0 binary_check_new branch_new package_root
   local control_live="$SCBL_ROOT/control-plane/scbl_control_plane.py"
 
@@ -2715,8 +2728,12 @@ PYEOF_SAFE_SERVER_EXTRACT
   control_new="${package_root}/scbl_control_plane.py"
   update_new="${package_root}/scbl_update_server.py"
   diagnostics_new="${package_root}/scbl_server_diagnostics.sh"
+  component_manager_new="${package_root}/scbl_component_manager.py"
+  component_publisher_new="${package_root}/scbl_publish_hooks_bundle.py"
+  invite_test_new="${package_root}/scbl_invite_test_manager.py"
+  component_installer_new="${package_root}/install_component_manager.sh"
   version_new="${package_root}/VERSION_SERVER_TOOL"
-  [[ -f "$manager_new" && -f "$control_new" && -f "$update_new" && -f "$diagnostics_new" && -f "$version_new" ]] || {
+  [[ -f "$manager_new"      && -f "$control_new"      && -f "$update_new"      && -f "$diagnostics_new"      && -f "$component_manager_new"      && -f "$component_publisher_new"      && -f "$invite_test_new"      && -f "$component_installer_new"      && -f "$version_new" ]] || {
     rm -rf "$tmpdir"; echo "服务端工具包缺少必要文件。"; return 1;
   }
   [[ "$(tr -d '[:space:]' < "$version_new")" == "$version" ]] || {
@@ -2724,7 +2741,8 @@ PYEOF_SAFE_SERVER_EXTRACT
   }
   validate_manager_script_file "$manager_new"
   bash -n "$diagnostics_new"
-  python3 -m py_compile "$control_new" "$update_new"
+  bash -n "$component_installer_new"
+  python3 -m py_compile     "$control_new"     "$update_new"     "$component_manager_new"     "$component_publisher_new"     "$invite_test_new"
 
   backup_root="$SCBL_ROOT/backups/server-tool/$(date +%Y%m%d_%H%M%S)"
   mkdir -p "$backup_root"
@@ -2733,7 +2751,14 @@ PYEOF_SAFE_SERVER_EXTRACT
   [[ -f "$MANAGER_DIR/scbl_update_server.py" ]] && cp -a "$MANAGER_DIR/scbl_update_server.py" "$backup_root/scbl_update_server.py"
   [[ -f "$MANAGER_DIR/scbl_control_plane.py" ]] && cp -a "$MANAGER_DIR/scbl_control_plane.py" "$backup_root/scbl_control_plane.manager.py"
   [[ -f "$MANAGER_DIR/scbl_server_diagnostics.sh" ]] && cp -a "$MANAGER_DIR/scbl_server_diagnostics.sh" "$backup_root/scbl_server_diagnostics.manager.sh"
+  [[ -f "$MANAGER_DIR/scbl_component_manager.py" ]] && cp -a "$MANAGER_DIR/scbl_component_manager.py" "$backup_root/scbl_component_manager.py"
+  [[ -f "$MANAGER_DIR/scbl_publish_hooks_bundle.py" ]] && cp -a "$MANAGER_DIR/scbl_publish_hooks_bundle.py" "$backup_root/scbl_publish_hooks_bundle.py"
+  [[ -f "$MANAGER_DIR/scbl_invite_test_manager.py" ]] && cp -a "$MANAGER_DIR/scbl_invite_test_manager.py" "$backup_root/scbl_invite_test_manager.py"
+  [[ -f "$MANAGER_DIR/install_component_manager.sh" ]] && cp -a "$MANAGER_DIR/install_component_manager.sh" "$backup_root/install_component_manager.sh"
   [[ -f /usr/local/bin/scbl-server-diagnostics ]] && cp -a /usr/local/bin/scbl-server-diagnostics "$backup_root/scbl-server-diagnostics.command"
+  [[ -f /usr/local/bin/scbl-component-manager ]] && cp -a /usr/local/bin/scbl-component-manager "$backup_root/scbl-component-manager.command"
+  [[ -f /usr/local/bin/scbl-publish-hooks-test ]] && cp -a /usr/local/bin/scbl-publish-hooks-test "$backup_root/scbl-publish-hooks-test.command"
+  [[ -f /usr/local/bin/scbl-invite-test ]] && cp -a /usr/local/bin/scbl-invite-test "$backup_root/scbl-invite-test.command"
   [[ -f "$SCBL_ROOT/server/scbl_control_plane.py" ]] && cp -a "$SCBL_ROOT/server/scbl_control_plane.py" "$backup_root/scbl_control_plane.server.py"
   [[ -f "$control_live" ]] && cp -a "$control_live" "$backup_root/scbl_control_plane.live.py"
   [[ -f "$SCBL_ROOT/server/check_scbl_binary_release.sh" ]] && cp -a "$SCBL_ROOT/server/check_scbl_binary_release.sh" "$backup_root/check_scbl_binary_release.sh"
@@ -2750,6 +2775,11 @@ PYEOF_SAFE_SERVER_EXTRACT
     install -m 0644 "$control_new" "$MANAGER_DIR/scbl_control_plane.py"
     install -m 0755 "$diagnostics_new" "$MANAGER_DIR/scbl_server_diagnostics.sh"
     install -m 0755 "$diagnostics_new" /usr/local/bin/scbl-server-diagnostics
+    install -m 0755 "$component_manager_new" "$MANAGER_DIR/scbl_component_manager.py"
+    install -m 0755 "$component_publisher_new" "$MANAGER_DIR/scbl_publish_hooks_bundle.py"
+    install -m 0755 "$invite_test_new" "$MANAGER_DIR/scbl_invite_test_manager.py"
+    install -m 0755 "$component_installer_new" "$MANAGER_DIR/install_component_manager.sh"
+    SCBL_ROOT="$SCBL_ROOT" bash "$MANAGER_DIR/install_component_manager.sh"
     install -d -m 0755 "$SCBL_ROOT/server" "$SCBL_ROOT/control-plane"
     install -m 0644 "$control_new" "$SCBL_ROOT/server/scbl_control_plane.py"
     install -m 0755 "$control_new" "$control_live"
@@ -2786,6 +2816,20 @@ PYEOF_SERVER_TOOL_STATE
     else
       rm -f /usr/local/bin/scbl-server-diagnostics
     fi
+    for asset in scbl_component_manager.py scbl_publish_hooks_bundle.py scbl_invite_test_manager.py install_component_manager.sh; do
+      if [[ -f "$backup_root/$asset" ]]; then
+        install -m 0755 "$backup_root/$asset" "$MANAGER_DIR/$asset"
+      else
+        rm -f "$MANAGER_DIR/$asset"
+      fi
+    done
+    for command in scbl-component-manager scbl-publish-hooks-test scbl-invite-test; do
+      if [[ -f "$backup_root/${command}.command" ]]; then
+        install -m 0755 "$backup_root/${command}.command" "/usr/local/bin/$command"
+      else
+        rm -f "/usr/local/bin/$command"
+      fi
+    done
     [[ -f "$backup_root/scbl_control_plane.server.py" ]] && install -m 0644 "$backup_root/scbl_control_plane.server.py" "$SCBL_ROOT/server/scbl_control_plane.py"
     [[ -f "$backup_root/scbl_control_plane.live.py" ]] && install -m 0755 "$backup_root/scbl_control_plane.live.py" "$control_live"
     systemctl restart scbl-control-plane.service 2>/dev/null || true
@@ -3609,6 +3653,98 @@ collect_server_diagnostics_menu() {
   pause
 }
 
+
+ensure_invite_test_command() {
+  if [[ -x /usr/local/bin/scbl-invite-test ]]; then
+    return 0
+  fi
+  if [[ -f "$MANAGER_DIR/install_component_manager.sh" \
+        && -f "$MANAGER_DIR/scbl_component_manager.py" \
+        && -f "$MANAGER_DIR/scbl_publish_hooks_bundle.py" \
+        && -f "$MANAGER_DIR/scbl_invite_test_manager.py" ]]; then
+    SCBL_ROOT="$SCBL_ROOT" bash "$MANAGER_DIR/install_component_manager.sh"
+  fi
+  if [[ ! -x /usr/local/bin/scbl-invite-test ]]; then
+    echo "邀请/组队测试管理命令尚未安装，请先执行菜单14升级 Server Tool。"
+    return 1
+  fi
+}
+
+invite_test_client_help() {
+  cat <<'INVITECLIENTHELP'
+
+两台 Windows 测试机：
+  1. 解压同一份 SCBL-Invite-Party-Test-*.zip。
+  2. 各运行 Windows/Create-Test-Shortcut.ps1 一次。
+  3. 完全退出普通启动器和游戏。
+  4. 只使用桌面的“SCBL 测试通道”快捷方式启动。
+  5. 测试顺序：在线5分钟 -> 私房直邀 -> 大厅组队后建私房 -> 大厅组队后快速匹配。
+
+测试失败后不要连续重启：
+  - 两台电脑各生成一次客户端诊断包；
+  - 服务端在本菜单选择“收集最近一小时测试日志”。
+INVITECLIENTHELP
+}
+
+invite_test_menu() {
+  load_env_if_exists; set_defaults
+  mkdir -p "$SCBL_ROOT/incoming/invite-test"
+  while true; do
+    cat <<INVITETESTMENU
+
+邀请 / 组队测试版本管理：
+  测试包目录：$SCBL_ROOT/incoming/invite-test/
+  1. 显示上传目录和已有测试包
+  2. 一键部署最新测试包（自动备份、校验、失败回滚）
+  3. 查看当前测试版本状态
+  4. 一键恢复测试前状态
+  5. 收集最近一小时测试日志
+  6. 查看两台 Windows 客户端测试方法
+  0. 返回
+INVITETESTMENU
+    read -e -r -p "请选择: " c || true
+    case "$c" in
+      1)
+        echo "请通过 Xshell/SFTP 将完整 SCBL-Invite-Party-Test-*.zip 上传到："
+        echo "  $SCBL_ROOT/incoming/invite-test/"
+        echo
+        ls -lah "$SCBL_ROOT/incoming/invite-test/" 2>/dev/null || true
+        pause
+        ;;
+      2)
+        if ensure_invite_test_command; then
+          /usr/local/bin/scbl-invite-test deploy || true
+        fi
+        pause
+        ;;
+      3)
+        if ensure_invite_test_command; then
+          /usr/local/bin/scbl-invite-test status || true
+        fi
+        pause
+        ;;
+      4)
+        if ensure_invite_test_command; then
+          /usr/local/bin/scbl-invite-test rollback || true
+        fi
+        pause
+        ;;
+      5)
+        if ensure_invite_test_command; then
+          /usr/local/bin/scbl-invite-test diagnostics --since "1 hour ago" || true
+        fi
+        pause
+        ;;
+      6)
+        invite_test_client_help
+        pause
+        ;;
+      0) return 0 ;;
+      *) echo "无效选择。" ;;
+    esac
+  done
+}
+
 main_menu() {
   while true; do
     load_env_if_exists
@@ -3632,6 +3768,7 @@ main_menu() {
 13. 客户端公告管理
 14. SCBL 服务端工具在线升级
 15. 一键收集服务端诊断日志
+16. 邀请 / 组队测试版本管理
 0. 退出
 MENU
     read -e -r -p "请选择: " choice || true
@@ -3651,6 +3788,7 @@ MENU
       13) configure_client_announcements; pause ;;
       14) server_tool_update_menu ;;
       15) collect_server_diagnostics_menu ;;
+      16) invite_test_menu ;;
       0) exit 0 ;;
       *) echo "无效选择。" ;;
     esac

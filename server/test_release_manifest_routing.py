@@ -20,11 +20,23 @@ assert "server-tool-release-manifest.json" not in server_release
 assert "[CLIENT] Windows Client v${version}" in client_release
 assert "[SERVER] Server Tool v${version}" in server_release
 
-# The dual-stack update service is a required Server Tool runtime dependency.
-assert "server/scbl_update_server.py" in server_release
-assert 'tar -tzf "dist/$package" | grep -Fxq "$root/scbl_update_server.py"' in server_release
-assert "scbl_update_server.py" in bootstrap
+# These files are required Server Tool runtime dependencies and must be present
+# in the release source list, bootstrap installer and archive verification loop.
+required_runtime_files = (
+    "scbl_update_server.py",
+    "scbl_component_manager.py",
+    "scbl_publish_hooks_bundle.py",
+    "scbl_invite_test_manager.py",
+    "install_component_manager.sh",
+)
+for name in required_runtime_files:
+    assert f"server/{name}" in server_release
+    assert name in bootstrap
+
+assert 'tar -tzf "dist/$package" | grep -Fxq "$root/$required"' in server_release
 assert 'update_server_file="$package_root/scbl_update_server.py"' in bootstrap
+assert 'component_manager_file="$package_root/scbl_component_manager.py"' in bootstrap
+assert 'invite_test_file="$package_root/scbl_invite_test_manager.py"' in bootstrap
 assert 'update_new="${package_root}/scbl_update_server.py"' in manager
 assert 'install -m 0644 "$update_new" "$MANAGER_DIR/scbl_update_server.py"' in manager
 

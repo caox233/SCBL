@@ -55,13 +55,33 @@ installer="$package_root/install_public_server.sh"
 version_file="$package_root/VERSION_SERVER_TOOL"
 control_file="$package_root/scbl_control_plane.py"
 update_server_file="$package_root/scbl_update_server.py"
-[[ -f "$installer" && -f "$version_file" && -f "$control_file" && -f "$update_server_file" ]] || {
-  echo "服务端工具包缺少必要文件。" >&2
-  exit 1
-}
+diagnostics_file="$package_root/scbl_server_diagnostics.sh"
+component_manager_file="$package_root/scbl_component_manager.py"
+component_publisher_file="$package_root/scbl_publish_hooks_bundle.py"
+invite_test_file="$package_root/scbl_invite_test_manager.py"
+component_installer="$package_root/install_component_manager.sh"
+for required in \
+  "$installer" \
+  "$version_file" \
+  "$control_file" \
+  "$update_server_file" \
+  "$diagnostics_file" \
+  "$component_manager_file" \
+  "$component_publisher_file" \
+  "$invite_test_file" \
+  "$component_installer"; do
+  [[ -f "$required" ]] || { echo "服务端工具包缺少必要文件：$required" >&2; exit 1; }
+done
 [[ "$(tr -d '[:space:]' < "$version_file")" == "$version" ]] || { echo "服务端工具包版本不一致。" >&2; exit 1; }
 bash -n "$installer"
-python3 -m py_compile "$control_file" "$update_server_file"
+bash -n "$diagnostics_file"
+bash -n "$component_installer"
+python3 -m py_compile \
+  "$control_file" \
+  "$update_server_file" \
+  "$component_manager_file" \
+  "$component_publisher_file" \
+  "$invite_test_file"
 python3 - "$installer" <<'PYEOF_VALIDATE_BOOTSTRAP_MANAGER'
 from pathlib import Path
 import re, sys
@@ -76,11 +96,22 @@ PYEOF_VALIDATE_BOOTSTRAP_MANAGER
 install -d -m 0755 "$MANAGER_DIR"
 install -m 0755 "$installer" "$MANAGER_TARGET"
 install -m 0644 "$version_file" "$MANAGER_DIR/VERSION_SERVER_TOOL"
-for asset in scbl_control_plane.py scbl_update_server.py check_scbl_binary_release.sh 5th-echelon_branch.txt; do
+for asset in \
+  scbl_control_plane.py \
+  scbl_update_server.py \
+  scbl_server_diagnostics.sh \
+  scbl_component_manager.py \
+  scbl_publish_hooks_bundle.py \
+  scbl_invite_test_manager.py \
+  install_component_manager.sh \
+  check_scbl_binary_release.sh \
+  5th-echelon_branch.txt; do
   [[ -f "$package_root/$asset" ]] || continue
-  case "$asset" in *.sh) mode=0755 ;; *) mode=0644 ;; esac
+  case "$asset" in *.sh|scbl_*.py) mode=0755 ;; *) mode=0644 ;; esac
   install -m "$mode" "$package_root/$asset" "$MANAGER_DIR/$asset"
 done
+install -m 0755 "$diagnostics_file" /usr/local/bin/scbl-server-diagnostics
+SCBL_ROOT="${SCBL_ROOT:-/opt/scbl-public}" bash "$component_installer"
 
 cat > /usr/local/bin/SCBL <<'SCBL_COMMAND'
 #!/usr/bin/env bash

@@ -10,7 +10,19 @@ if [[ ${EUID:-$(id -u)} -ne 0 ]]; then
   exit 1
 fi
 
-SINCE="${1:-3 hours ago}"
+RAW_SINCE="${1:-3 hours ago}"
+# A previous menu/invocation could pass a bare numeric value (for example "1"),
+# which journalctl rejects as a timestamp. Treat it as an hour count instead.
+if [[ "$RAW_SINCE" =~ ^[0-9]+$ ]]; then
+  SINCE="$RAW_SINCE hours ago"
+else
+  SINCE="$RAW_SINCE"
+fi
+if ! journalctl --since "$SINCE" -n 0 --no-pager >/dev/null 2>&1; then
+  echo "警告：日志时间范围无效：$SINCE；已回退到 3 hours ago。" >&2
+  SINCE="3 hours ago"
+fi
+
 SCBL_ROOT="${SCBL_ROOT:-/opt/scbl-public}"
 OUTPUT_DIR="${SCBL_DIAGNOSTIC_OUTPUT_DIR:-$PWD}"
 STAMP="$(date '+%Y%m%d_%H%M%S')"
@@ -164,6 +176,8 @@ copy_text_redacted "$SCBL_ROOT/scbl.env" "$ROOT/files/scbl.env"
 copy_text_redacted "$SCBL_ROOT/easytier-server.toml" "$ROOT/files/easytier-server.toml"
 copy_text_redacted "$SCBL_ROOT/server/service.toml" "$ROOT/files/server/service.toml"
 copy_text_redacted "$SCBL_ROOT/client-updates/client_update_manifest.json" "$ROOT/files/client_update_manifest.json"
+copy_text_redacted "$SCBL_ROOT/client-updates/components/channels/stable/client_components_v2.json" "$ROOT/files/components/stable/client_components_v2.json"
+copy_text_redacted "$SCBL_ROOT/client-updates/components/channels/test/client_components_v2.json" "$ROOT/files/components/test/client_components_v2.json"
 copy_text_redacted "/usr/local/lib/scbl-public/VERSION_SERVER_TOOL" "$ROOT/files/VERSION_SERVER_TOOL"
 copy_text_redacted "/usr/local/lib/scbl-public/5th-echelon_branch.txt" "$ROOT/files/5th-echelon_branch.txt"
 
@@ -175,7 +189,8 @@ for binary in \
   "$SCBL_ROOT/bin/easytier-core" \
   "$SCBL_ROOT/bin/easytier-cli" \
   /usr/local/lib/scbl-public/install_public_server.sh \
-  /usr/local/lib/scbl-public/scbl_control_plane.py; do
+  /usr/local/lib/scbl-public/scbl_control_plane.py \
+  /usr/local/lib/scbl-public/scbl_component_manager.py; do
   [[ -f "$binary" ]] || continue
   sha256sum "$binary" >>"$ROOT/files/binary-sha256.txt" 2>/dev/null || true
 done

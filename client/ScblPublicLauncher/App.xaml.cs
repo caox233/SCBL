@@ -1,4 +1,6 @@
-﻿using System;
+using SplinterCellCNLauncher.Models;
+using SplinterCellCNLauncher.Services;
+using System;
 using System.Diagnostics;
 using System.Runtime.InteropServices;
 using System.Security.Principal;
@@ -11,6 +13,12 @@ namespace SplinterCellCNLauncher;
 public partial class App : Application
 {
     private static Mutex? _singleInstanceMutex;
+    private static ClientUpdateChannelSelection _updateChannelSelection =
+        new(ClientUpdateChannel.Stable, false, "");
+
+    public static ClientUpdateChannel ComponentUpdateChannel { get; private set; } = ClientUpdateChannel.Stable;
+    public static string ComponentUpdateChannelName =>
+        ComponentUpdateChannel == ClientUpdateChannel.Test ? "test" : "stable";
 
     [DllImport("user32.dll")]
     private static extern bool SetForegroundWindow(IntPtr hWnd);
@@ -22,6 +30,9 @@ public partial class App : Application
 
     protected override void OnStartup(StartupEventArgs e)
     {
+        _updateChannelSelection = ClientUpdateChannelParser.Parse(e.Args);
+        ComponentUpdateChannel = _updateChannelSelection.Channel;
+
         // 公网专用版需要做防火墙放行、启动公网隧道、关闭原版启动器、覆盖游戏目录 DLL。
         // 这些操作在部分系统目录或其它用户权限下没有管理员权限会失败，所以这里统一自提权。
         if (!IsRunningAsAdministrator())
@@ -56,6 +67,11 @@ public partial class App : Application
             Shutdown();
             return;
         }
+
+        if (!string.IsNullOrWhiteSpace(_updateChannelSelection.Warning))
+            LogService.Warning(_updateChannelSelection.Warning);
+        LogService.Info(
+            $"Component update channel selected: channel={ComponentUpdateChannelName}, explicit={_updateChannelSelection.WasExplicitlySelected}");
 
         AppContext.SetSwitch("System.Net.Http.SocketsHttpHandler.Http2UnencryptedSupport", true);
 

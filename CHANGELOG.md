@@ -1,5 +1,15 @@
 # 更新记录
 
+## Linux Server Tool v1.0.10
+
+- 主菜单第16项由“邀请 / 组队测试版本管理”升级为通用“测试管理”，不再要求通过 Xshell/SFTP 手工上传测试 ZIP。
+- 可直接查看 `caox233/5th-echelon` GitHub Releases 中的测试候选，按编号选择并自动下载、校验和部署，或直接部署最新候选。
+- 测试 Release 必须同时提供符合命名规则的 ZIP 和同名 `.sha256`；下载仅允许受信任的 GitHub HTTPS 地址，并限制 API 响应、校验文件、压缩包和解压文件大小。
+- 外层 SHA256 通过后，继续校验内部 `CHECKSUMS.sha256`、Hooks 与 dedicated server 来源提交、组件元数据、文件大小和 SHA256。
+- 部署继续自动备份 dedicated server、数据库和 test 组件清单；失败时自动恢复，不修改 EasyTier、Route Guard、防火墙、控制平面或 stable 正式通道。
+- 新增 `scbl-test-manager` 命令，旧 `scbl-invite-test` 命令继续保留兼容。
+- 修复 Server Tool Release 打包阶段在 `pipefail` 下验证压缩包成员时可能因管道提前关闭而失败的问题；PR 仅执行构建验证，正式 Release 仍只在合入 `main` 后发布。
+
 ## Windows Client v1.0.14 / Server Tool v1.0.9
 
 - 客户端统一核对 Hooks、Route Guard、EasyTier 和 Updater，只有缺失、大小不符或 SHA256 不一致的组件才会下载。

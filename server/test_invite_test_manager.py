@@ -219,6 +219,18 @@ class InviteTestManagerTests(unittest.TestCase):
         self.assertTrue(result["dryRun"])
         self.assertEqual(result["sourceCommit"], "1" * 40)
 
+    def test_installer_patches_local_upload_and_desktop_transfer_menu(self) -> None:
+        script = (Path(__file__).with_name("install_component_manager.sh")).read_text(encoding="utf-8")
+        self.assertIn("SCBL_LOCAL_TEST_TRANSFER_MENU_V1", script)
+        self.assertIn("upload_local_test_bundle()", script)
+        self.assertIn('"$TEST_MANAGER_COMMAND" deploy --bundle "$uploaded" --dry-run', script)
+        self.assertIn("select_local_test_bundle()", script)
+        self.assertIn("rz -y", script)
+        self.assertIn('sz -y "$path"', script)
+        self.assertIn("从当前电脑上传本地测试 ZIP", script)
+        self.assertIn("收集最近一小时测试日志并发送到当前电脑", script)
+        self.assertIn("ZMODEM 接收目录", script)
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -3,7 +3,7 @@
 SCBL 是面向《细胞分裂：黑名单》社区联机环境的自建客户端、Linux 服务端部署和客户端更新管理项目。
 
 > 当前 Windows 客户端：**v1.0.14**<br>
-> 当前 Linux 服务端工具：**v1.0.11**
+> 当前 Linux 服务端工具：**v1.0.12**
 
 ## 快速开始
 
@@ -86,6 +86,21 @@ powershell -ExecutionPolicy Bypass -File .\client\build_all_windows.ps1 -Fast -P
 - 修复安装；
 - Launcher 或平台级正式升级；
 - 灾难恢复。
+
+## 本地测试候选
+
+Server Tool v1.0.12 的菜单 `16. 测试管理` 改为本地测试包流程：
+
+- `16-1` 通过 Xshell/ZMODEM 从当前电脑上传测试 ZIP；
+- `16-2` 从已上传 ZIP 中选择并部署；
+- `16-3` 部署最新上传 ZIP；
+- `16-6` 收集服务端诊断包，并可通过 ZMODEM 发回当前电脑。
+
+完整的 Windows Hooks、WSL/Ubuntu dedicated server 编译及测试 ZIP 组装步骤见：
+
+```text
+docs/guides/LOCAL_TEST_CANDIDATE.md
+```
 
 ## 服务端组件仓库
 

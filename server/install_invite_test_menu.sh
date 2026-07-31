@@ -156,10 +156,11 @@ ln -sfn /usr/local/bin/SCBL /usr/local/bin/scbl
 trap - ERR
 
 echo
-echo "测试管理菜单已安装到当前 SCBL 一键管理工具。"
+echo "本地测试包管理菜单已安装到当前 SCBL 一键管理工具。"
 echo "原文件备份：$backup"
 echo "下一步："
-echo "  1. 执行 SCBL"
+echo "  1. 重新执行 SCBL"
 echo "  2. 选择 16. 测试管理"
-echo "  3. 查看并选择 GitHub 测试候选，脚本会自动下载、校验和部署"
+echo "  3. 选择 16-1，从当前电脑上传本地测试 ZIP"
+echo "  4. 选择 16-2，校验并部署已上传的测试包"
 echo "恢复本次菜单安装：sudo bash $SCRIPT_DIR/install_invite_test_menu.sh --rollback"

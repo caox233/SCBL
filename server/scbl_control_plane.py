@@ -18,6 +18,7 @@ import sqlite3
 import subprocess
 import threading
 import time
+from contextlib import contextmanager
 from dataclasses import dataclass, field
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -213,12 +214,22 @@ def extract_overlay_ips(value: str) -> list[str]:
     return [ip for ip in dict.fromkeys(_OVERLAY_IP_REGEX.findall(value or "")) if is_client_overlay_ip(ip)]
 
 
+@contextmanager
+def readonly_database():
+    """Open the dedicated-server database and always release its file handle."""
+    conn = sqlite3.connect(f"file:{DB_PATH}?mode=ro", uri=True, timeout=0.35)
+    try:
+        conn.execute("PRAGMA query_only=ON")
+        conn.execute("PRAGMA busy_timeout=350")
+        yield conn
+    finally:
+        conn.close()
+
+
 def _load_authoritative_sessions() -> dict[str, AuthoritativeGameSession]:
     if not DB_PATH.exists():
         return {}
-    with sqlite3.connect(f"file:{DB_PATH}?mode=ro", uri=True, timeout=0.35) as conn:
-        conn.execute("PRAGMA query_only=ON")
-        conn.execute("PRAGMA busy_timeout=350")
+    with readonly_database() as conn:
         rows = conn.execute(
             """
             SELECT g.id, g.type_id, g.creator_id, host.username,
@@ -415,8 +426,7 @@ def database_health() -> tuple[bool, int | None]:
     if not DB_PATH.exists():
         return False, None
     try:
-        with sqlite3.connect(f"file:{DB_PATH}?mode=ro", uri=True, timeout=0.35) as conn:
-            conn.execute("PRAGMA query_only=ON")
+        with readonly_database() as conn:
             row = conn.execute("SELECT COUNT(*) FROM users").fetchone()
             return True, int(row[0]) if row else 0
     except Exception:
@@ -428,8 +438,7 @@ def account_exists(username: str) -> bool | None:
     if not username or not DB_PATH.exists():
         return None
     try:
-        with sqlite3.connect(f"file:{DB_PATH}?mode=ro", uri=True, timeout=0.35) as conn:
-            conn.execute("PRAGMA query_only=ON")
+        with readonly_database() as conn:
             row = conn.execute("SELECT 1 FROM users WHERE username = ? LIMIT 1", (username,)).fetchone()
             return bool(row)
     except Exception:

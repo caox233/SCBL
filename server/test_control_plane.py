@@ -10,6 +10,7 @@ import sys
 import tempfile
 import threading
 import time
+from contextlib import closing
 from pathlib import Path
 
 
@@ -29,7 +30,7 @@ def main() -> None:
 
     with tempfile.TemporaryDirectory(prefix="scbl-control-plane-test-") as tmp:
         db_path = Path(tmp) / "5th-echelon.db"
-        with sqlite3.connect(db_path) as conn:
+        with closing(sqlite3.connect(db_path)) as conn:
             conn.executescript(
                 """
                 CREATE TABLE users (id INTEGER PRIMARY KEY, username TEXT NOT NULL);
@@ -82,6 +83,47 @@ def main() -> None:
             control_plane._SESSION_CACHE = {}
             control_plane._SESSION_SNAPSHOT_AT_MS = 0
             control_plane._SESSION_SNAPSHOT_ERROR = ""
+
+        # sqlite3.Connection.__enter__ only starts a transaction; __exit__ does
+        # not close the OS file handle. Track the wrapper directly so the
+        # long-running refresh loops cannot silently regress into leaking one
+        # descriptor per poll.
+        real_connect = control_plane.sqlite3.connect
+        opened_connections = 0
+        closed_connections = 0
+
+        class TrackedConnection:
+            def __init__(self, inner):
+                self._inner = inner
+                self._closed = False
+
+            def __getattr__(self, name):
+                return getattr(self._inner, name)
+
+            def close(self):
+                nonlocal closed_connections
+                if not self._closed:
+                    self._closed = True
+                    closed_connections += 1
+                self._inner.close()
+
+        def tracked_connect(*args, **kwargs):
+            nonlocal opened_connections
+            opened_connections += 1
+            return TrackedConnection(real_connect(*args, **kwargs))
+
+        control_plane.sqlite3.connect = tracked_connect
+        try:
+            for _ in range(25):
+                assert control_plane._load_authoritative_sessions()
+                assert control_plane.database_health() == (True, 3)
+                assert control_plane.account_exists("A") is True
+                assert control_plane.account_exists("missing") is False
+        finally:
+            control_plane.sqlite3.connect = real_connect
+
+        assert opened_connections == 100
+        assert closed_connections == opened_connections
 
         assert control_plane.refresh_game_session_snapshot() is True
         a = control_plane.game_session_payload("10.66.0.2")

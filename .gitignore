@@ -4,6 +4,7 @@
 **/obj/
 **/publish/
 **/publish-single/
+**/publish-smoke*/
 *.user
 *.suo
 *.pdb

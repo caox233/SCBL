@@ -33,6 +33,7 @@ public partial class App : Application
         _updateChannelSelection = ClientUpdateChannelParser.Parse(e.Args);
         ComponentUpdateChannel = _updateChannelSelection.Channel;
 
+#if !SCBL_SMOKE_NO_ELEVATION
         // 公网专用版需要做防火墙放行、启动公网隧道、关闭原版启动器、覆盖游戏目录 DLL。
         // 这些操作在部分系统目录或其它用户权限下没有管理员权限会失败，所以这里统一自提权。
         if (!IsRunningAsAdministrator())
@@ -54,6 +55,7 @@ public partial class App : Application
             Shutdown();
             return;
         }
+#endif
 
         bool createdNew;
         _singleInstanceMutex = new Mutex(

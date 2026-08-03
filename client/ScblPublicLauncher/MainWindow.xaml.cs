@@ -882,7 +882,7 @@ public partial class MainWindow : Window
             if (closeAfterCleanup)
             {
                 _allowClose = true;
-                Dispatcher.BeginInvoke(new Action(Close));
+                _ = Dispatcher.BeginInvoke(new Action(Close));
             }
         }
     }

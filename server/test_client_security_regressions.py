@@ -2,7 +2,10 @@
 from pathlib import Path
 
 root = Path(__file__).resolve().parents[1]
-main = (root / "client/ScblPublicLauncher/MainWindow.xaml.cs").read_text(encoding="utf-8")
+main = "\n".join(
+    path.read_text(encoding="utf-8")
+    for path in sorted((root / "client/ScblPublicLauncher").glob("MainWindow*.cs"))
+)
 control = (root / "client/ScblPublicLauncher/Services/ControlPlaneService.cs").read_text(encoding="utf-8")
 log = (root / "client/ScblPublicLauncher/Services/LogService.cs").read_text(encoding="utf-8")
 diag = (root / "client/ScblPublicLauncher/Services/DiagnosticExportService.cs").read_text(encoding="utf-8")

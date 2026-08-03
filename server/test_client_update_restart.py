@@ -33,7 +33,10 @@ assert "Client version check recovered after retry" in remote
 assert "Client version check unavailable after {CheckAttemptCount} attempts" in remote
 
 route_guard = Path("client/scbl-process-router/main.go").read_text(encoding="utf-8")
-launcher = Path("client/ScblPublicLauncher/MainWindow.xaml.cs").read_text(encoding="utf-8")
+launcher = "\n".join(
+    path.read_text(encoding="utf-8")
+    for path in sorted(Path("client/ScblPublicLauncher").glob("MainWindow*.cs"))
+)
 router_service = Path("client/ScblPublicLauncher/Services/ProcessRouterService.cs").read_text(encoding="utf-8")
 control_models = Path("client/ScblPublicLauncher/Models/ControlPlaneModels.cs").read_text(encoding="utf-8")
 tunnel = Path("client/ScblPublicLauncher/Services/PublicTunnelService.cs").read_text(encoding="utf-8")
@@ -52,7 +55,7 @@ assert "bind_device = true" in tunnel
 
 updater_project = Path("client/SCBL.Updater/SCBL.Updater.csproj").read_text(encoding="utf-8")
 updater_manifest = Path("client/SCBL.Updater/app.manifest").read_text(encoding="utf-8")
-window = Path("client/ScblPublicLauncher/MainWindow.xaml.cs").read_text(encoding="utf-8")
+window = launcher
 driver_bootstrap = Path("client/ScblPublicLauncher/Services/WinDivertBootstrapService.cs").read_text(encoding="utf-8")
 build_script = Path("client/build_all_windows.ps1").read_text(encoding="utf-8")
 package_script = Path("client/create_client_full_package.ps1").read_text(encoding="utf-8")

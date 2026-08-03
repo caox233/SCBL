@@ -5,7 +5,10 @@ settings = Path("client/ScblPublicLauncher/Models/LauncherSettings.cs").read_tex
 settings_service = Path("client/ScblPublicLauncher/Services/LauncherSettingsService.cs").read_text(encoding="utf-8")
 tunnel = Path("client/ScblPublicLauncher/Services/PublicTunnelService.cs").read_text(encoding="utf-8")
 tunnel_config = Path("client/ScblPublicLauncher/Services/PublicTunnelConfig.cs").read_text(encoding="utf-8")
-window = Path("client/ScblPublicLauncher/MainWindow.xaml.cs").read_text(encoding="utf-8")
+window = "\n".join(
+    path.read_text(encoding="utf-8")
+    for path in sorted(Path("client/ScblPublicLauncher").glob("MainWindow*.cs"))
+)
 server = Path("server/install_public_server.sh").read_text(encoding="utf-8")
 control = Path("server/scbl_control_plane.py").read_text(encoding="utf-8")
 update = Path("server/scbl_update_server.py").read_text(encoding="utf-8")

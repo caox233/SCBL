@@ -4,7 +4,10 @@ from pathlib import Path
 
 version = Path("VERSION_CLIENT").read_text(encoding="utf-8").strip()
 control = Path("client/ScblPublicLauncher/Services/ControlPlaneService.cs").read_text(encoding="utf-8")
-window = Path("client/ScblPublicLauncher/MainWindow.xaml.cs").read_text(encoding="utf-8")
+window = "\n".join(
+    path.read_text(encoding="utf-8")
+    for path in sorted(Path("client/ScblPublicLauncher").glob("MainWindow*.cs"))
+)
 tunnel = Path("client/ScblPublicLauncher/Services/PublicTunnelService.cs").read_text(encoding="utf-8")
 router = Path("client/ScblPublicLauncher/Services/ProcessRouterService.cs").read_text(encoding="utf-8")
 probe = Path("client/ScblPublicLauncher/Services/PeerProbeService.cs").read_text(encoding="utf-8")

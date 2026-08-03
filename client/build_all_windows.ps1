@@ -1,8 +1,5 @@
 param(
-    [string]$FifthRepository = "",
-    [string]$FifthReleaseTag = "",
-    [string]$FifthBranch = "",
-    [string]$GitHubToken = "",
+    [string]$HooksDll = "",
     [switch]$Fast,
     [switch]$Clean,
     [switch]$Package,
@@ -196,10 +193,7 @@ if ((Test-Path -LiteralPath $RootUpdater) -and (Test-Path -LiteralPath $PayloadU
 
 if ($Package) {
     $BootstrapArgs = @('-PublishRoot', $Publish)
-    if (![string]::IsNullOrWhiteSpace($FifthRepository)) { $BootstrapArgs += @('-FifthRepository', $FifthRepository) }
-    if (![string]::IsNullOrWhiteSpace($FifthReleaseTag)) { $BootstrapArgs += @('-FifthReleaseTag', $FifthReleaseTag) }
-    if (![string]::IsNullOrWhiteSpace($FifthBranch)) { $BootstrapArgs += @('-FifthBranch', $FifthBranch) }
-    if (![string]::IsNullOrWhiteSpace($GitHubToken)) { $BootstrapArgs += @('-GitHubToken', $GitHubToken) }
+    if (![string]::IsNullOrWhiteSpace($HooksDll)) { $BootstrapArgs += @('-SourceDll', $HooksDll) }
     Invoke-Step "bootstrap-hooks" (Join-Path $Root "prepare_bootstrap_hooks.ps1") $BootstrapArgs
 
     $PackageArgs = @('-Version', $ScblVersion, '-OutputDir', $OutputDir)

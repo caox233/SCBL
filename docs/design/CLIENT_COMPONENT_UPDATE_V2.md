@@ -134,7 +134,7 @@ Routine work is component-scoped:
 - Updater changes run the Updater workflow.
 - Route Guard or WinDivert integration changes run the Route Guard workflow.
 - EasyTier preparation changes run the EasyTier workflow.
-- Hooks and dedicated server changes run independent workflows in `caox233/5th-echelon`.
+- Hooks and dedicated server live in this repository and may use independent component workflows, while every artifact records the same SCBL source commit that produced it.
 - Server component-manager changes run Linux Python/shell tests only.
 
 Each workflow cancels superseded runs for the same PR and uses the relevant NuGet, Go or Rust cache.

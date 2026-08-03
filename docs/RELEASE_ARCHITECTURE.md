@@ -6,7 +6,8 @@
 |---|---|---|---|
 | Windows 客户端 | `VERSION_CLIENT` | `client-vX.Y.Z` | `[CLIENT] Windows Client vX.Y.Z` |
 | Linux 服务端工具 | `VERSION_SERVER_TOOL` | `server-tool-vX.Y.Z` | `[SERVER] Server Tool vX.Y.Z` |
-| 5th dedicated server 与 Hooks | 5th 项目维护 | 5th 项目标签 | 5th 项目维护 |
+| Hooks | `client/hooks/Cargo.toml` | 随客户端组件清单 | SCBL Commit + 组件版本 |
+| dedicated server | `server/dedicated-server/Cargo.toml` | 随服务端测试/正式资产 | SCBL Commit + 组件版本 |
 
 客户端和服务端不再创建 `stable-latest` Release。安装器和管理工具读取主分支版本文件，再下载对应的正式完整包和 SHA256。
 
@@ -29,4 +30,4 @@
 
 ## 数据边界
 
-Server Tool 更新不得覆盖 `scbl.env`、`server/5th-echelon.db`、客户端更新目录、备份目录或 DDNS-GO 配置。Hooks 源码和 DLL 不在 SCBL 仓库内修改或重新构建。
+Server Tool 更新不得覆盖 `scbl.env`、`server/5th-echelon.db`、客户端更新目录、备份目录或 DDNS-GO 配置。Hooks DLL 和 dedicated server 二进制虽由本仓库源码构建，但部署时仍按不可变组件处理，不允许同版本覆盖成不同内容。

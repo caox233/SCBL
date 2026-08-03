@@ -60,6 +60,7 @@ __pycache__/
 
 # Rust Hooks snapshot build output
 client/hooks-source/**/target/
+/target/
 
 # One-time audit and legacy status output
 /release/

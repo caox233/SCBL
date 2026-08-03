@@ -31,7 +31,7 @@ curl -fsSL https://raw.githubusercontent.com/caox233/SCBL/main/scripts/install-s
 - `VERSION_SERVER_TOOL` 是 Linux 服务端工具版本来源。
 - Release 标签分别为 `client-vX.Y.Z` 和 `server-tool-vX.Y.Z`。
 - Release 标题分别以 `[CLIENT]` 和 `[SERVER]` 开头，便于在同一列表中区分。
-- Hooks 与 dedicated server 由 `caox233/5th-echelon` 独立构建和发布。
+- Hooks 源码位于 `client/hooks`，dedicated server 源码位于 `server/dedicated-server`；两者由同一个 SCBL Commit 统一追踪，但仍作为独立组件构建和发布。
 
 正式客户端版本门禁仍然优先执行，组件清单不能绕过或替代该门禁。客户端通过服务器更新服务读取组件清单，并逐项核对本地组件：
 
@@ -60,6 +60,8 @@ Hooks 在游戏启动前部署。Route Guard、EasyTier 和 Updater 先下载到
 
 `--test` 等价于 `--update-channel test`，参数会在 UAC 提权重启后保留。关闭测试版启动器，再用不带参数的原快捷方式启动，即恢复正式通道。
 
+本地反复调试 Hooks 时，可把 DLL 放到启动器旁的 `local-components/hooks/uplay_r1_loader.dll`，再用 `--test` 启动。启动器每次启动游戏前都会读取并覆盖这个当前文件，无需重编启动器或手工更新固定哈希；复制前后的实际 SHA256 仍会写入日志和部署标记。`stable` 通道永远忽略该本地覆盖目录。
+
 `stable` 外置组件替换在组件清单签名验证完成前保持关闭；正式客户端继续使用完整包自带、经过 SHA256 校验的 bootstrap 组件。
 
 ## 构建方式
@@ -75,6 +77,9 @@ powershell -ExecutionPolicy Bypass -File .\client\build_launcher_incremental.ps1
 
 # 仅正式发布或修复包时组装完整客户端
 powershell -ExecutionPolicy Bypass -File .\client\build_all_windows.ps1 -Fast -Package
+
+# 校验 Hooks、dedicated server 与共享协议；加 -Release 生成本机发布产物
+powershell -ExecutionPolicy Bypass -File .\scripts\build-rust-components.ps1
 ```
 
 组件拥有独立 GitHub Actions 工作流和缓存。普通 PR 只验证受影响组件，不组装完整客户端；正式完整包工作流并行获取 Launcher、Updater、Route Guard、EasyTier 产物，加入已验证的 bootstrap Hooks 后组装 ZIP，不重新编译已经测试过的组件。
@@ -124,8 +129,9 @@ docs/guides/LOCAL_TEST_CANDIDATE.md
 ## 目录
 
 ```text
-client/          Windows Launcher、Updater、EasyTier 与 Route Guard
-server/          Linux 服务端管理器、组件仓库、控制平面与回归测试
+client/          Windows Launcher、Updater、Hooks、EasyTier 与 Route Guard
+server/          Dedicated Server、Quazal、Linux 管理器、控制平面与回归测试
+shared/          客户端与服务端共用的 gRPC 协议
 scripts/         一键安装入口及长期维护脚本
 docs/design/     当前设计文档
 docs/changes/    重要架构变更基线
@@ -139,6 +145,6 @@ docs/releases/   当前与上一代正式发布说明
 
 客户端的严格进程路由使用 WinDivert 2.2.2；虚拟网广播保持原样交给 EasyTier 处理。少数安全软件可能基于驱动的数据包处理能力显示风险提示。请只从本仓库正式 Release 下载，并核对 SHA256。
 
-SCBL 不会自动关闭安全软件、添加排除项或绕过安全检测。`dedicated_server`、Hooks 源码和 Hooks DLL 由 5th 项目独立构建和发布，SCBL 只消费经校验的确定资产。
+SCBL 不会自动关闭安全软件、添加排除项或绕过安全检测。`dedicated_server` 与 Hooks 在本仓库内维护；正式分发仍只消费带版本、大小和 SHA256 的确定资产。
 
 SCBL 是非官方社区项目，与 Ubisoft 无隶属或授权关系。本仓库不包含游戏本体文件。

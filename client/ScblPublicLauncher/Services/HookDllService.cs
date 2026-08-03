@@ -58,13 +58,22 @@ public sealed class HookDllService
             LogService.Info("检测到 uplay_r1_loader.orig.dll，保留现有备份。");
         }
 
-        VerifiedClientComponent? external = _componentUpdateService.ResolveHooksForSelectedChannel();
-        BootstrapHook bootstrap = external == null ? ResolveBootstrapHook() : BootstrapHook.Empty;
-        string expectedHash = external?.Sha256 ?? bootstrap.Sha256;
-        string sourcePath = external?.FilePath ?? bootstrap.FilePath;
-        string sourceDescription = external == null
-            ? "bootstrap-package"
-            : $"component:{external.Channel}/{external.Version}";
+        BootstrapHook? localTestHook = ResolveLocalTestHook();
+        VerifiedClientComponent? external = localTestHook == null
+            ? _componentUpdateService.ResolveHooksForSelectedChannel()
+            : null;
+        BootstrapHook bootstrap = localTestHook == null && external == null
+            ? ResolveBootstrapHook()
+            : BootstrapHook.Empty;
+        string expectedHash = localTestHook?.Sha256 ?? external?.Sha256 ?? bootstrap.Sha256;
+        string sourcePath = localTestHook?.FilePath ?? external?.FilePath ?? bootstrap.FilePath;
+        string sourceDescription = localTestHook != null
+            ? "local-test-override"
+            : external == null
+                ? "bootstrap-package"
+                : $"component:{external.Channel}/{external.Version}";
+        string sourceChannel = localTestHook != null ? "test" : external?.Channel ?? "stable";
+        string sourceVersion = localTestHook != null ? "local-override" : external?.Version ?? "bootstrap-package";
 
         if (string.IsNullOrWhiteSpace(expectedHash) || !File.Exists(sourcePath))
             throw new Exception("专用联机组件部署失败：没有可用且已校验的 Hooks 组件。请使用完整客户端修复安装。");
@@ -88,7 +97,28 @@ public sealed class HookDllService
         if (!afterHash.Equals(expectedHash, StringComparison.OrdinalIgnoreCase))
             throw new Exception("专用联机组件部署失败：写入后的 uplay_r1_loader.dll 校验不一致。请检查杀软或文件权限。");
 
-        WriteDeployMarker(gameDir, afterHash, external, sourceDescription);
+        WriteDeployMarker(gameDir, afterHash, sourceChannel, sourceVersion, sourceDescription);
+    }
+
+    private static BootstrapHook? ResolveLocalTestHook()
+    {
+        if (App.ComponentUpdateChannel != ClientUpdateChannel.Test)
+            return null;
+
+        string configured = (Environment.GetEnvironmentVariable("SCBL_LOCAL_HOOKS_DLL") ?? "").Trim();
+        string path = string.IsNullOrWhiteSpace(configured)
+            ? Path.Combine(AppContext.BaseDirectory, "local-components", "hooks", "uplay_r1_loader.dll")
+            : Path.GetFullPath(configured);
+        if (!File.Exists(path))
+            return null;
+
+        string hash = ComputeFileSha256BestEffort(path);
+        if (string.IsNullOrWhiteSpace(hash))
+            throw new IOException("本地测试 Hooks 无法读取：" + path);
+
+        LogService.Warning(
+            $"Test channel is using a local Hooks override without a pinned manifest hash. Path={path}, CurrentSha256={hash}");
+        return new BootstrapHook(path, hash);
     }
 
     private static BootstrapHook ResolveBootstrapHook()
@@ -240,7 +270,8 @@ public sealed class HookDllService
     private static void WriteDeployMarker(
         string gameDir,
         string dllSha256,
-        VerifiedClientComponent? external,
+        string channel,
+        string version,
         string sourceDescription)
     {
         var marker = new
@@ -249,8 +280,8 @@ public sealed class HookDllService
             DeployedAt = DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss"),
             Dll = "uplay_r1_loader.dll",
             Sha256 = dllSha256,
-            Channel = external?.Channel ?? "stable",
-            Version = external?.Version ?? "bootstrap-package",
+            Channel = channel,
+            Version = version,
             Source = sourceDescription
         };
 

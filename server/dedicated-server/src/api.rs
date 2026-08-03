@@ -1,0 +1,910 @@
+//! This module defines and implements the gRPC services for the dedicated server,
+//! including Friends, Users, Misc, UsersAdmin, and GamesAdmin services.
+
+use std::collections::HashMap;
+use std::collections::HashSet;
+use std::future::Future;
+use std::net::SocketAddr;
+use std::sync::Arc;
+
+use quazal::rmc::types::Property;
+use quazal::rmc::types::QList;
+use quazal::rmc::types::StationURL;
+use server_api::friends;
+use server_api::friends::friends_server::Friends;
+use server_api::friends::friends_server::FriendsServer;
+use server_api::friends::Friend;
+use server_api::games;
+use server_api::games::games_admin_server::GamesAdmin;
+use server_api::games::games_admin_server::GamesAdminServer;
+use server_api::misc;
+use server_api::misc::misc_server::Misc;
+use server_api::misc::misc_server::MiscServer;
+use server_api::users;
+use server_api::users::users_admin_server::UsersAdmin;
+use server_api::users::users_admin_server::UsersAdminServer;
+use server_api::users::users_server::Users;
+use server_api::users::users_server::UsersServer;
+use server_api::users::User;
+use slog::Logger;
+use sodiumoxide::base64;
+use sodiumoxide::crypto::secretbox;
+use sodiumoxide::crypto::secretbox::Key;
+use sodiumoxide::crypto::secretbox::Nonce;
+use tokio::sync::RwLock;
+use tonic::transport::Server;
+use tonic::Request;
+use tonic::Response;
+use tonic::Status;
+
+use crate::config::DebugConfig;
+use crate::storage::GameSession;
+use crate::storage::LoginError;
+use crate::storage::Storage;
+
+const INVITE_KIND_PRIVATE_ROOM: i32 = 1;
+const INVITE_KIND_LOBBY_PARTY: i32 = 2;
+const INVITE_KIND_PARTY_FOLLOW: i32 = 3;
+const INVITE_KIND_LOBBY_RESTORE: i32 = 4;
+const MAX_UPLAY_GAME_SESSION_DATA: usize = 16 * 1024;
+
+fn invite_requires_uplay_game_session(kind: i32) -> bool {
+    matches!(kind, INVITE_KIND_PRIVATE_ROOM | INVITE_KIND_PARTY_FOLLOW)
+}
+
+fn invite_forces_join(kind: i32) -> bool {
+    matches!(kind, INVITE_KIND_PARTY_FOLLOW | INVITE_KIND_LOBBY_RESTORE)
+}
+
+fn validate_uplay_game_session(data: &[u8]) -> bool {
+    !data.is_empty() && data.len() <= MAX_UPLAY_GAME_SESSION_DATA
+}
+
+/// Return a response copy of the host-published Uplay GameSession. Direct
+/// private invitations must target the exact private Quazal Session rather
+/// than the published Party/carrier id. The cached publication and payload
+/// bytes are never mutated.
+fn project_invite_uplay_game_session(kind: i32, invite_session_id: u32, published: Option<misc::UplayGameSession>) -> Option<misc::UplayGameSession> {
+    let mut session = published?;
+    if kind == INVITE_KIND_PRIVATE_ROOM {
+        session.id = u64::from(invite_session_id);
+    }
+    Some(session)
+}
+
+#[cfg(test)]
+mod private_game_direct_route_tests {
+    use super::*;
+
+    fn published() -> misc::UplayGameSession {
+        misc::UplayGameSession {
+            id: 465,
+            data: vec![1, 2, 3, 4],
+            flags: 7,
+            invite_only: true,
+        }
+    }
+
+    #[test]
+    fn direct_private_projects_only_top_level_target_id() {
+        let projected = project_invite_uplay_game_session(INVITE_KIND_PRIVATE_ROOM, 466, Some(published())).unwrap();
+        assert_eq!(projected.id, 466);
+        assert_eq!(projected.data, vec![1, 2, 3, 4]);
+        assert_eq!(projected.flags, 7);
+        assert!(projected.invite_only);
+    }
+
+    #[test]
+    fn party_follow_keeps_host_published_target_id() {
+        let projected = project_invite_uplay_game_session(INVITE_KIND_PARTY_FOLLOW, 466, Some(published())).unwrap();
+        assert_eq!(projected.id, 465);
+        assert_eq!(projected.data, vec![1, 2, 3, 4]);
+    }
+
+    #[test]
+    fn missing_publication_stays_missing() {
+        assert!(project_invite_uplay_game_session(INVITE_KIND_PRIVATE_ROOM, 466, None).is_none());
+    }
+}
+
+fn session_invite_kind(session: &GameSession) -> Option<i32> {
+    let attributes = session.attributes.parse::<QList<Property>>().ok()?;
+    attributes.0.iter().find_map(|property| {
+        if property.id != 113 {
+            return None;
+        }
+        match property.value {
+            0 => Some(INVITE_KIND_PRIVATE_ROOM),
+            1 => Some(INVITE_KIND_LOBBY_PARTY),
+            _ => None,
+        }
+    })
+}
+
+fn authenticated_user_id<T>(request: &Request<T>) -> Result<u32, Status> {
+    request
+        .metadata()
+        .get("user_id")
+        .ok_or_else(|| Status::unauthenticated("Missing authenticated user"))?
+        .to_str()
+        .map_err(|_| Status::unauthenticated("Invalid authenticated user"))?
+        .parse()
+        .map_err(|_| Status::unauthenticated("Invalid authenticated user"))
+}
+
+#[cfg(test)]
+mod authenticated_user_tests {
+    use super::*;
+
+    #[test]
+    fn accepts_valid_interceptor_metadata() {
+        let mut request = Request::new(());
+        request.metadata_mut().insert("user_id", 42_u32.into());
+        assert_eq!(authenticated_user_id(&request).unwrap(), 42);
+    }
+
+    #[test]
+    fn rejects_missing_or_malformed_metadata_without_panicking() {
+        let missing = authenticated_user_id(&Request::new(())).unwrap_err();
+        assert_eq!(missing.code(), tonic::Code::Unauthenticated);
+
+        let mut malformed = Request::new(());
+        malformed.metadata_mut().insert("user_id", "not-a-number".parse().unwrap());
+        let malformed = authenticated_user_id(&malformed).unwrap_err();
+        assert_eq!(malformed.code(), tonic::Code::Unauthenticated);
+    }
+}
+
+/// Implements the `Friends` gRPC service.
+pub struct MyFriends {
+    logger: Logger,
+    storage: Arc<Storage>,
+    debug_config: Arc<DebugConfig>,
+}
+
+#[tonic::async_trait]
+impl Friends for MyFriends {
+    /// Handles friend invitation requests.
+    ///
+    /// Extracts sender and receiver IDs, adds the invite to storage, and returns a response.
+    async fn invite(&self, request: Request<friends::InviteRequest>) -> Result<Response<friends::InviteResponse>, Status> {
+        let sender = authenticated_user_id(&request)?;
+        debug!(self.logger, "Invite request: {:?} from {}", request, sender);
+        let receiver = request.into_inner().id;
+
+        let Some(receiver_id) = self
+            .storage
+            .find_user_id_by_ubi_id_async(&receiver)
+            .await
+            .map_err(|e| Status::internal(format!("Couldn't add invite: {e:?}")))?
+        else {
+            return Err(Status::not_found("User not found"));
+        };
+        if receiver_id == sender {
+            return Err(Status::invalid_argument("Cannot invite yourself"));
+        }
+
+        let host_sessions = self
+            .storage
+            .find_host_sessions_async(sender)
+            .await
+            .map_err(|e| Status::internal(format!("Couldn't resolve invite target: {e:?}")))?;
+        // Newest recognized session is authoritative. A newer lobby session must
+        // win over an older stale private room after the player returns to lobby.
+        let Some((session, kind)) = host_sessions.into_iter().find_map(|session| session_invite_kind(&session).map(|kind| (session, kind))) else {
+            return Err(Status::failed_precondition("No active lobby or private room to invite into"));
+        };
+
+        let Some(invite_id) = self
+            .storage
+            .add_invite_async(sender, receiver_id, kind, session.session_type, session.session_id)
+            .await
+            .map_err(|e| Status::internal(format!("Couldn't add invite: {e:?}")))?
+        else {
+            return Err(Status::failed_precondition("Invite target is no longer joinable"));
+        };
+        info!(
+            self.logger,
+            "InviteBound";
+            "invite_id" => invite_id,
+            "kind" => kind,
+            "sender_id" => sender,
+            "receiver_id" => receiver_id,
+            "session_type" => session.session_type,
+            "session_id" => session.session_id,
+        );
+        Ok(Response::new(friends::InviteResponse {}))
+    }
+
+    /// Handles requests to list friends.
+    ///
+    /// Retrieves all users from storage and marks them as online based on debug configuration.
+    async fn list(&self, request: Request<friends::ListRequest>) -> Result<Response<friends::ListResponse>, Status> {
+        let user_id = authenticated_user_id(&request)?;
+        debug!(self.logger, "Friendlist request: {:?} from {}", request, user_id);
+        let users = self.storage.list_users_async().await.map_err(|e| Status::internal(format!("{e}")))?;
+        let friends = users
+            .into_iter()
+            .map(|u| Friend {
+                id: u.ubi_id,
+                username: u.username,
+                is_online: u.is_online || self.debug_config.mark_all_as_online,
+            })
+            .collect();
+        let resp = friends::ListResponse { friends };
+        Ok(Response::new(resp))
+    }
+}
+
+/// Authenticates a gRPC request by validating the provided authorization token.
+///
+/// This function extracts the token from the request metadata, decrypts it using the
+/// provided key, and verifies the user ID against the storage. If successful,
+/// the user ID is inserted into the request metadata for downstream services.
+async fn check_token<T>(logger: &Logger, key: &Key, storage: &Arc<Storage>, mut req: Request<T>) -> Result<Request<T>, Status> {
+    let token = req.metadata().get("authorization").ok_or(Status::unauthenticated("Missing authorization"))?;
+
+    let mut parts = token.to_str().map_err(|_| Status::unauthenticated("Invalid token"))?.split('.');
+    let c = parts.next().ok_or(Status::unauthenticated("Invalid token"))?;
+    let n = parts.next().ok_or(Status::unauthenticated("Invalid token"))?;
+    if parts.next().is_some() {
+        return Err(Status::unauthenticated("Invalid token"));
+    }
+
+    let c = base64::decode(c, base64::Variant::UrlSafeNoPadding).map_err(|()| Status::unauthenticated("Invalid token"))?;
+    let n = base64::decode(n, base64::Variant::UrlSafeNoPadding).map_err(|()| Status::unauthenticated("Invalid token"))?;
+
+    let user_id = secretbox::open(&c, &Nonce::from_slice(&n).ok_or(Status::unauthenticated("Invalid token"))?, key).map_err(|()| Status::unauthenticated("Invalid token"))?;
+
+    let user_id = std::str::from_utf8(&user_id).map_err(|_| Status::unauthenticated("Invalid user"))?;
+
+    debug!(logger, "Looking for user {user_id}");
+
+    let user = storage
+        .find_username_by_user_id_async(user_id.parse().map_err(|_| Status::unauthenticated("Invalid user"))?)
+        .await
+        .map_err(|_| Status::unauthenticated("Invalid token"))?;
+
+    let Some(user) = user else {
+        return Err(Status::unauthenticated("Invalid user"));
+    };
+
+    debug!(logger, "Valid token for user {user_id}: {user}");
+
+    let parsed_user_id = user_id.parse().map_err(|_| Status::unauthenticated("Invalid user"))?;
+    storage
+        .touch_api_presence_async(parsed_user_id)
+        .await
+        .map_err(|error| Status::internal(format!("Presence heartbeat failed: {error}")))?;
+    req.metadata_mut().insert("user_id", parsed_user_id.into());
+
+    Ok(req)
+}
+
+/// Implements the `Users` gRPC service.
+pub struct MyUsers {
+    logger: Logger,
+    key: Key,
+    storage: Arc<Storage>,
+}
+
+#[tonic::async_trait]
+impl Users for MyUsers {
+    /// Handles user login requests.
+    ///
+    /// Authenticates the user against the storage and generates an authorization token upon successful login.
+    async fn login(&self, request: Request<users::LoginRequest>) -> Result<Response<users::LoginResponse>, Status> {
+        let request = request.into_inner();
+        let username = request.username;
+        let password = request.password;
+
+        let maybe_user = self
+            .storage
+            .login_user_async(&username, &password)
+            .await
+            .map_err(|e| Status::internal(format!("Login error: {e:?}")))?;
+
+        let user_id = maybe_user.map_err(|err| match err {
+            LoginError::InvalidPassword => Status::unauthenticated("Invalid login"),
+            LoginError::NotFound => Status::not_found("Unknown user"),
+        })?;
+
+        let user_id = format!("{user_id}");
+        let n = secretbox::gen_nonce();
+        let c = secretbox::seal(user_id.as_bytes(), &n, &self.key);
+
+        let c = base64::encode(c, base64::Variant::UrlSafeNoPadding);
+        let n = base64::encode(n, base64::Variant::UrlSafeNoPadding);
+
+        info!(self.logger, "Login successful for {username}");
+        Ok(Response::new(users::LoginResponse {
+            error: String::new(),
+            token: format!("{c}.{n}"),
+            user: None,
+        }))
+    }
+
+    /// Handles user registration requests.
+    ///
+    /// Registers a new user in the storage, handling potential conflicts like duplicate usernames or Ubisoft IDs.
+    async fn register(&self, request: Request<users::RegisterRequest>) -> Result<Response<users::RegisterResponse>, Status> {
+        let request = request.into_inner();
+        let username = request.username;
+        let password = request.password;
+        let ubi_id = request.ubi_id;
+
+        let error = if let Err(err) = self.storage.register_user_async(&username, &password, Some(&ubi_id)).await {
+            match err.downcast::<sqlx::Error>() {
+                Ok(sqlx::Error::Database(db_err)) => {
+                    if db_err.is_unique_violation() {
+                        return Err(Status::already_exists(String::from("Username already taken or Ubisoft ID already registered")));
+                    }
+                    return Err(Status::internal(db_err.to_string()));
+                }
+                Ok(err) => return Err(Status::internal(err.to_string())),
+                Err(err) => err.to_string(),
+            }
+        } else {
+            String::new()
+        };
+        info!(self.logger, "New user {username} ({ubi_id}) registered");
+        Ok(Response::new(users::RegisterResponse { error, user: None }))
+    }
+}
+
+/// Implements the `Misc` gRPC service.
+pub struct MyMisc {
+    logger: Logger,
+    storage: Arc<Storage>,
+    debug_config: Arc<DebugConfig>,
+    uplay_game_sessions: Arc<RwLock<HashMap<u32, misc::UplayGameSession>>>,
+}
+
+#[tonic::async_trait]
+impl Misc for MyMisc {
+    /// Handles event requests, primarily for retrieving pending friend invites.
+    async fn event(&self, request: Request<misc::EventRequest>) -> Result<Response<misc::EventResponse>, Status> {
+        let user_id = authenticated_user_id(&request)?;
+        let Some(invite) = self.storage.take_invite_async(user_id).await.map_err(|e| {
+            error!(self.logger, "Error getting latest invite for user: {e}");
+            Status::internal(format!("{e:?}"))
+        })?
+        else {
+            return Ok(Response::new(misc::EventResponse { invite: None }));
+        };
+
+        let Some(sender) = self.storage.find_user_by_id_async(invite.sender).await.map_err(|e| {
+            error!(self.logger, "Error getting ubi id for user: {e}");
+            Status::internal(format!("{e:?}"))
+        })?
+        else {
+            return Err(Status::not_found(""));
+        };
+        let published_game_session = if invite_requires_uplay_game_session(invite.kind) {
+            self.uplay_game_sessions.read().await.get(&invite.sender).cloned()
+        } else {
+            None
+        };
+        let published_uplay_game_session_id = published_game_session.as_ref().map_or(0, |session| session.id);
+        let game_session = project_invite_uplay_game_session(invite.kind, invite.session_id, published_game_session);
+        if invite.kind == INVITE_KIND_PRIVATE_ROOM {
+            if let Some(projected) = game_session.as_ref() {
+                info!(
+                    self.logger,
+                    "PrivateInviteUplayTargetProjected";
+                    "invite_id" => invite.id,
+                    "sender_id" => invite.sender,
+                    "receiver_id" => invite.receiver,
+                    "session_type" => invite.session_type,
+                    "private_session_id" => invite.session_id,
+                    "published_uplay_game_session_id" => published_uplay_game_session_id,
+                    "projected_uplay_game_session_id" => projected.id,
+                    "payload_bytes" => projected.data.len(),
+                    "payload_unchanged" => true,
+                    "flags_unchanged" => true,
+                    "invite_only_unchanged" => true,
+                    "response_only" => true,
+                );
+            }
+        }
+        if invite_requires_uplay_game_session(invite.kind) && game_session.is_none() {
+            warn!(
+                self.logger,
+                "InviteUplayGameSessionUnavailable";
+                "invite_id" => invite.id,
+                "kind" => invite.kind,
+                "sender_id" => invite.sender,
+                "receiver_id" => invite.receiver,
+                "session_id" => invite.session_id,
+            );
+        }
+        info!(
+            self.logger,
+            "InviteEventDelivered";
+            "invite_id" => invite.id,
+            "delivery_count" => invite.delivery_count,
+            "kind" => invite.kind,
+            "sender_id" => invite.sender,
+            "receiver_id" => invite.receiver,
+            "session_type" => invite.session_type,
+            "session_id" => invite.session_id,
+            "uplay_game_session_present" => game_session.is_some(),
+            "uplay_game_session_published_id" => published_uplay_game_session_id,
+            "uplay_game_session_id" => game_session.as_ref().map_or(0, |session| session.id),
+            "uplay_target_projected" => invite.kind == INVITE_KIND_PRIVATE_ROOM && game_session.is_some(),
+            "uplay_game_session_bytes" => game_session.as_ref().map_or(0, |session| session.data.len()),
+            "uplay_game_session_flags" => game_session.as_ref().map_or(0, |session| session.flags),
+            "uplay_game_session_invite_only" => game_session.as_ref().is_some_and(|session| session.invite_only),
+        );
+        Ok(Response::new(misc::EventResponse {
+            invite: Some(misc::InviteEvent {
+                id: invite.id,
+                sender: Some(User {
+                    id: sender.ubi_id,
+                    username: sender.username,
+                    ips: vec![],
+                }),
+                force_join: self.debug_config.force_joins || invite_forces_join(invite.kind),
+                kind: invite.kind,
+                game_session,
+            }),
+        }))
+    }
+
+    async fn accept_invite(&self, request: Request<misc::AcceptInviteRequest>) -> Result<Response<misc::AcceptInviteResponse>, Status> {
+        let user_id = authenticated_user_id(&request)?;
+        let invite_id = request.into_inner().id;
+        let Some(invite) = self
+            .storage
+            .accept_invite_async(user_id, invite_id)
+            .await
+            .map_err(|error| Status::internal(format!("Couldn't accept invite: {error:?}")))?
+        else {
+            return Err(Status::not_found("Invitation expired or unavailable"));
+        };
+        info!(
+            self.logger,
+            "InviteAccepted";
+            "invite_id" => invite.id,
+            "kind" => invite.kind,
+            "sender_id" => invite.sender,
+            "receiver_id" => invite.receiver,
+            "session_type" => invite.session_type,
+            "session_id" => invite.session_id,
+        );
+        Ok(Response::new(misc::AcceptInviteResponse {
+            accepted: true,
+            kind: invite.kind,
+        }))
+    }
+
+    async fn set_game_session(&self, request: Request<misc::SetGameSessionRequest>) -> Result<Response<misc::SetGameSessionResponse>, Status> {
+        let user_id = authenticated_user_id(&request)?;
+        let request = request.into_inner();
+        if !validate_uplay_game_session(&request.data) {
+            return Err(Status::invalid_argument("Uplay GameSession data is empty or too large"));
+        }
+        let session = misc::UplayGameSession {
+            id: request.id,
+            data: request.data,
+            flags: request.flags,
+            invite_only: request.invite_only,
+        };
+        info!(
+            self.logger,
+            "UplayGameSessionPublished";
+            "user_id" => user_id,
+            "game_session_id" => session.id,
+            "data_bytes" => session.data.len(),
+            "flags" => session.flags,
+            "invite_only" => session.invite_only,
+        );
+        self.uplay_game_sessions.write().await.insert(user_id, session);
+        Ok(Response::new(misc::SetGameSessionResponse {}))
+    }
+
+    async fn clear_game_session(&self, request: Request<misc::ClearGameSessionRequest>) -> Result<Response<misc::ClearGameSessionResponse>, Status> {
+        let user_id = authenticated_user_id(&request)?;
+        let removed = self.uplay_game_sessions.write().await.remove(&user_id).is_some();
+        info!(self.logger, "UplayGameSessionCleared"; "user_id" => user_id, "removed" => removed);
+        Ok(Response::new(misc::ClearGameSessionResponse {}))
+    }
+
+    /// Handles P2P testing requests.
+    ///
+    /// Attempts to establish a UDP connection with the client and exchanges a challenge.
+    async fn test_p2p(&self, request: Request<misc::TestP2pRequest>) -> Result<Response<misc::TestP2pResponse>, Status> {
+        let mut client_addr = request.remote_addr().ok_or(Status::failed_precondition("no client address"))?;
+        client_addr.set_port(13_000);
+        let request = request.into_inner();
+        let mut resp_data = b"P2P Test - ".to_vec();
+        resp_data.extend(request.challenge);
+
+        let buf = tokio::time::timeout(std::time::Duration::from_secs(5), async {
+            let socket = tokio::net::UdpSocket::bind("0.0.0.0:0").await?;
+            socket.connect(client_addr).await?;
+            socket.send(&resp_data).await?;
+            let mut buf = [0; 1024];
+            let len = socket.recv(&mut buf).await?;
+            Ok(buf[..len].to_vec())
+        });
+        let Ok(challenge) = buf.await else {
+            return Err(Status::deadline_exceeded("client didn't response in time"));
+        };
+        let Ok(challenge): std::io::Result<Vec<u8>> = challenge else {
+            return Err(Status::unknown(format!("P2P communication failed: {}", challenge.unwrap_err())));
+        };
+
+        Ok(Response::new(misc::TestP2pResponse { challenge }))
+    }
+}
+
+/// Implements the `UsersAdmin` gRPC service for administrative user management.
+pub struct MyUsersAdmin {
+    logger: Logger,
+    storage: Arc<Storage>,
+}
+
+#[tonic::async_trait]
+impl UsersAdmin for MyUsersAdmin {
+    /// Handles requests to list all users.
+    ///
+    /// Retrieves user information and their associated IP addresses from storage.
+    async fn list(&self, request: Request<users::ListRequest>) -> Result<Response<users::ListResponse>, Status> {
+        let _request = request.into_inner();
+        let Ok(db_users) = self.storage.list_users_async().await else {
+            return Err(Status::internal("Error listing users"));
+        };
+
+        let mut users = vec![];
+        for user in db_users {
+            let urls = self.storage.list_urls(user.id).await.map_err(|e| Status::internal(format!("{e:?}")))?;
+            let ips = urls
+                .into_iter()
+                .map(|u| u.parse::<StationURL>())
+                .filter_map(Result::ok)
+                .map(|u| u.address)
+                .collect::<HashSet<_>>()
+                .into_iter()
+                .collect();
+            users.push(User {
+                id: user.ubi_id,
+                username: user.username,
+                ips,
+            });
+        }
+
+        let resp = users::ListResponse {
+            #[allow(clippy::cast_possible_wrap, clippy::cast_possible_truncation)]
+            total: users.len() as i32,
+            users,
+        };
+        Ok(Response::new(resp))
+    }
+
+    /// Handles requests to retrieve a single user's details.
+    ///
+    /// Retrieves user information and their associated IP addresses from storage based on the provided user ID.
+    async fn get(&self, request: Request<users::GetRequest>) -> Result<Response<users::GetResponse>, Status> {
+        let request = request.into_inner();
+        let user_id = request.id;
+        let user_id: u32 = user_id.parse().map_err(|_| Status::invalid_argument("Invalid ID"))?;
+        let Ok(user) = self.storage.find_user_by_id_async(user_id).await else {
+            return Err(Status::internal("Error retrieving user"));
+        };
+
+        let Some(user) = user else {
+            return Err(Status::not_found("User not found"));
+        };
+
+        let urls = self.storage.list_urls(user.id).await.map_err(|e| Status::internal(format!("{e:?}")))?;
+        let ips = urls
+            .into_iter()
+            .map(|u| u.parse::<StationURL>())
+            .filter_map(Result::ok)
+            .map(|u| u.address)
+            .collect::<HashSet<_>>()
+            .into_iter()
+            .collect();
+
+        let resp = users::GetResponse {
+            user: Some(User {
+                id: user.ubi_id,
+                username: user.username,
+                ips,
+            }),
+        };
+        Ok(Response::new(resp))
+    }
+
+    /// Handles requests to delete a user.
+    ///
+    /// Deletes a user from storage based on their Ubisoft ID.
+    async fn delete(&self, request: Request<users::DeleteRequest>) -> Result<Response<users::DeleteResponse>, Status> {
+        let request = request.into_inner();
+        let Some(user) = self
+            .storage
+            .find_user_by_ubi_id_async(&request.id)
+            .await
+            .map_err(|_| Status::invalid_argument("Invalid ID"))?
+        else {
+            return Err(Status::not_found("User not found"));
+        };
+        match self.storage.delete_user_async(user.id).await {
+            Ok(()) => {
+                warn!(self.logger, "Deleted user {user:?}");
+                Ok(Response::new(users::DeleteResponse {}))
+            }
+            Err(e) => Err(Status::internal(format!("{e:?}"))),
+        }
+    }
+}
+
+/// Implements the `GamesAdmin` gRPC service for administrative game session management.
+struct MyGamesAdmin {
+    logger: Logger,
+    storage: Arc<Storage>,
+}
+
+#[tonic::async_trait]
+impl GamesAdmin for MyGamesAdmin {
+    /// Handles requests to list all active game sessions.
+    ///
+    /// Retrieves game session information from storage and parses game-specific attributes.
+    async fn list(&self, request: Request<games::ListRequest>) -> Result<Response<games::ListResponse>, Status> {
+        let _request = request.into_inner();
+        let sessions = self.storage.list_game_sessions_async().await.map_err(|e| {
+            error!(self.logger, "Error listing games: {e}");
+            Status::internal(format!("{e:?}"))
+        })?;
+
+        Ok(Response::new(games::ListResponse {
+            games: sessions
+                .into_iter()
+                .filter_map(|s| {
+                    let attributes: QList<Property> = s
+                        .attributes
+                        .parse()
+                        .inspect_err(|e| {
+                            error!(self.logger, "Error parsing game type: {e}");
+                        })
+                        .unwrap_or_default();
+                    let attributes: HashMap<u32, u32> = attributes.0.into_iter().map(|p| (p.id, p.value)).collect();
+
+                    // just guessing that 105 gives me what I want... ¯\_(ツ)_/¯
+                    let game_type = match attributes.get(&105) {
+                        None => String::from("Lobby"),
+                        Some(&1) => String::from("SvM"),
+                        Some(&2) => String::from("Coop"),
+                        Some(v) => format!("Unknown({v})"),
+                    };
+
+                    let Some(creator) = s.participants.iter().find(|participant| participant.user_id == s.creator_id) else {
+                        error!(self.logger, "Skipping inconsistent game session without creator"; "session_id" => s.session_id, "creator_id" => s.creator_id);
+                        return None;
+                    };
+                    let creator = creator.name.clone();
+
+                    Some(games::Game {
+                        id: s.session_id,
+                        creator,
+                        participants: s.participants.into_iter().filter(|p| p.user_id != s.creator_id).map(|p| p.name).collect(),
+                        game_type,
+                    })
+                })
+                .collect(),
+        }))
+    }
+
+    /// Handles requests to delete a game session.
+    ///
+    /// Deletes a game session from storage based on its session ID.
+    async fn delete(&self, request: Request<games::DeleteRequest>) -> Result<Response<games::DeleteResponse>, Status> {
+        let request = request.into_inner();
+        let session_id = request.id;
+        match self.storage.delete_game_session_by_id_async(session_id).await {
+            Ok(()) => {
+                warn!(self.logger, "Deleted game session {session_id:?}");
+                Ok(Response::new(games::DeleteResponse {}))
+            }
+            Err(e) => Err(Status::internal(format!("{e:?}"))),
+        }
+    }
+}
+
+/// Creates an authenticated gRPC service.
+///
+/// This function wraps a gRPC service with an interceptor that validates
+/// an authorization token present in the request metadata.
+fn authenticated<S>(
+    service: S,
+    logger: Logger,
+    key: Key,
+    storage: Arc<Storage>,
+) -> tonic_async_interceptor::AsyncInterceptedService<S, impl tonic_async_interceptor::AsyncInterceptor<Future = impl Future<Output = Result<Request<()>, Status>> + Send> + Clone>
+{
+    tonic_async_interceptor::AsyncInterceptedService::new(service, move |req: Request<()>| {
+        let storage = Arc::clone(&storage);
+        let logger = logger.clone();
+        let key = key.clone();
+        async move {
+            let this = check_token(&logger, &key, &storage, req).await;
+            if let Err(ref e) = this {
+                error!(logger, "Auth failure: {e}");
+            }
+            this
+        }
+    })
+}
+
+/// Creates a gRPC service with preshared key authentication.
+///
+/// This function wraps a gRPC service with an interceptor that validates
+/// a preshared key present in the "authorization" metadata of the request.
+fn preshared_authentication<S>(service: S, key: String) -> tonic::service::interceptor::InterceptedService<S, impl tonic::service::Interceptor + Clone> {
+    tonic::service::interceptor::InterceptedService::new(service, move |req: Request<()>| {
+        let header_value = req.metadata().get("authorization").ok_or(Status::unauthenticated("Missing authorization"))?;
+        let token = header_value.to_str().map_err(|_| Status::unauthenticated("Invalid token"))?;
+
+        if token == key {
+            Ok(req)
+        } else {
+            Err(Status::permission_denied("Invalid token"))
+        }
+    })
+}
+
+/// Encodes a byte slice into a Base32 string.
+fn base32(data: &[u8]) -> String {
+    let mut s = String::new();
+    for chunk in data.chunks(5) {
+        let mut value = 0u64;
+        let mut i = 0;
+        for c in chunk {
+            value <<= 8;
+            value |= u64::from(*c);
+            i += 1;
+        }
+        value <<= 8 * (5 - i);
+        if i == 8 {
+            i = 0;
+        } else {
+            i = 8 - (i * 8 + 4) / 5;
+        }
+        for i in (i..8).rev() {
+            let ch = match ((value >> (5 * i)) & 0b11111) as u8 {
+                b @ 0..=9 => b'0' + b,
+                b @ 10..=31 => b'A' + b - 10,
+                b => unreachable!("{b:?}"),
+            };
+            s.push(ch as char);
+        }
+    }
+    s
+}
+
+/// Starts the gRPC server, binding to the specified address and registering services.
+///
+/// This function initializes the server, sets up reflection services, and registers
+/// the Friends, Users, and Misc gRPC services. Optionally, it enables and registers
+/// administrative services (UsersAdmin and GamesAdmin) if `enable_admin_services` is true.
+pub async fn start_server(
+    logger: Logger,
+    storage: Arc<Storage>,
+    server_addr: SocketAddr,
+    debug_config: Arc<DebugConfig>,
+    enable_admin_services: bool,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let key = secretbox::gen_key();
+    let uplay_game_sessions = Arc::new(RwLock::new(HashMap::new()));
+    info!(logger, "Listening on {server_addr}");
+    let builder = Server::builder()
+        .add_service(
+            tonic_reflection::server::Builder::configure()
+                .register_encoded_file_descriptor_set(users::FILE_DESCRIPTOR_SET)
+                .register_encoded_file_descriptor_set(friends::FILE_DESCRIPTOR_SET)
+                .register_encoded_file_descriptor_set(misc::FILE_DESCRIPTOR_SET)
+                .build_v1alpha()
+                .unwrap(),
+        )
+        .add_service(
+            tonic_reflection::server::Builder::configure()
+                .register_encoded_file_descriptor_set(users::FILE_DESCRIPTOR_SET)
+                .register_encoded_file_descriptor_set(friends::FILE_DESCRIPTOR_SET)
+                .register_encoded_file_descriptor_set(misc::FILE_DESCRIPTOR_SET)
+                .build_v1()
+                .unwrap(),
+        )
+        .add_service(authenticated(
+            FriendsServer::new(MyFriends {
+                logger: logger.clone(),
+                storage: Arc::clone(&storage),
+                debug_config: Arc::clone(&debug_config),
+            }),
+            logger.clone(),
+            key.clone(),
+            Arc::clone(&storage),
+        ))
+        .add_service(authenticated(
+            MiscServer::new(MyMisc {
+                logger: logger.clone(),
+                storage: Arc::clone(&storage),
+                debug_config,
+                uplay_game_sessions: Arc::clone(&uplay_game_sessions),
+            }),
+            logger.clone(),
+            key.clone(),
+            Arc::clone(&storage),
+        ))
+        .add_service(UsersServer::new(MyUsers {
+            logger: logger.clone(),
+            storage: Arc::clone(&storage),
+            key,
+        }));
+
+    let builder = if enable_admin_services {
+        warn!(logger, "Enabling admin services");
+        let preshared = base32(&secretbox::gen_key().0);
+        println!("Admin Key: {preshared}");
+        builder
+            .add_service(preshared_authentication(
+                UsersAdminServer::new(MyUsersAdmin {
+                    logger: logger.clone(),
+                    storage: Arc::clone(&storage),
+                }),
+                preshared.clone(),
+            ))
+            .add_service(preshared_authentication(GamesAdminServer::new(MyGamesAdmin { logger, storage }), preshared))
+    } else {
+        builder
+    };
+
+    builder.serve(server_addr).await?;
+    Ok(())
+}
+
+#[cfg(test)]
+mod invite_target_tests {
+    use super::*;
+
+    fn session(attributes: &str) -> GameSession {
+        GameSession {
+            session_type: 1,
+            session_id: 1,
+            creator_id: 1,
+            attributes: attributes.to_string(),
+            participants: Vec::new(),
+        }
+    }
+
+    #[test]
+    fn classifies_private_room_and_lobby_party_sessions() {
+        assert_eq!(session_invite_kind(&session("113 => 0;103 => 0;112 => 4")), Some(INVITE_KIND_PRIVATE_ROOM));
+        assert_eq!(session_invite_kind(&session("113 => 1;3 => 8;4 => 0")), Some(INVITE_KIND_LOBBY_PARTY));
+        assert_eq!(session_invite_kind(&session("not valid attributes")), None);
+    }
+
+    #[test]
+    fn only_private_and_follow_invites_require_uplay_game_session_data() {
+        assert!(invite_requires_uplay_game_session(INVITE_KIND_PRIVATE_ROOM));
+        assert!(!invite_requires_uplay_game_session(INVITE_KIND_LOBBY_PARTY));
+        assert!(invite_requires_uplay_game_session(INVITE_KIND_PARTY_FOLLOW));
+        assert!(!invite_requires_uplay_game_session(INVITE_KIND_LOBBY_RESTORE));
+    }
+
+    #[test]
+    fn follow_and_lobby_restore_invites_force_join() {
+        assert!(invite_forces_join(INVITE_KIND_PARTY_FOLLOW));
+        assert!(invite_forces_join(INVITE_KIND_LOBBY_RESTORE));
+        assert!(!invite_forces_join(INVITE_KIND_PRIVATE_ROOM));
+        assert!(!invite_forces_join(INVITE_KIND_LOBBY_PARTY));
+    }
+
+    #[test]
+    fn validates_uplay_game_session_blob_boundaries() {
+        assert!(!validate_uplay_game_session(&[]));
+        assert!(validate_uplay_game_session(&[1]));
+        assert!(validate_uplay_game_session(&vec![0; MAX_UPLAY_GAME_SESSION_DATA]));
+        assert!(!validate_uplay_game_session(&vec![0; MAX_UPLAY_GAME_SESSION_DATA + 1]));
+    }
+}

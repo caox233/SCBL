@@ -13,7 +13,6 @@ internal static class Program
         try
         {
             string? package = GetArg(args, "--package");
-            string? plan = GetArg(args, "--plan");
             target = GetArg(args, "--target");
             string? pidText = GetArg(args, "--pid");
             restart = GetArg(args, "--restart");
@@ -29,14 +28,14 @@ internal static class Program
                 Log("Missing --target; inferred target=" + target);
             }
 
-            if (string.IsNullOrWhiteSpace(package) && string.IsNullOrWhiteSpace(plan))
+            if (string.IsNullOrWhiteSpace(package))
             {
-                Log("No --package or --plan specified; nothing to update.");
+                Log("No --package specified; nothing to update.");
                 return 0;
             }
 
             target = Path.GetFullPath(target);
-            Log($"Update started. package={package}, plan={plan}, target={target}");
+            Log($"Update started. package={package}, target={target}");
 
             if (!Directory.Exists(target))
                 throw new DirectoryNotFoundException(target);
@@ -57,38 +56,14 @@ internal static class Program
             // Kill them before applying updates so tools\*.exe and WinDivert files are not locked.
             StopRuntimeProcessesForUpdate(target);
 
-            string appliedVersion = "";
-            if (!string.IsNullOrWhiteSpace(plan))
-            {
-                plan = Path.GetFullPath(plan);
-                if (!File.Exists(plan))
-                    throw new FileNotFoundException("Update plan not found", plan);
+            package = Path.GetFullPath(package);
+            if (!File.Exists(package))
+                throw new FileNotFoundException("Update package not found", package);
 
-                appliedVersion = ReadPlanVersion(plan);
-                ApplyDeltaPlan(plan, target);
-
-                try
-                {
-                    string? planDir = Path.GetDirectoryName(plan);
-                    if (!string.IsNullOrWhiteSpace(planDir) && Directory.Exists(planDir))
-                        Directory.Delete(planDir, recursive: true);
-                }
-                catch (Exception ex)
-                {
-                    Log("Temporary update folder cleanup skipped: " + ex.Message);
-                }
-            }
-            else
-            {
-                package = Path.GetFullPath(package!);
-                if (!File.Exists(package))
-                    throw new FileNotFoundException("Update package not found", package);
-
-                ApplyFullPackage(package, target);
-                appliedVersion = NormalizeVersion(requestedVersion);
-                if (string.IsNullOrWhiteSpace(appliedVersion))
-                    throw new InvalidOperationException("Missing or invalid --version for full client update.");
-            }
+            ApplyFullPackage(package, target);
+            string appliedVersion = NormalizeVersion(requestedVersion);
+            if (string.IsNullOrWhiteSpace(appliedVersion))
+                throw new InvalidOperationException("Missing or invalid --version for full client update.");
 
             CleanupBackupDirectory(target);
             WriteAppliedUpdateReceipt(target, appliedVersion);
@@ -300,94 +275,6 @@ internal static class Program
         {
             try { Directory.Delete(temp, recursive: true); } catch { }
         }
-    }
-
-    private static void ApplyDeltaPlan(string planPath, string target)
-    {
-        var json = File.ReadAllText(planPath);
-        var plan = JsonSerializer.Deserialize<DeltaUpdatePlan>(json, JsonOptions) ?? throw new InvalidOperationException("Invalid update plan");
-        string stagingRoot = string.IsNullOrWhiteSpace(plan.StagingRoot) ? Path.GetDirectoryName(planPath)! : plan.StagingRoot;
-        var keep = plan.KeepLocal.Count > 0 ? plan.KeepLocal : new List<string> { "logs/", "backup/", "updates/", "launcher_settings.json" };
-
-        BackupCurrent(target);
-
-        foreach (var raw in plan.Delete.Distinct(StringComparer.OrdinalIgnoreCase))
-        {
-            string relative = NormalizeRelative(raw);
-            if (!IsSafeRelativePath(relative) || MatchesPattern(relative, keep))
-                continue;
-            if (Path.GetFileName(relative).Equals("SCBL.Updater.exe", StringComparison.OrdinalIgnoreCase))
-                continue;
-
-            string dest = Path.Combine(target, relative.Replace('/', Path.DirectorySeparatorChar));
-            try
-            {
-                if (File.Exists(dest))
-                {
-                    Log($"Delete obsolete file: {relative}");
-                    File.Delete(dest);
-                }
-                else if (Directory.Exists(dest))
-                {
-                    Log($"Delete obsolete directory: {relative}");
-                    Directory.Delete(dest, recursive: true);
-                }
-            }
-            catch (Exception ex)
-            {
-                Log($"Delete skipped: {relative}, {ex.Message}");
-            }
-        }
-
-        foreach (var file in plan.Files)
-        {
-            string relative = NormalizeRelative(file.Path);
-            if (!IsSafeRelativePath(relative) || MatchesPattern(relative, keep))
-                continue;
-            if (Path.GetFileName(relative).Equals("SCBL.Updater.exe", StringComparison.OrdinalIgnoreCase))
-            {
-                Log("Skip replacing running updater: " + relative);
-                continue;
-            }
-            if (IsUpdateMetadataFile(relative))
-            {
-                Log("Skip update metadata file: " + relative);
-                continue;
-            }
-
-            string src = Path.Combine(stagingRoot, relative.Replace('/', Path.DirectorySeparatorChar));
-            string dest = Path.Combine(target, relative.Replace('/', Path.DirectorySeparatorChar));
-            if (!File.Exists(src))
-                throw new FileNotFoundException("Staged update file missing", src);
-
-            if (!string.IsNullOrWhiteSpace(file.Sha256))
-            {
-                string actual = ComputeSha256(src);
-                if (!actual.Equals(file.Sha256, StringComparison.OrdinalIgnoreCase))
-                    throw new InvalidOperationException($"Hash mismatch for staged file: {relative}");
-            }
-
-            Directory.CreateDirectory(Path.GetDirectoryName(dest)!);
-            File.Copy(src, dest, overwrite: true);
-            Log("Updated file: " + relative);
-        }
-    }
-
-    private static string ReadPlanVersion(string planPath)
-    {
-        try
-        {
-            using JsonDocument doc = JsonDocument.Parse(File.ReadAllText(planPath));
-            if (doc.RootElement.TryGetProperty("Version", out JsonElement upper))
-                return (upper.GetString() ?? "").Trim().TrimStart('v', 'V');
-            if (doc.RootElement.TryGetProperty("version", out JsonElement lower))
-                return (lower.GetString() ?? "").Trim().TrimStart('v', 'V');
-        }
-        catch (Exception ex)
-        {
-            Log("Read update plan version skipped: " + ex.Message);
-        }
-        return "";
     }
 
     private static void WriteAppliedUpdateReceipt(string target, string version)
@@ -855,24 +742,4 @@ internal static class Program
         return Convert.ToHexString(sha.ComputeHash(stream)).ToLowerInvariant();
     }
 
-    private static readonly JsonSerializerOptions JsonOptions = new()
-    {
-        PropertyNameCaseInsensitive = true
-    };
-
-    private sealed class DeltaUpdatePlan
-    {
-        public string Version { get; set; } = string.Empty;
-        public string StagingRoot { get; set; } = string.Empty;
-        public List<DeltaPlanFile> Files { get; set; } = new();
-        public List<string> Delete { get; set; } = new();
-        public List<string> KeepLocal { get; set; } = new();
-    }
-
-    private sealed class DeltaPlanFile
-    {
-        public string Path { get; set; } = string.Empty;
-        public string Sha256 { get; set; } = string.Empty;
-        public long Size { get; set; }
-    }
 }

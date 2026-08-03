@@ -65,20 +65,13 @@ public partial class MainWindow : Window
     private readonly object _gameProcessSync = new();
     private readonly HashSet<int> _launcherOwnedGamePids = new();
     private CancellationTokenSource? _gameMonitorCts;
-    private CancellationTokenSource? _tunnelWatchdogCts;
-    private readonly SemaphoreSlim _networkPrepareLock = new(1, 1);
-    private readonly SemaphoreSlim _networkVerifyLock = new(1, 1);
     private readonly SemaphoreSlim _gameLaunchRequestLock = new(1, 1);
     private CancellationTokenSource? _networkCheckCooldownCts;
     private bool _networkCheckButtonCoolingDown;
-    private int _networkConsecutiveFailureCount;
-    private bool _networkAutoRetryScheduled;
     private bool _networkReady;
-    private bool _startupNetworkPreparationDone;
     private bool _remoteAnnouncementCheckedThisSession;
     private bool _networkLifecycleStarted;
     private bool _networkShutdownStarted;
-    private DateTime _lastNetworkVerifyUtc = DateTime.MinValue;
     private DateTime _lastGreenStatusUtc = DateTime.MinValue;
     private DateTime _lastYellowStatusUtc = DateTime.MinValue;
     private ServerStatusKind _serverStatusKind = ServerStatusKind.Unknown;
@@ -150,7 +143,6 @@ public partial class MainWindow : Window
     private const int GameProcessProbeIntervalMs = 1000;
     private const int GameExitMissingChecks = 2;
     private const int GameLaunchWaitTimeoutSeconds = 600;
-    private const int AutoNetworkFailureRedThreshold = 3;
     private const int GreenStatusHoldSeconds = 12;
     private const int YellowStatusDebounceMs = 450;
     private const int DiagnosticVersionClickThreshold = 3;
@@ -168,14 +160,6 @@ public partial class MainWindow : Window
         NetworkFailed,
         TunnelFailed,
         ServerFailed
-    }
-
-    private sealed class NetworkCheckReport
-    {
-        public bool Ok { get; init; }
-        public string Message { get; init; } = "";
-        public long? LatencyMs { get; init; }
-        public IReadOnlyList<string> FailedPorts { get; init; } = Array.Empty<string>();
     }
 
     private sealed record GameQualitySample(DateTime AtUtc, bool Success, long? LatencyMs);
@@ -519,12 +503,10 @@ public partial class MainWindow : Window
         {
             _assignedIp = result.AssignedIp;
             _lastServerLatencyMs = result.LatencyMs;
-            _networkConsecutiveFailureCount = 0;
             _ = CheckRemoteClientServicesAfterNetworkAsync();
             return true;
         }
 
-        _networkConsecutiveFailureCount++;
         if (showFailureDialog)
             await ShowNetworkFailureDialogAsync(result);
         return false;
@@ -812,60 +794,6 @@ public partial class MainWindow : Window
         }
     }
 
-    private void StartTunnelWatchdog()
-    {
-        if (_tunnelWatchdogCts != null)
-            return;
-
-        _tunnelWatchdogCts = new CancellationTokenSource();
-        var token = _tunnelWatchdogCts.Token;
-        _ = Task.Run(async () =>
-        {
-            while (!token.IsCancellationRequested)
-            {
-                try
-                {
-                    await Task.Delay(TimeSpan.FromSeconds(5), token).ConfigureAwait(false);
-                    if (token.IsCancellationRequested || _allowClose)
-                        break;
-
-                    if (_networkReady && !_tunnelService.IsRunning && !_tunnelService.HasRunningTunnelClientProcess())
-                    {
-                        LogService.Error("Tunnel watchdog detected stopped tunnel-client; verifying before reconnect.");
-                        var stillOkTask = await Dispatcher.InvokeAsync(() => TryReuseExistingPublicNetworkAsync("watchdog verify"));
-                        bool stillOk = await stillOkTask;
-                        if (stillOk)
-                            continue;
-
-                        _networkConsecutiveFailureCount++;
-                        if (_networkConsecutiveFailureCount >= 2)
-                        {
-                            await Dispatcher.InvokeAsync(() =>
-                            {
-                                _networkReady = false;
-                                SetServerStatus(YellowBrush, "", ServerStatusKind.TunnelConnecting);
-                            });
-                            var retryTask = await Dispatcher.InvokeAsync(() => EnsurePublicNetworkOrchestratedAsync(showFailureDialog: false, reason: "watchdog reconnect"));
-                            await retryTask;
-                        }
-                        else
-                        {
-                            LogService.Info("Tunnel watchdog: transient miss ignored to keep green status stable.");
-                        }
-                    }
-                }
-                catch (OperationCanceledException)
-                {
-                    break;
-                }
-                catch (Exception ex)
-                {
-                    LogService.Error("Tunnel watchdog failed: " + ex.Message);
-                }
-            }
-        }, token);
-    }
-
     private static string GetDisplayVersion()
     {
         var assembly = Assembly.GetExecutingAssembly();
@@ -928,7 +856,6 @@ public partial class MainWindow : Window
             StopMusic();
             LogService.Info("Launcher close cleanup started.");
             _networkShutdownStarted = true;
-            _tunnelWatchdogCts?.Cancel();
             _networkCheckCooldownCts?.Cancel();
             _peerRefreshCts?.Cancel();
             _controlPlaneHeartbeatCts?.Cancel();
@@ -964,9 +891,6 @@ public partial class MainWindow : Window
     {
         _networkShutdownStarted = true;
         CancelGameMonitor();
-        _tunnelWatchdogCts?.Cancel();
-        _tunnelWatchdogCts?.Dispose();
-        _tunnelWatchdogCts = null;
         _networkCheckCooldownCts?.Cancel();
         _networkCheckCooldownCts?.Dispose();
         _networkCheckCooldownCts = null;
@@ -1144,140 +1068,6 @@ public partial class MainWindow : Window
         }
     }
 
-    private void ScheduleAutoNetworkRetry()
-    {
-        if (_networkAutoRetryScheduled || _allowClose)
-            return;
-
-        _networkAutoRetryScheduled = true;
-        _ = RetryPreparePublicNetworkAsync();
-    }
-
-    private async Task RetryPreparePublicNetworkAsync()
-    {
-        try
-        {
-            await Task.Delay(2500);
-            if (!_allowClose && !_networkReady)
-                await EnsurePublicNetworkOrchestratedAsync(showFailureDialog: false, reason: "auto retry");
-        }
-        catch (Exception ex)
-        {
-            LogService.Error("Public network retry failed: " + ex.Message);
-        }
-        finally
-        {
-            _networkAutoRetryScheduled = false;
-        }
-    }
-
-    private async Task RefreshServerStatusAsync(bool showFailureDialog)
-    {
-        await EnsurePublicNetworkOrchestratedAsync(showFailureDialog, reason: "refresh status");
-    }
-
-    private async Task<bool> PreparePublicNetworkAsync(bool showFailureDialog)
-    {
-        if (!await _networkPrepareLock.WaitAsync(0))
-        {
-            LogService.Info("Public network preparation is already running; waiting for current preparation to finish.");
-            await _networkPrepareLock.WaitAsync();
-            _networkPrepareLock.Release();
-
-            if (_networkReady && !string.IsNullOrWhiteSpace(_assignedIp))
-                return await VerifyPublicNetworkAsync(showFailureDialog, reason: "after waiting for existing preparation");
-            return _networkReady && _serverStatusKind == ServerStatusKind.Normal;
-        }
-
-        try
-        {
-            if (await TryReuseExistingPublicNetworkAsync("before preparation"))
-                return true;
-
-            // 只有确实没有可复用网卡时才显示“网络准备中”；保留网卡的热启动直接进入隧道连接，减少黄灯跳动。
-            if (_serverStatusKind != ServerStatusKind.Normal)
-            {
-                var initialKind = _adapterService.HasPrimaryAdapterBestEffort() ? ServerStatusKind.TunnelConnecting : ServerStatusKind.NetworkCreating;
-                SetServerStatus(YellowBrush, "", initialKind);
-            }
-
-            await RunStartupNetworkPreparationAsync();
-
-            if (await TryReuseExistingPublicNetworkAsync("after startup preparation"))
-                return true;
-
-            string ip = await EnsurePublicTunnelAsync();
-            _adapterService.EnsureRouteBindingBestEffort(ip);
-            int interfaceIndex = _adapterService.GetInterfaceIndexForIp(ip);
-            if (_settings.ForceGameVirtualAdapter && interfaceIndex <= 0)
-                throw new InvalidOperationException("未找到 EasyTier 虚拟网卡，无法强制游戏流量绑定。");
-            // Route Guard starts only after this launcher owns an actual game PID.
-            _processRouterService.Stop("network prepared without an active launcher-owned game session");
-
-            _networkReady = true;
-            SetServerStatus(YellowBrush, "", ServerStatusKind.ServerConnecting);
-
-            // 网络准备完成后自动执行一次检测逻辑，不再要求用户额外点击“检测网络”。
-            return await VerifyPublicNetworkAsync(showFailureDialog, reason: "auto after preparation");
-        }
-        catch (Exception ex)
-        {
-            _networkReady = false;
-            _networkConsecutiveFailureCount++;
-            LogService.Error($"Prepare public network failed: {ex}");
-
-            if (!showFailureDialog && _networkConsecutiveFailureCount < AutoNetworkFailureRedThreshold)
-            {
-                // 自动重试期间不要把已成功状态改回“网络创建中”；真实连续失败后再提示红灯。
-                if (_serverStatusKind != ServerStatusKind.Normal)
-                    SetServerStatus(YellowBrush, "", ServerStatusKind.TunnelConnecting);
-                ScheduleAutoNetworkRetry();
-                return false;
-            }
-
-            SetServerStatus(RedBrush, "", ServerStatusKind.TunnelFailed);
-            if (showFailureDialog)
-                await ShowFriendlyErrorDialogAsync(FriendlyErrorKind.Tunnel, ex, _tunnelService.ReadTunnelLogTail());
-            return false;
-        }
-        finally
-        {
-            _networkPrepareLock.Release();
-            UpdateLaunchButtonAvailability();
-        }
-    }
-
-    private async Task RunStartupNetworkPreparationAsync()
-    {
-        if (_startupNetworkPreparationDone)
-            return;
-
-        _startupNetworkPreparationDone = true;
-
-        // 防火墙规则可以后台修复；虚拟网卡清理必须在启动隧道前完成，
-        // 否则第二次打开启动器时可能出现“清理旧网卡”和“创建新隧道”并发，导致自动检测先失败、手动检测又成功。
-        var firewallTask = Task.Run(() => _firewallService.EnsureFirewallRulesBestEffort(GetLauncherBaseDirectory(), _gameDir));
-
-        try
-        {
-            LogService.Info("Startup network preparation: clean legacy SCBLTunnel routes and duplicate EasyTier adapters.");
-            await Task.Run(() => _adapterService.CleanupBeforeStartBestEffort());
-            LogService.Info("Startup network preparation: lightweight adapter check completed.");
-        }
-        catch (Exception ex)
-        {
-            LogService.Error("Startup adapter cleanup failed: " + ex.Message);
-        }
-
-        _ = firewallTask.ContinueWith(t =>
-        {
-            if (t.Exception != null)
-                LogService.Error("Startup firewall preparation failed: " + t.Exception.GetBaseException().Message);
-            else
-                LogService.Info("Startup firewall preparation completed.");
-        }, TaskScheduler.Default);
-    }
-
     private async Task<bool> EnsureNetworkReadyBeforeLaunchAsync()
     {
         var result = await _networkOrchestrator.EnsureReadyAsync(NetworkEnsureMode.BeforeLaunch, "before launch");
@@ -1293,230 +1083,6 @@ public partial class MainWindow : Window
         return false;
     }
 
-
-    private async Task<bool> VerifyPublicNetworkAsync(bool showFailureDialog, string reason)
-    {
-        if (!await _networkVerifyLock.WaitAsync(0))
-        {
-            LogService.Info($"Public network check already running; waiting. reason={reason}");
-            await _networkVerifyLock.WaitAsync();
-            _networkVerifyLock.Release();
-            return _networkReady && _serverStatusKind == ServerStatusKind.Normal;
-        }
-
-        try
-        {
-            string bindIp = _assignedIp.Trim();
-            if (string.IsNullOrWhiteSpace(bindIp))
-            {
-                _networkReady = false;
-                if (showFailureDialog)
-                    SetServerStatus(RedBrush, "", ServerStatusKind.NetworkFailed);
-                else
-                {
-                    if (_serverStatusKind != ServerStatusKind.Normal)
-                        SetServerStatus(YellowBrush, "", ServerStatusKind.NetworkCreating);
-                    ScheduleAutoNetworkRetry();
-                }
-                return false;
-            }
-
-            LogService.Info($"Public network check started: {reason}, bindIp={bindIp}");
-            var report = await DetectPublicServerWithRetryAsync(bindIp, reason, attempts: showFailureDialog ? 3 : 3);
-            _lastNetworkVerifyUtc = DateTime.UtcNow;
-            _lastServerLatencyMs = report.LatencyMs;
-
-            if (report.Ok)
-            {
-                _networkConsecutiveFailureCount = 0;
-                _networkReady = true;
-                SetServerStatus(GreenBrush, "", ServerStatusKind.Normal);
-                LogService.Info($"Public network check succeeded: {reason}, latency={report.LatencyMs?.ToString() ?? "n/a"}ms");
-                _ = CheckRemoteClientServicesAfterNetworkAsync();
-                return true;
-            }
-
-            _networkConsecutiveFailureCount++;
-            _networkReady = true;
-            LogService.Error($"Public network check warning ({reason}): {report.Message}; consecutiveFailures={_networkConsecutiveFailureCount}");
-
-            if (!showFailureDialog && _networkConsecutiveFailureCount < AutoNetworkFailureRedThreshold)
-            {
-                // 启动时网络刚建立完成，Windows 路由和服务握手可能还在稳定中。
-                // 不立刻红灯，保持黄灯并自动重试；手动检测使用同一套检测逻辑，所以不会出现“自动失败、手动成功”的分叉。
-                if (_serverStatusKind != ServerStatusKind.Normal)
-                    SetServerStatus(YellowBrush, "", ServerStatusKind.ServerConnecting);
-                ScheduleAutoNetworkRetry();
-                return false;
-            }
-
-            SetServerStatus(RedBrush, "", ServerStatusKind.ServerFailed);
-            if (showFailureDialog)
-                await ShowFriendlyErrorDialogAsync(FriendlyErrorKind.Server, report.Message + _tunnelService.ReadTunnelLogTail());
-            return false;
-        }
-        finally
-        {
-            _networkVerifyLock.Release();
-        }
-    }
-
-    private async Task<NetworkCheckReport> DetectPublicServerWithRetryAsync(string bindIp, string reason, int attempts)
-    {
-        attempts = Math.Max(1, attempts);
-        NetworkCheckReport? last = null;
-        for (int i = 1; i <= attempts; i++)
-        {
-            last = await DetectPublicServerAsync(bindIp);
-            if (last.Ok)
-                return last;
-
-            if (i < attempts)
-            {
-                int delayMs = i == 1 ? 300 : 600;
-                LogService.Info($"Public network check retry scheduled: reason={reason}, attempt={i}, delay={delayMs}ms, message={last.Message}");
-                await Task.Delay(delayMs);
-            }
-        }
-
-        return last ?? new NetworkCheckReport { Ok = false, Message = L("服务器连接失败。", "Server connection failed.") };
-    }
-
-    private async Task<bool> TryReuseExistingPublicNetworkAsync(string reason)
-    {
-        var candidates = new[]
-        {
-            _assignedIp,
-            _tunnelService.ReadAssignedIp(),
-            _settings.LastBindIp
-        }
-        .Where(x => IsValidScblClientIp(x))
-        .Select(x => x.Trim())
-        .Distinct(StringComparer.OrdinalIgnoreCase)
-        .ToArray();
-
-        if (candidates.Length == 0)
-            return false;
-
-        foreach (string ip in candidates)
-        {
-            LogService.Info($"Network orchestrator: trying silent reuse. reason={reason}, ip={ip}");
-            var report = await DetectPublicServerWithRetryAsync(ip, "silent reuse", attempts: 1);
-            if (!report.Ok)
-                continue;
-
-            _assignedIp = ip;
-            _settings.LastBindIp = ip;
-            _lastServerLatencyMs = report.LatencyMs;
-            _lastNetworkVerifyUtc = DateTime.UtcNow;
-            _networkConsecutiveFailureCount = 0;
-            _networkReady = true;
-            _settingsService.Save(_settings);
-
-            _adapterService.EnsureRouteBindingBestEffort(ip);
-            _processRouterService.Stop("silent network reuse without an active launcher-owned game session");
-
-            SetServerStatus(GreenBrush, "", ServerStatusKind.Normal);
-            _ = CheckRemoteClientServicesAfterNetworkAsync();
-            LogService.Info($"Network orchestrator: reuse succeeded. ip={ip}, latency={report.LatencyMs?.ToString() ?? "n/a"}ms");
-            return true;
-        }
-
-        return false;
-    }
-
-    private static bool IsValidScblClientIp(string? value)
-    {
-        if (string.IsNullOrWhiteSpace(value))
-            return false;
-        return PublicTunnelConfig.IsScblClientIp(value);
-    }
-
-    private async Task<string> EnsurePublicTunnelAsync()
-    {
-        if (_serverStatusKind != ServerStatusKind.Normal)
-            SetServerStatus(YellowBrush, "", ServerStatusKind.TunnelConnecting);
-        string endpoint = GetConfiguredPublicEndpoint();
-        string secret = GetConfiguredTunnelSecret();
-        string ip;
-        try
-        {
-            ip = await _tunnelService.EnsureStartedAsync(GetLauncherBaseDirectory(), TimeSpan.FromSeconds(18), endpoint, secret, GetEasyTierClientOptions());
-        }
-        catch (Exception ex) when (!string.IsNullOrWhiteSpace(_settings.LastGoodPublicEndpoint) &&
-                                   !PublicTunnelConfig.NormalizePublicEndpoint(_settings.LastGoodPublicEndpoint).Equals(endpoint, StringComparison.OrdinalIgnoreCase))
-        {
-            string fallback = PublicTunnelConfig.NormalizePublicEndpoint(_settings.LastGoodPublicEndpoint);
-            LogService.Error($"Primary public endpoint failed, trying last known endpoint. primary={endpoint}, fallback={fallback}, error={ex.Message}");
-            ip = await _tunnelService.EnsureStartedAsync(GetLauncherBaseDirectory(), TimeSpan.FromSeconds(18), fallback, secret, GetEasyTierClientOptions());
-            endpoint = fallback;
-        }
-
-        if (string.IsNullOrWhiteSpace(ip))
-            throw new Exception(L("公网隧道已启动，但没有获取到虚拟 IP。", "Public tunnel started but no virtual IP was assigned."));
-
-        _assignedIp = ip.Trim();
-        _settings.LastBindIp = _assignedIp;
-        _settings.LastAssignedVirtualIp = _assignedIp;
-        _settings.LastServerVirtualIp = PublicTunnelConfig.ServerVirtualIp;
-        _settings.PublicEndpoint = endpoint;
-        _settings.TunnelSecret = secret;
-        _settings.LastGoodPublicEndpoint = endpoint;
-        _settingsService.Save(_settings);
-        return _assignedIp;
-    }
-
-    private async Task<NetworkCheckReport> DetectPublicServerAsync(string bindIp)
-    {
-        // 快速路径：先测最关键的 gRPC 端口。成功就立即绿灯，避免启动时等待所有端口造成“很慢”的感觉。
-        // 其它端口属于辅助服务，后续远程更新/登录流程会按需验证，详细问题写日志。
-        var grpc = await TryOpenTcpConnectionAsync(PublicServerAddress, 50051, TimeSpan.FromMilliseconds(550), bindIp);
-        if (grpc.Ok)
-        {
-            return new NetworkCheckReport
-            {
-                Ok = true,
-                LatencyMs = grpc.LatencyMs,
-                Message = L("服务器连接成功。", "Server connected."),
-                FailedPorts = Array.Empty<string>()
-            };
-        }
-
-        // gRPC 偶发慢时，再用配置端口兜底判断隧道到服务端是否已经通。
-        var config = await TryOpenTcpConnectionAsync(PublicServerAddress, 80, TimeSpan.FromMilliseconds(550), bindIp);
-        if (config.Ok)
-        {
-            return new NetworkCheckReport
-            {
-                Ok = true,
-                LatencyMs = config.LatencyMs,
-                Message = L("服务器连接成功。", "Server connected."),
-                FailedPorts = Array.Empty<string>()
-            };
-        }
-
-        // 失败时再并发做一次短检测，方便日志和弹窗给出明确失败阶段。
-        var contentTask = TryOpenTcpConnectionAsync(PublicServerAddress, 8000, TimeSpan.FromMilliseconds(650), bindIp);
-        var updateTask = TryOpenTcpConnectionAsync(PublicServerAddress, 18080, TimeSpan.FromMilliseconds(650), bindIp);
-        await Task.WhenAll(contentTask, updateTask);
-
-        var failures = new List<string> { "50051/gRPC", "80/config" };
-        if (!contentTask.Result.Ok)
-            failures.Add("8000/content");
-        if (!updateTask.Result.Ok)
-            failures.Add("18080/update");
-
-        long? latency = grpc.LatencyMs ?? config.LatencyMs ?? contentTask.Result.LatencyMs ?? updateTask.Result.LatencyMs;
-        return new NetworkCheckReport
-        {
-            Ok = false,
-            LatencyMs = latency,
-            FailedPorts = failures,
-            Message = L(
-                "服务器连接失败。失败环节：服务端端口检测。失败端口：",
-                "Server connection failed. Stage: service port check. Failed ports: ") + string.Join(", ", failures)
-        };
-    }
 
     private static async Task<(bool Ok, long? LatencyMs)> TryOpenTcpConnectionAsync(string host, int port, TimeSpan timeout, string bindIp)
     {

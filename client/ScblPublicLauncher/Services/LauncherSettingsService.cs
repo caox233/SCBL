@@ -3,15 +3,12 @@ using System;
 using System.IO;
 using System.Text;
 using System.Text.Json;
-using System.Collections.Generic;
-using System.Linq;
 
 namespace SplinterCellCNLauncher.Services;
 
 public sealed class LauncherSettingsService
 {
     public string SettingsPath { get; } = Path.Combine(LogService.ConfigDirectory, "launcher_settings.json");
-    private string LegacySettingsPath => Path.Combine(AppContext.BaseDirectory, "logs", "launcher_settings.json");
     private string BackupPath => SettingsPath + ".bak";
 
     public LauncherSettings Load()
@@ -19,7 +16,6 @@ public sealed class LauncherSettingsService
         try
         {
             LauncherSettings settings;
-            MigrateLegacySettingsIfNeeded();
             if (!File.Exists(SettingsPath))
             {
                 settings = new LauncherSettings();
@@ -31,15 +27,13 @@ public sealed class LauncherSettingsService
             }
 
             settings = WithDefaults(settings);
-            settings.Password = !string.IsNullOrWhiteSpace(settings.PasswordProtected)
-                ? CredentialProtectionService.Unprotect(settings.PasswordProtected)
-                : CredentialProtectionService.Unprotect(settings.Password);
+            settings.Password = CredentialProtectionService.Unprotect(settings.PasswordProtected);
 
-            // v0.4.6: TunnelSecret is migrated into DPAPI storage. Old plaintext
-            // TunnelSecret remains readable once, but Save() will not write it back.
+            // A server-generated bootstrap settings file may provide TunnelSecret once.
+            // Save() immediately replaces it with the current-user DPAPI field.
             string plainSecret = !string.IsNullOrWhiteSpace(settings.TunnelSecretProtected)
                 ? CredentialProtectionService.Unprotect(settings.TunnelSecretProtected)
-                : CredentialProtectionService.Unprotect(settings.TunnelSecret);
+                : settings.TunnelSecret;
             settings.TunnelSecret = PublicTunnelConfig.NormalizeTunnelSecret(plainSecret);
             return settings;
         }
@@ -60,21 +54,16 @@ public sealed class LauncherSettingsService
             Username = settings.Username,
             GameDirectory = settings.GameDirectory,
             GameExecutable = settings.GameExecutable,
-            LastBindIp = settings.LastBindIp,
             Password = string.Empty,
             PasswordProtected = CredentialProtectionService.Protect(settings.Password),
             PublicEndpoint = settings.PublicEndpoint,
             TunnelSecret = string.Empty,
             TunnelSecretProtected = CredentialProtectionService.Protect(effectiveSecret),
-            UseCustomPublicEndpoint = settings.UseCustomPublicEndpoint,
-            LastGoodPublicEndpoint = settings.LastGoodPublicEndpoint,
             EasyTierInstanceId = settings.EasyTierInstanceId,
-            EasyTierPinnedVirtualIp = string.Empty,
             EasyTierNetworkName = settings.EasyTierNetworkName,
             EasyTierLatencyFirst = settings.EasyTierLatencyFirst,
             EasyTierEnableP2P = settings.EasyTierEnableP2P,
             EasyTierWssPort = settings.EasyTierWssPort,
-            EasyTierStableRelayMode = settings.EasyTierStableRelayMode,
             ForceGameVirtualAdapter = settings.ForceGameVirtualAdapter,
             SaveOverwritePromptHandled = settings.SaveOverwritePromptHandled,
             Language = string.IsNullOrWhiteSpace(settings.Language) ? "zh-CN" : settings.Language,
@@ -134,66 +123,6 @@ public sealed class LauncherSettingsService
         }
     }
 
-    private void MigrateLegacySettingsIfNeeded()
-    {
-        try
-        {
-            if (File.Exists(SettingsPath))
-                return;
-
-            string? source = EnumerateLegacySettingsCandidates()
-                .Where(File.Exists)
-                .Distinct(StringComparer.OrdinalIgnoreCase)
-                .OrderByDescending(path => File.GetLastWriteTimeUtc(path))
-                .FirstOrDefault();
-            if (string.IsNullOrWhiteSpace(source))
-                return;
-
-            Directory.CreateDirectory(LogService.ConfigDirectory);
-            File.Copy(source, SettingsPath, overwrite: false);
-            LogService.Info($"Migrated launcher settings to portable per-machine path: source={source}, target={SettingsPath}");
-        }
-        catch (Exception ex)
-        {
-            LogService.Warning("Legacy settings migration skipped: " + ex.Message);
-        }
-    }
-
-    private IEnumerable<string> EnumerateLegacySettingsCandidates()
-    {
-        yield return LegacySettingsPath;
-        yield return Path.Combine(
-            Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-            "SCBL_Public",
-            "launcher_settings.json");
-
-        string baseDir = Path.GetFullPath(AppContext.BaseDirectory)
-            .TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
-        var roots = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-        string? parent = Directory.GetParent(baseDir)?.FullName;
-        string? grandParent = string.IsNullOrWhiteSpace(parent) ? null : Directory.GetParent(parent)?.FullName;
-        if (!string.IsNullOrWhiteSpace(parent))
-            roots.Add(parent);
-        if (!string.IsNullOrWhiteSpace(grandParent))
-            roots.Add(grandParent);
-
-        foreach (string root in roots)
-        {
-            IEnumerable<string> directories;
-            try
-            {
-                directories = Directory.EnumerateDirectories(root, "SCBL_Public*", SearchOption.TopDirectoryOnly).ToArray();
-            }
-            catch
-            {
-                continue;
-            }
-
-            foreach (string directory in directories)
-                yield return Path.Combine(directory, "logs", "launcher_settings.json");
-        }
-    }
-
     private static LauncherSettings WithDefaults(LauncherSettings settings)
     {
         if (string.IsNullOrWhiteSpace(settings.GameExecutable))
@@ -214,14 +143,8 @@ public sealed class LauncherSettingsService
             settings.EasyTierNetworkName = PublicTunnelConfig.EasyTierNetworkName;
         if (!Guid.TryParse(settings.EasyTierInstanceId, out _))
             settings.EasyTierInstanceId = Guid.NewGuid().ToString("D");
-        // v0.5.9 uses DHCP for every EasyTier start. Clear the legacy v0.5.7 pin so
-        // copied settings cannot accidentally force duplicate virtual addresses.
-        settings.EasyTierPinnedVirtualIp = string.Empty;
-
         // Production topology: clients proactively establish direct P2P links, do not
         // become third-party data relays, and use the fixed server only when direct P2P fails.
-        // Force the policy during load so settings migrated from v1.0.0 are corrected automatically.
-        settings.EasyTierStableRelayMode = false;
         settings.EasyTierEnableP2P = true;
         settings.EasyTierLatencyFirst = false;
         // v1.0.2 reuses TCP 11010 for the fixed server WSS fallback. Migrate the

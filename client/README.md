@@ -18,6 +18,9 @@ powershell -ExecutionPolicy Bypass -File .\client\build_all_windows.ps1 -Fast -P
 
 # 仅供远程 UI/启动冒烟检查，不提权且不得发布
 powershell -ExecutionPolicy Bypass -File .\client\build_launcher_smoke.ps1
+
+# .NET 客户端单元测试（配置安全、版本策略、事务更新、存储保留）
+dotnet test .\client\SCBL.Client.Tests\SCBL.Client.Tests.csproj -c Release -r win-x86
 ```
 
 主要输出：
@@ -54,9 +57,11 @@ Hooks 不嵌入 Launcher EXE。正式包在 `tools/uplay_r1_loader.dll` 携带�
 客户端目录\temp\计算机名\config\launcher_settings.json
 ```
 
-首次成功读取后，Launcher 会把隧道密钥迁移到当前 Windows 用户的 DPAPI 保护字段。不要提交真实密钥、生成后的配置、日志或诊断包。
+`TunnelSecret` 只作为首次配置引导；首次成功读取并保存后，Launcher 会清空明文字段并改用当前 Windows 用户的 DPAPI 保护字段。密码不接受明文 JSON。不要提交真实密钥、生成后的配置、日志或诊断包。
 
 Launcher 生成的配置、日志、组件状态、网络运行状态、更新缓存和诊断包统一位于 `temp/计算机名/`。同一份 NAS 客户端可由多台电脑使用，各机器的数据不会互相覆盖；整个 `temp` 目录在完整包更新时都会被保留。
+
+SCBL 2.0 只读取上述正式目录，不再扫描旧 `SCBL_Public` AppData 或旧客户端 `logs` 配置。启动时会轮转过大的游戏日志、清除过期工作文件，并限制诊断包、下载包和组件缓存数量。
 
 ```text
 temp/<computer-name>/
@@ -70,3 +75,5 @@ temp/<computer-name>/
 ```
 
 游戏 `SYSTEM` 目录只保留游戏必须直接读取的 `scbl.toml`、Hooks DLL、原版 DLL 备份和游戏存档。`scbl.toml` 使用标准分区 TOML 格式，不读取旧 `5th_auth.dat`；Launcher 写入新配置时会删除旧文件。
+
+Route Guard 和 EasyTier 组件包按整组事务安装：全部目标文件预先写入并校验，所有文件完成后才删除回滚副本；中途失败会恢复整组旧文件。客户端版本只允许向更高版本自动更新，不接受普通清单降级。

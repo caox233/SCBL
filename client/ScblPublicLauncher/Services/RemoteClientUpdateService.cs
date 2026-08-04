@@ -30,7 +30,6 @@ public sealed class RemoteClientUpdateService
         public string BaseUrl { get; init; } = "";
         public string FullPackage { get; init; } = "";
         public string FullPackageSha256 { get; init; } = "";
-        public bool IsVersionUpgrade { get; init; } = true;
         public string[] ReleaseNotes { get; init; } = Array.Empty<string>();
         public string UpdateAnnouncementTitle { get; init; } = "";
         public string UpdateAnnouncementBody { get; init; } = "";
@@ -145,8 +144,15 @@ public sealed class RemoteClientUpdateService
                         $"Client version check recovered after retry: attempt={attempt}/{CheckAttemptCount}, elapsedMs={stopwatch.ElapsedMilliseconds}, endpoint={manifestUrl}");
                 }
 
-                if (current.Equals(targetVersion, StringComparison.OrdinalIgnoreCase))
+                if (!ClientVersionPolicy.IsUpgradeRequired(current, targetVersion))
+                {
+                    if (ClientVersionPolicy.Compare(current, targetVersion) > 0)
+                    {
+                        LogService.Warning(
+                            $"Server client version is older than the installed client; downgrade refused. local={current}, server={targetVersion}");
+                    }
                     return RemoteUpdateCheckResult.Completed(baseUrl, null);
+                }
 
                 var announcement = manifest?.updateAnnouncement ?? manifest?.update_announcement;
                 bool announcementEnabled = announcement?.enabled ?? true;
@@ -156,7 +162,6 @@ public sealed class RemoteClientUpdateService
                     BaseUrl = baseUrl,
                     FullPackage = package,
                     FullPackageSha256 = expected,
-                    IsVersionUpgrade = true,
                     ReleaseNotes = (manifest?.release_notes ?? manifest?.releaseNotes ?? Array.Empty<string>())
                         .Where(x => !string.IsNullOrWhiteSpace(x))
                         .Select(x => x.Trim())

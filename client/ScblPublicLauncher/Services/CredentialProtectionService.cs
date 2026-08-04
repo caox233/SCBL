@@ -75,9 +75,9 @@ public static class CredentialProtectionService
         if (string.IsNullOrWhiteSpace(protectedText))
             return string.Empty;
 
-        // Backward compatibility: older launcher_settings.json stored Password as plain text.
+        // SCBL 2.0 never accepts plaintext secrets from launcher_settings.json.
         if (!protectedText.StartsWith(Prefix, StringComparison.OrdinalIgnoreCase))
-            return protectedText;
+            return string.Empty;
 
         byte[] encryptedBytes;
         try

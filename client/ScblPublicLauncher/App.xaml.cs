@@ -58,6 +58,7 @@ public partial class App : Application
 #endif
 
         LogService.InitializeStorage();
+        ClientStorageMaintenanceService.RunStartupCleanup();
 
         bool createdNew;
         _singleInstanceMutex = new Mutex(

@@ -150,35 +150,36 @@ public static class StagedComponentBootstrapService
                 entries[normalized] = candidate;
         }
 
-        foreach ((string sourceName, string targetRelativePath) in fileMap)
+        string workRoot = Path.Combine(
+            LogService.UpdatesDirectory,
+            "component-work",
+            $"scbl-{component}-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(workRoot);
+        try
         {
-            if (!entries.TryGetValue(sourceName, out ZipArchiveEntry? sourceEntry))
-                throw new InvalidDataException($"组件 {component} 缺少文件：{sourceName}");
-
-            string targetPath = Path.Combine(GetBaseDirectory(), targetRelativePath.Replace('/', Path.DirectorySeparatorChar));
-            string workDirectory = Path.Combine(LogService.UpdatesDirectory, "component-work");
-            Directory.CreateDirectory(workDirectory);
-            string temporarySource = Path.Combine(
-                workDirectory,
-                $"scbl-{component}-{Guid.NewGuid():N}-{Path.GetFileName(sourceName)}");
-            try
+            var installs = new List<ComponentFileInstall>();
+            foreach ((string sourceName, string targetRelativePath) in fileMap)
             {
+                if (!entries.TryGetValue(sourceName, out ZipArchiveEntry? sourceEntry))
+                    throw new InvalidDataException($"组件 {component} 缺少文件：{sourceName}");
+
+                string extractedPath = Path.Combine(workRoot, Path.GetFileName(sourceName));
                 using (Stream input = sourceEntry.Open())
-                using (FileStream output = new(temporarySource, FileMode.CreateNew, FileAccess.Write, FileShare.None))
+                using (FileStream output = new(extractedPath, FileMode.CreateNew, FileAccess.Write, FileShare.None))
                     input.CopyTo(output);
 
-                string expectedFileHash = ComputeSha256(temporarySource);
-                if (File.Exists(targetPath)
-                    && ComputeSha256(targetPath).Equals(expectedFileHash, StringComparison.OrdinalIgnoreCase))
-                {
-                    continue;
-                }
-                ReplaceFileAtomically(temporarySource, targetPath, expectedFileHash);
+                string targetPath = Path.Combine(GetBaseDirectory(), targetRelativePath.Replace('/', Path.DirectorySeparatorChar));
+                installs.Add(new ComponentFileInstall(
+                    extractedPath,
+                    targetPath,
+                    ComputeSha256(extractedPath)));
             }
-            finally
-            {
-                TryDelete(temporarySource);
-            }
+
+            TransactionalComponentInstaller.Install(installs);
+        }
+        finally
+        {
+            try { Directory.Delete(workRoot, recursive: true); } catch { }
         }
 
         LogService.Info($"Staged bundle applied: component={component}, version={entry.Version}, files={fileMap.Count}");

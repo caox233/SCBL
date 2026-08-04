@@ -61,8 +61,6 @@ public sealed class PublicTunnelService
     private bool _udpBroadcastRelayConfirmed;
     private string _udpBroadcastRelayMessage = "";
 
-    public string AcceleratorToken => string.Empty; // compatibility with the retired custom accelerator IPC.
-    public string ClientLogPath => LogService.LogPath;
     public bool IsRunning => _process is { HasExited: false };
 
     public string GetTunnelExePath(string launcherBaseDir)
@@ -70,10 +68,6 @@ public sealed class PublicTunnelService
 
     public string GetCliExePath(string launcherBaseDir)
         => Path.Combine(launcherBaseDir, "tools", "easytier-cli.exe");
-
-    // Compatibility path. EasyTier release packages may ship Wintun support files beside the core.
-    public string GetWintunDllPath(string launcherBaseDir)
-        => Path.Combine(launcherBaseDir, "tools", "wintun.dll");
 
     public bool HasRunningTunnelClientProcess()
         => EnumerateOwnedEasyTierProcesses().Any();
@@ -105,7 +99,7 @@ public sealed class PublicTunnelService
 
     private static async Task<FileStream> AcquireStartupLockAsync(TimeSpan timeout)
     {
-        string dir = Path.Combine(LogService.AppDataDir, "network");
+        string dir = LogService.NetworkDirectory;
         Directory.CreateDirectory(dir);
         string path = Path.Combine(dir, "easytier-start.lock");
         DateTime deadline = DateTime.UtcNow + (timeout < TimeSpan.FromSeconds(5) ? TimeSpan.FromSeconds(5) : timeout);
@@ -212,7 +206,7 @@ public sealed class PublicTunnelService
             throw new FileNotFoundException("未找到 easytier-cli.exe。请确认 EasyTier 官方核心包已完整复制到 publish-single\\tools。", cliExe);
 
         Directory.CreateDirectory(LogService.LogDirectory);
-        string networkDir = Path.Combine(LogService.AppDataDir, "network");
+        string networkDir = LogService.NetworkDirectory;
         Directory.CreateDirectory(networkDir);
         _runningConfigPath = Path.Combine(networkDir, "scbl-easytier-client.toml");
         WriteClientConfig(_runningConfigPath, publicEndpoint, tunnelSecret, options);

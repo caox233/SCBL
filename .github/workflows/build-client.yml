@@ -74,7 +74,7 @@ jobs:
       - uses: actions/setup-dotnet@v4
         if: steps.changes.outputs.launcher == 'true' || steps.changes.outputs.updater == 'true' || github.event_name == 'workflow_dispatch'
         with:
-          dotnet-version: '8.0.x'
+          dotnet-version: '10.0.x'
 
       - name: Cache NuGet packages
         if: steps.changes.outputs.launcher == 'true' || steps.changes.outputs.updater == 'true' || github.event_name == 'workflow_dispatch'
@@ -97,6 +97,13 @@ jobs:
         run: |
           dotnet restore .\client\SCBL.Updater\SCBL.Updater.csproj --runtime win-x86
           dotnet build .\client\SCBL.Updater\SCBL.Updater.csproj -c Release -r win-x86 --no-restore --nologo
+
+      - name: Run client unit tests
+        if: steps.changes.outputs.launcher == 'true' || steps.changes.outputs.updater == 'true' || github.event_name == 'workflow_dispatch'
+        shell: pwsh
+        run: |
+          dotnet restore .\client\SCBL.Client.Tests\SCBL.Client.Tests.csproj --runtime win-x86
+          dotnet test .\client\SCBL.Client.Tests\SCBL.Client.Tests.csproj -c Release -r win-x86 --no-restore --nologo
 
       - uses: actions/setup-go@v5
         if: steps.changes.outputs.router == 'true' || github.event_name == 'workflow_dispatch'

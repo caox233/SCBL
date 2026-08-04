@@ -12,6 +12,7 @@ tunnel = Path("client/ScblPublicLauncher/Services/PublicTunnelService.cs").read_
 router = Path("client/ScblPublicLauncher/Services/ProcessRouterService.cs").read_text(encoding="utf-8")
 probe = Path("client/ScblPublicLauncher/Services/PeerProbeService.cs").read_text(encoding="utf-8")
 diagnostic = Path("client/ScblPublicLauncher/Services/DiagnosticExportService.cs").read_text(encoding="utf-8")
+maintenance = Path("client/ScblPublicLauncher/Services/ClientStorageMaintenanceService.cs").read_text(encoding="utf-8")
 xaml = Path("client/ScblPublicLauncher/MainWindow.xaml").read_text(encoding="utf-8")
 
 assert re.fullmatch(r"[0-9]+\.[0-9]+\.[0-9]+", version)
@@ -52,8 +53,9 @@ assert "ServerPathSwitchConfirmSamples = 3" in window
 assert "ApplyServerPathDisplaySample" in window
 assert "Server path display switch pending" in window
 assert "Server path display kept the last confirmed route" in window
-assert "CleanupLegacyRouteHistoryArtifacts" in diagnostic
-assert "LegacyGameRouteHistoryIncluded=False" in diagnostic
+assert "CleanupLegacyRouteHistoryArtifacts" not in diagnostic
+assert "LegacyGameRouteHistoryIncluded=False" not in diagnostic
 assert 'candidates.Add((Path.Combine(LogService.PersistentDataDirectory, "runtime", "game-route-history.jsonl")' not in diagnostic
-assert "DiagnosticExportService.CleanupLegacyRouteHistoryArtifacts();" in window
+assert "ClientStorageMaintenanceService.RunStartupCleanup();" in Path("client/ScblPublicLauncher/App.xaml.cs").read_text(encoding="utf-8")
+assert "PruneComponentVersions" in maintenance and "RotateIfOversized" in maintenance
 print("SCBL client control-plane, route-display, and diagnostic resilience checks passed")

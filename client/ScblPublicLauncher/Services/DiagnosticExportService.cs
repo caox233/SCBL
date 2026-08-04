@@ -19,13 +19,6 @@ namespace SplinterCellCNLauncher.Services;
 /// </summary>
 public sealed class DiagnosticExportService
 {
-    private static readonly string[] LegacyRouteHistoryFileNames =
-    {
-        "game-route-status.json",
-        "game-route-history.jsonl",
-        "game-route-history.jsonl.1"
-    };
-
     private static readonly Regex ProtectedJsonFieldRegex = new(
         "(?i)(\\\"(?:Password|PasswordProtected|TunnelSecret|TunnelSecretProtected|network_secret)\\\"\\s*:\\s*)\\\"[^\\\"]*\\\"",
         RegexOptions.Compiled | RegexOptions.CultureInvariant);
@@ -47,7 +40,6 @@ public sealed class DiagnosticExportService
         Directory.CreateDirectory(workRoot);
         try
         {
-            CleanupLegacyRouteHistoryArtifacts();
             string filesDir = Path.Combine(workRoot, "files");
             string commandsDir = Path.Combine(workRoot, "commands");
             Directory.CreateDirectory(filesDir);
@@ -80,26 +72,6 @@ public sealed class DiagnosticExportService
         }
     }
 
-    public static void CleanupLegacyRouteHistoryArtifacts()
-    {
-        string runtimeDirectory = Path.Combine(LogService.PersistentDataDirectory, "runtime");
-        foreach (string fileName in LegacyRouteHistoryFileNames)
-        {
-            string path = Path.Combine(runtimeDirectory, fileName);
-            try
-            {
-                if (!File.Exists(path))
-                    continue;
-                File.Delete(path);
-                LogService.Info("Removed legacy route-history diagnostic artifact: " + path);
-            }
-            catch (Exception ex)
-            {
-                LogService.Info($"Legacy route-history artifact cleanup skipped: path={path}, reason={ex.Message}");
-            }
-        }
-    }
-
     private static string BuildSummary(
         string launcherBaseDirectory,
         string launcherVersion,
@@ -118,7 +90,6 @@ public sealed class DiagnosticExportService
         sb.AppendLine($"AssignedVirtualIp={assignedVirtualIp}");
         sb.AppendLine($"GameDirectory={gameDirectory}");
         sb.AppendLine($"GameSessionActive={gameSessionActive}");
-        sb.AppendLine("LegacyGameRouteHistoryIncluded=False");
         sb.AppendLine($"OS={RuntimeInformation.OSDescription}");
         sb.AppendLine($"OSArchitecture={RuntimeInformation.OSArchitecture}");
         sb.AppendLine($"ProcessArchitecture={RuntimeInformation.ProcessArchitecture}");

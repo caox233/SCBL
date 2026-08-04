@@ -77,10 +77,13 @@ public sealed class ClientComponentUpdateService
             }
 
             var verified = new Dictionary<string, VerifiedClientComponent>(StringComparer.OrdinalIgnoreCase);
+            IReadOnlyDictionary<string, (string Version, string Sha256)> installed = ReadInstalledComponentVersions(channel);
             foreach ((string name, ClientComponentDefinition definition) in manifest.Components.OrderBy(pair => pair.Key, StringComparer.OrdinalIgnoreCase))
             {
                 ValidateDefinition(name, definition, manifestUri);
                 EnsureLauncherCompatibility(definition.MinLauncherVersion);
+                if (installed.TryGetValue(name, out (string Version, string Sha256) current))
+                    ValidateComponentProgression(name, current.Version, current.Sha256, definition.Version, definition.Sha256);
                 VerifiedClientComponent component = EnsureCachedComponent(name, definition, channel, manifestUri);
                 verified[name] = component;
             }
@@ -211,6 +214,60 @@ public sealed class ClientComponentUpdateService
         if (!Version.TryParse(clean, out Version? parsed))
             throw new InvalidDataException("版本号格式无效：" + value);
         return parsed;
+    }
+
+    internal static void ValidateComponentProgression(
+        string name,
+        string currentVersion,
+        string currentSha256,
+        string candidateVersion,
+        string candidateSha256)
+    {
+        Version current = ParseVersion(currentVersion);
+        Version candidate = ParseVersion(candidateVersion);
+        if (candidate < current)
+            throw new InvalidDataException($"组件 {name} 拒绝降级：current={currentVersion}, candidate={candidateVersion}。");
+        if (candidate == current
+            && !currentSha256.Equals(candidateSha256, StringComparison.OrdinalIgnoreCase))
+        {
+            throw new InvalidDataException(
+                $"组件 {name} 的同一版本出现不同 SHA256；不可变组件不能被同版本覆盖。version={candidateVersion}。");
+        }
+    }
+
+    private static IReadOnlyDictionary<string, (string Version, string Sha256)> ReadInstalledComponentVersions(string channel)
+    {
+        var result = new Dictionary<string, (string Version, string Sha256)>(StringComparer.OrdinalIgnoreCase);
+        string statePath = Path.Combine(LogService.ComponentsDirectory, "component_state.json");
+        try
+        {
+            if (!File.Exists(statePath))
+                return result;
+            using JsonDocument document = JsonDocument.Parse(File.ReadAllText(statePath));
+            JsonElement root = document.RootElement;
+            string stateChannel = root.TryGetProperty("Channel", out JsonElement channelElement)
+                ? channelElement.GetString() ?? ""
+                : "";
+            if (!stateChannel.Equals(channel, StringComparison.OrdinalIgnoreCase)
+                || !root.TryGetProperty("Components", out JsonElement components))
+                return result;
+            foreach (JsonProperty property in components.EnumerateObject())
+            {
+                string version = property.Value.TryGetProperty("Version", out JsonElement versionElement)
+                    ? versionElement.GetString() ?? ""
+                    : "";
+                string sha256 = property.Value.TryGetProperty("Sha256", out JsonElement hashElement)
+                    ? hashElement.GetString() ?? ""
+                    : "";
+                if (!string.IsNullOrWhiteSpace(version) && Sha256Pattern.IsMatch(sha256))
+                    result[property.Name] = (version, sha256);
+            }
+        }
+        catch (Exception ex)
+        {
+            LogService.Warning("Installed component version state is unreadable; immutable progression check skipped: " + ex.Message);
+        }
+        return result;
     }
 
     private static VerifiedClientComponent EnsureCachedComponent(

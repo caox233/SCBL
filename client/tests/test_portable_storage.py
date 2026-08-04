@@ -13,6 +13,8 @@ hooks_log = (root / "client/hooks/src/lib.rs").read_text(encoding="utf-8")
 party_log = (root / "client/hooks/src/uplay_r1_loader/party.rs").read_text(encoding="utf-8")
 package = (root / "client/create_client_full_package.ps1").read_text(encoding="utf-8")
 updater = (root / "client/SCBL.Updater/Program.cs").read_text(encoding="utf-8")
+maintenance = (launcher / "Services/ClientStorageMaintenanceService.cs").read_text(encoding="utf-8")
+credentials = (launcher / "Services/CredentialProtectionService.cs").read_text(encoding="utf-8")
 
 assert 'Path.Combine(ClientRootDirectory, "temp", MachineName)' in log_service
 assert 'Path.Combine(PersistentDataDirectory, "config")' in log_service
@@ -23,6 +25,11 @@ assert "SCBL_CLIENT_DATA_DIR" in hooks_log
 assert "SCBL_CLIENT_DATA_DIR" in party_log
 assert "$ExcludedRoots = @('temp', 'logs', 'updates', 'backup')" in package
 assert 'new[] { "temp/", "logs/", "updates/", "backup/" }' in updater
+assert "MigrateLegacyStorageBestEffort" not in log_service
+assert "MigrateLegacySettingsIfNeeded" not in settings
+assert "PruneComponentVersions" in maintenance
+assert "RotateIfOversized" in maintenance
+assert "SCBL 2.0 never accepts plaintext secrets" in credentials
 
 assert 'Path.Combine(gameDir, "scbl.toml")' in hook_writer
 assert "[User]" in hook_writer
@@ -33,4 +40,3 @@ assert "CnAuthConfig" not in hooks_config
 assert "parse_cn_or_standard_config" not in hooks_config
 
 print("portable per-machine client storage and strict scbl.toml checks passed")
-

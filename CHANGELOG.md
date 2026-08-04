@@ -10,6 +10,10 @@
 - 修复 Control Plane SQLite 连接泄漏，强化 Dedicated Server 身份校验与异常数据容错。
 - WORKPC 端到端验证通过：Ubisoft 重启 PID 收养、Route Guard 严格模式、真实游戏启动、Hooks 会话清理和启动器网络关闭均正常。
 - Windows 客户端生成的数据统一整理到 `temp/计算机名/`，并将 Hooks 配置正式切换为标准 `scbl.toml`。
+- 删除客户端 0.x AppData/日志配置迁移和已停用的 EasyTier 设置字段；密码配置只接受 DPAPI 密文，服务端生成的隧道密钥仅允许首次引导后转存 DPAPI。
+- Route Guard 与 EasyTier 组件改为整组事务替换，任一文件失败时恢复全部旧文件；客户端自动更新拒绝无授权降级。
+- 游戏日志、诊断包、下载工作区和版本化组件缓存加入自动保留策略，避免长期运行持续占用磁盘。
+- 新增 .NET 10 客户端单元测试，覆盖版本策略、DPAPI、组件事务回滚和存储清理；Windows 工作流统一使用 .NET 10 SDK。
 
 ## Linux Server Tool v1.0.11
 

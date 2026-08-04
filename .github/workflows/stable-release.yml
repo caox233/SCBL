@@ -162,10 +162,3 @@ jobs:
           else
             gh release create "$dedicated" "${dedicated_assets[@]}" --title "SCBL Dedicated Server v$server_version" --notes "Built from the SCBL stable source tree." --target main --latest=false
           fi
-      - name: Publish server-selectable client components
-        env: { GH_TOKEN: '${{ github.token }}' }
-        shell: pwsh
-        run: |
-          foreach ($component in @('hooks','route-guard','easytier','updater')) {
-            ./scripts/release/publish-client-component.ps1 -Directory "release-output/components/$component" -Channel stable
-          }

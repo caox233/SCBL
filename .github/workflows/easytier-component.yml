@@ -17,10 +17,7 @@ on:
       - "client/easytier/**"
       - "THIRD_PARTY_LICENSES/EasyTier-LGPL-3.0.txt"
       - "VERSION_CLIENT"
-      - "COMPONENT_VERSIONS.json"
-      - "scripts/release/publish-client-component.ps1"
       - "scripts/release/new-deterministic-zip.ps1"
-      - ".github/workflows/easytier-component.yml"
   workflow_dispatch:
 
 concurrency:

@@ -93,9 +93,9 @@ powershell -ExecutionPolicy Bypass -File .\scripts\build-rust-components.ps1
 ```
 
 组件拥有独立 GitHub Actions 工作流和缓存。修改组件时必须同步提升
-`COMPONENT_VERSIONS.json` 中对应版本；工作流拒绝同版本替换为不同 SHA256。正式发布统一由
-`Publish SCBL stable release` 工作流在 GitHub 同时构建 Windows 客户端、Linux 服务端、
-二进制部署包和四个单组件 Release。
+`COMPONENT_VERSIONS.json` 中对应版本；工作流拒绝同版本替换为不同 SHA256。正式完整包由
+`Publish SCBL stable release` 工作流统一构建 Windows 客户端、Linux 服务端和二进制部署包；
+四个单组件 Release 只由各自的组件工作流发布，避免重复构建争用同一个不可变版本。
 
 完整客户端包主要用于：
 

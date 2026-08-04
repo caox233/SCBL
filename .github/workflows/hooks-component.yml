@@ -5,6 +5,7 @@ on:
     paths:
       - "client/hooks/**"
       - "client/hooks-source/**"
+      - ".cargo/config.toml"
       - "scripts/build-rust-components.ps1"
       - "client/prepare_bootstrap_hooks.ps1"
       - "COMPONENT_VERSIONS.json"
@@ -15,11 +16,9 @@ on:
     paths:
       - "client/hooks/**"
       - "client/hooks-source/**"
+      - ".cargo/config.toml"
       - "scripts/build-rust-components.ps1"
       - "client/prepare_bootstrap_hooks.ps1"
-      - "COMPONENT_VERSIONS.json"
-      - "scripts/release/publish-client-component.ps1"
-      - ".github/workflows/hooks-component.yml"
   workflow_dispatch:
 
 permissions:

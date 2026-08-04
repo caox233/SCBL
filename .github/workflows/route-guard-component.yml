@@ -15,10 +15,7 @@ on:
     paths:
       - "client/scbl-process-router/**"
       - "client/WINDIVERT_NOTICE.txt"
-      - "COMPONENT_VERSIONS.json"
-      - "scripts/release/publish-client-component.ps1"
       - "scripts/release/new-deterministic-zip.ps1"
-      - ".github/workflows/route-guard-component.yml"
   workflow_dispatch:
 
 concurrency:

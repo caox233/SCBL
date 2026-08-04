@@ -16,9 +16,6 @@ on:
       - "client/SCBL.Updater/**"
       - "client/SCBL.Version.props"
       - "VERSION_CLIENT"
-      - "COMPONENT_VERSIONS.json"
-      - "scripts/release/publish-client-component.ps1"
-      - ".github/workflows/updater-component.yml"
   workflow_dispatch:
 
 concurrency:

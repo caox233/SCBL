@@ -42,7 +42,7 @@ try {
     try {
         $env:GOOS = "windows"
         $env:GOARCH = "amd64"
-        & $Go build -mod=readonly -trimpath -ldflags "-s -w" -o "scbl-process-router.exe" .
+        & $Go build -mod=readonly -trimpath -buildvcs=false -ldflags "-s -w" -o "scbl-process-router.exe" .
         if ($LASTEXITCODE -ne 0) { throw "go build failed" }
     }
     finally {

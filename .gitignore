@@ -4,8 +4,9 @@
 **/obj/
 **/publish/
 **/publish-single/
-!client/hooks/src/bin/
-!client/hooks/src/bin/hook-loader.rs
+# Rust executable sources also live under src/bin; do not treat them as build output.
+!**/src/bin/
+!**/src/bin/**
 **/publish-smoke*/
 *.user
 *.suo

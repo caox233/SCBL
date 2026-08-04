@@ -58,8 +58,8 @@ jobs:
         if: github.event_name == 'pull_request'
         shell: pwsh
         run: |
-          dotnet restore client/SCBL.Client.Tests/SCBL.Client.Tests.csproj --runtime win-x86 --nologo
-          dotnet test client/SCBL.Client.Tests/SCBL.Client.Tests.csproj -c Release -r win-x86 --no-restore --nologo
+          dotnet restore client/SCBL.Client.Tests/SCBL.Client.Tests.csproj --nologo
+          dotnet test client/SCBL.Client.Tests/SCBL.Client.Tests.csproj -c Release --no-restore --nologo
       - name: Publish Launcher component
         if: github.event_name != 'pull_request'
         shell: pwsh

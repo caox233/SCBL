@@ -266,10 +266,11 @@ public partial class MainWindow : Window
     {
         try
         {
-            txtTopBadge.Text = "CN PRIVATE SERVER";
-            txtAppTitle.Text = IsEnglish ? "5th Echelon (Public)" : "5th Echelon(公网版)";
+            txtTopBadge.Text = "SCBL";
+            txtAppTitle.Text = "SCBL CONNECT";
+            txtHeroHeadline.Text = L("准备进入第五梯队", "PREPARE FOR FIFTH ECHELON");
             RefreshAnnouncementVisual();
-            txtSectionTitle.Text = L("公网联机设置", "Public Online Settings");
+            txtSectionTitle.Text = L("身份验证", "AUTHENTICATION");
             txtUsernameLabel.Text = L("账号", "Username");
             txtPasswordLabel.Text = L("密码", "Password");
             txtConnectionStatusCaption.Text = L("连接状态", "Connection Status");
@@ -281,7 +282,7 @@ public partial class MainWindow : Window
             txtFooterNotice.Text = L(
                 "友情提示：本启动器基于开源项目 5th Echelon 优化制作。公网版默认自动接入专用公网隧道，也可在右上角设置中修改服务器地址。原项目地址：https://github.com/unixoide/5th-echelon\n国内联机交流群：709112052  等你来♂战！",
                 "Tip: This launcher is optimized from the open-source 5th Echelon project. The public edition connects to its dedicated tunnel automatically; the server address can also be changed from Settings. Original project: https://github.com/unixoide/5th-echelon\nCN co-op group: 709112052  Come fight ♂");
-            txtLauncherVersion.Text = L($"公网专版 v{GetDisplayVersion()}", $"Public Edition v{GetDisplayVersion()}");
+            txtLauncherVersion.Text = $"SCBL  /  v{GetDisplayVersion()}";
             if (txtPlayersTitle != null)
                 txtPlayersTitle.Text = L("当前在线玩家", "Online Players");
             if (txtPeerHeaderName != null)
@@ -391,6 +392,7 @@ public partial class MainWindow : Window
 
         InitializeLocalStateAfterVersionCheck();
         SetGameRunningState(false);
+        InitializeBackgroundVideo();
         PlayStartupMusicIfEnabled();
 
         await HandleFirstRunSaveOverwritePromptAsync();
@@ -572,6 +574,7 @@ public partial class MainWindow : Window
         // v0.5.0：普通关闭停止 EasyTier/route-guard 运行时，完整网卡删除仅由“修复网络”执行。
         // Window_Closing 已调用 NetworkOrchestrator.ShutdownAsync 进行“保留运行时”的轻量关闭。
         StopMusic();
+        StopBackgroundVideo();
         base.OnClosed(e);
     }
 
@@ -792,7 +795,7 @@ public partial class MainWindow : Window
             GetLauncherBaseDirectory(),
             bindIp,
             TimeSpan.FromSeconds(1.3));
-        if (!stable)
+        if (!stable && !_tunnelService.IsRunning && !_tunnelService.HasRunningTunnelClientProcess())
             throw new InvalidOperationException(L(
                 "EasyTier动态虚拟IP尚未稳定，已阻止启动游戏。请稍后重试。",
                 "The EasyTier dynamic virtual IP is not stable yet. Game launch was blocked; please retry shortly."));
@@ -802,6 +805,13 @@ public partial class MainWindow : Window
             throw new InvalidOperationException(L(
                 "没有找到当前EasyTier虚拟IP对应的网卡路由。",
                 "No adapter route was found for the current EasyTier virtual IP."));
+
+        if (!stable)
+        {
+            // The CLI portal can briefly be busy while first-run account and peer discovery
+            // requests run in parallel. The live process and OS adapter checks remain strict.
+            LogService.Warning($"EasyTier assigned-IP stability sampling was inconclusive; continuing because the tunnel process and OS adapter are healthy. ip={bindIp}, ifIndex={interfaceIndex}");
+        }
 
         EasyTierBroadcastRelayStatus broadcast = _tunnelService.GetUdpBroadcastRelayStatus();
         if (!broadcast.Enabled)
@@ -820,7 +830,7 @@ public partial class MainWindow : Window
         else
             LogService.Info("EasyTier UDP broadcast relay is configured and no startup failure was observed.");
 
-        LogService.Info($"Dynamic virtual LAN fast preflight passed. ip={bindIp}, ifIndex={interfaceIndex}, addressing=dhcp, broadcastEnabled={broadcast.Enabled}, broadcastConfirmed={broadcast.Confirmed}, broadcastDegraded={broadcast.Degraded}");
+        LogService.Info($"Dynamic virtual LAN fast preflight passed. ip={bindIp}, ifIndex={interfaceIndex}, addressing=dhcp, stabilityConfirmed={stable}, broadcastEnabled={broadcast.Enabled}, broadcastConfirmed={broadcast.Confirmed}, broadcastDegraded={broadcast.Degraded}");
         _ = RefreshServerPathMetadataAsync(force: true);
     }
 
@@ -1266,9 +1276,6 @@ public partial class MainWindow : Window
 
     private async Task StartGameAndMonitorAsync(string gameExecutable)
     {
-        // Stop launcher BGM immediately when the game is actually launched.
-        StopMusic();
-
         string gamePath = Path.Combine(_gameDir, gameExecutable);
         string hookPath = Path.Combine(_gameDir, "uplay_r1_loader.dll");
         DateTime launchSessionStartedUtc = DateTime.UtcNow;
@@ -1308,6 +1315,7 @@ public partial class MainWindow : Window
                 _processRouterService.Stop("strict game routing disabled");
             }
             suspended.Resume();
+            FreezeLauncherMediaForGameSession();
         }
         catch
         {
@@ -2005,6 +2013,8 @@ public partial class MainWindow : Window
         UpdateMusicButton();
         if (!_settings.MusicEnabled)
             StopMusic();
+        else if (!_launcherMediaFrozenForGameSession)
+            PlayStartupMusicIfEnabled(forceReplay: true);
     }
 
     private void UpdateMusicButton()
@@ -2014,7 +2024,7 @@ public partial class MainWindow : Window
 
     private void PlayStartupMusicIfEnabled(bool forceReplay = false)
     {
-        if (!_settings.MusicEnabled)
+        if (!_settings.MusicEnabled || _launcherMediaFrozenForGameSession)
             return;
         if (_musicPlayedThisSession && !forceReplay)
             return;
@@ -2034,6 +2044,7 @@ public partial class MainWindow : Window
             _musicPlayer.MediaEnded += MusicPlayer_MediaEnded;
             _musicPlayer.Play();
             _musicPlayedThisSession = true;
+            _musicIsPlaying = true;
         }
         catch (Exception ex)
         {
@@ -2041,7 +2052,11 @@ public partial class MainWindow : Window
         }
     }
 
-    private void MusicPlayer_MediaEnded(object? sender, EventArgs e) => StopMusic();
+    private void MusicPlayer_MediaEnded(object? sender, EventArgs e)
+    {
+        _musicIsPlaying = false;
+        StopMusic();
+    }
 
     private string? ResolveLauncherMusicPath()
     {
@@ -2086,6 +2101,7 @@ public partial class MainWindow : Window
             _musicPlayer.Stop();
             _musicPlayer.Close();
             _musicPlayer.MediaEnded -= MusicPlayer_MediaEnded;
+            _musicIsPlaying = false;
         }
         catch { }
     }

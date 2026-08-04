@@ -56,6 +56,7 @@ struct SomeStormAddrType {
 
 static_detour! {
     static StateAcceptInviteEnterHook: unsafe extern "thiscall" fn(*mut c_void);
+    static LobbySettingsPlayersHook: unsafe extern "thiscall" fn(*mut c_void) -> usize;
 }
 
 static_detour! {
@@ -1406,6 +1407,39 @@ where
     }
 }
 
+const SCBL_MAX_PLAYERS: u32 = 12;
+const ACTIVE_LOBBY_SETTINGS_PTR_OFFSET: usize = 0x40c;
+const INLINE_LOBBY_SETTINGS_OFFSET: usize = 0x42c;
+const SESSION_LOBBY_SETTINGS_OFFSET: usize = 0x594;
+const LOBBY_MAX_PLAYERS_OFFSET: usize = 0x20;
+
+/// Resolve the same settings block captured by the supplied DX9/DX11 CE tables.
+/// Both retail executables use the same object layout even though the function
+/// entry points differ.
+unsafe fn lobby_settings_block(owner: *mut c_void) -> *mut u8 {
+    let active = std::ptr::read_unaligned(owner.cast::<u8>().add(ACTIVE_LOBBY_SETTINGS_PTR_OFFSET).cast::<*mut u8>());
+    if active.is_null() {
+        owner.cast::<u8>().add(INLINE_LOBBY_SETTINGS_OFFSET)
+    } else {
+        active.add(SESSION_LOBBY_SETTINGS_OFFSET)
+    }
+}
+
+fn lobby_settings_players(owner: *mut c_void) -> usize {
+    if !owner.is_null() {
+        unsafe {
+            let settings = lobby_settings_block(owner);
+            let max_players = settings.add(LOBBY_MAX_PLAYERS_OFFSET).cast::<u32>();
+            let previous = std::ptr::read_unaligned(max_players);
+            if previous != SCBL_MAX_PLAYERS {
+                std::ptr::write_unaligned(max_players, SCBL_MAX_PLAYERS);
+                info!("SCBL_PLAYER_CAP applied owner={owner:?} settings={settings:?} previous={previous} maximum={SCBL_MAX_PLAYERS}");
+            }
+        }
+    }
+    unsafe { LobbySettingsPlayersHook.call(owner) }
+}
+
 unsafe fn optional_trace_hook_with_name<T, F>(hook: &retour::StaticDetour<T>, target: Option<T>, f: F, name: &str)
 where
     T: retour::Function,
@@ -1471,6 +1505,7 @@ pub unsafe fn init(config: &Config, addr: &Addresses) {
 
     // always enable these hooks
     hook!(NetCoreHook, addr.func_net_core, net_core);
+    hook!(LobbySettingsPlayersHook, addr.func_lobby_settings_players, lobby_settings_players);
     hook!(StormJoinAdmissionTraceHook, addr.func_storm_join_admission_trace, storm_join_admission_trace);
     hook!(StormSessionLockTraceHook, addr.func_storm_session_lock_trace, storm_session_lock_trace);
     hook!(StormSessionUnlockTraceHook, addr.func_storm_session_unlock_trace, storm_session_unlock_trace);
@@ -1539,6 +1574,7 @@ pub unsafe fn deinit(config: &Config) {
     disable_configurable_hook!(config, Hook::Goal, SomethingWithGoalHook);
     disable_configurable_hook!(config, Hook::LeaveState, LeaveStateHook);
     disable_configurable_hook!(config, Hook::NetCore, NetCoreHook);
+    let _ = LobbySettingsPlayersHook.disable();
     disable_configurable_hook!(config, Hook::NetResultBase, NetResultBaseHook);
     disable_configurable_hook!(config, Hook::NetResultCore, NetResultCoreHook);
     disable_configurable_hook!(config, Hook::NetResultLobby, NetResultLobbyHook);

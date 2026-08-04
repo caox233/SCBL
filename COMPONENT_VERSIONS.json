@@ -1,9 +1,9 @@
 {
   "schemaVersion": 1,
-  "clientVersion": "2.0.1",
+  "clientVersion": "2.0.3",
   "serverToolVersion": "2.0.6",
   "routeGuardVersion": "2.0.2",
-  "hooksVersion": "2.0.1",
+  "hooksVersion": "2.0.4",
   "easyTierVersion": "2.6.4",
   "updaterVersion": "2.0.1",
   "sharedApiVersion": "2.0.0",

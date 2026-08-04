@@ -187,7 +187,9 @@ public sealed class ProcessRouterService
         psi.ArgumentList.Add("-launcher-pid");
         psi.ArgumentList.Add(Environment.ProcessId.ToString());
         psi.ArgumentList.Add("-heartbeat-timeout");
-        psi.ArgumentList.Add("2500ms");
+        // Runtime state may live on a single-user NAS share. Allow short SMB stalls without
+        // dropping strict routing; the guard still exits fail-open if the launcher really dies.
+        psi.ArgumentList.Add("8s");
 
         int[] pids;
         lock (_sessionSync)

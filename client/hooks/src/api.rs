@@ -142,6 +142,7 @@ macro_rules! connect {
     }};
 }
 
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Friend {
     pub id: String,
     pub username: String,
@@ -249,21 +250,23 @@ async fn republish_local_game_session() {
     }
 }
 
+pub async fn list_friends_async() -> Result<Vec<Friend>, Error> {
+    let mut client = connect!(FriendsClient);
+    let request = tonic::Request::new(ListRequest {});
+    let response = client.list(request).await?.into_inner();
+    Ok(response
+        .friends
+        .into_iter()
+        .map(|friend| Friend {
+            id: friend.id,
+            username: friend.username,
+            is_online: friend.is_online,
+        })
+        .collect())
+}
+
 pub fn list_friends() -> Result<Vec<Friend>, Error> {
-    run(async {
-        let mut client = connect!(FriendsClient);
-        let request = tonic::Request::new(ListRequest {});
-        let response = client.list(request).await?.into_inner();
-        Ok(response
-            .friends
-            .into_iter()
-            .map(|friend| Friend {
-                id: friend.id,
-                username: friend.username,
-                is_online: friend.is_online,
-            })
-            .collect())
-    })
+    run(list_friends_async())
 }
 
 async fn login_async(username: &str, password: &str) -> Result<(), Error> {

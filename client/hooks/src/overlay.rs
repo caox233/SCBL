@@ -6,6 +6,7 @@ use std::time::Instant;
 use hudhook::ImguiRenderLoop;
 use imgui::Style;
 use imgui::StyleColor;
+use imgui::StyleVar;
 use server_api::misc::InviteEvent;
 use tracing::info;
 use tracing::warn;
@@ -17,12 +18,16 @@ use windows::Win32::UI::WindowsAndMessaging::DefWindowProcA;
 
 use crate::uplay_r1_loader::Event;
 use crate::uplay_r1_loader::PrivateInviteAbMode;
-use crate::uplay_r1_loader::EVENTS;
 
 static NOTIFICATION_TIMEOUT: Duration = Duration::from_secs(30);
 static INITIAL_POPUP_DURATION: Duration = Duration::from_secs(10);
 static PARTY_FOLLOW_ACCEPT_DELAY: Duration = Duration::from_millis(750);
 static STATUS_MESSAGE: Mutex<Option<String>> = Mutex::new(None);
+const CARD_X: f32 = 24.0;
+const CARD_TOP: f32 = 24.0;
+const CARD_WIDTH: f32 = 410.0;
+const CARD_STACK_STEP: f32 = 126.0;
+const CARD_FADE_DURATION: Duration = Duration::from_millis(450);
 
 pub fn notify(message: impl Into<String>) {
     if let Ok(mut slot) = STATUS_MESSAGE.lock() {
@@ -34,50 +39,81 @@ fn take_status_message() -> Option<String> {
     STATUS_MESSAGE.lock().ok()?.take()
 }
 
+fn timed_card_alpha(elapsed: Duration, lifetime: Duration) -> f32 {
+    let fade = CARD_FADE_DURATION.as_secs_f32();
+    let fade_in = (elapsed.as_secs_f32() / fade).clamp(0.0, 1.0);
+    let remaining = lifetime.saturating_sub(elapsed).as_secs_f32();
+    let fade_out = (remaining / fade).clamp(0.0, 1.0);
+    fade_in.min(fade_out)
+}
+
+fn draw_cinematic_card_frame(ui: &imgui::Ui, alpha: f32) {
+    let position = ui.window_pos();
+    let size = ui.window_size();
+    let draw_list = ui.get_window_draw_list();
+    draw_list
+        .add_rect(position, [position[0] + size[0], position[1] + size[1]], [1.0, 1.0, 1.0, 0.24 * alpha])
+        .rounding(7.0)
+        .thickness(1.0)
+        .build();
+    draw_list
+        .add_line(
+            [position[0], position[1] + 10.0],
+            [position[0], position[1] + size[1] - 10.0],
+            [1.0, 1.0, 1.0, 0.92 * alpha],
+        )
+        .thickness(2.0)
+        .build();
+}
+
+fn cinematic_card_header(ui: &imgui::Ui, label: &str) {
+    ui.text_colored([0.70, 0.71, 0.72, 1.0], "SCBL / FIFTH ECHELON");
+    ui.spacing();
+    ui.text(label);
+    ui.separator();
+    ui.spacing();
+}
+
 // TODO: move to separate crate
 fn sc_style(style: &mut Style) {
     style.colors[StyleColor::Text as usize] = [1.00, 1.00, 1.00, 1.00];
     style.colors[StyleColor::TextDisabled as usize] = [0.50, 0.50, 0.50, 1.00];
-    style.colors[StyleColor::WindowBg as usize] = [0.03, 0.07, 0.04, 0.94];
+    style.colors[StyleColor::WindowBg as usize] = [0.025, 0.028, 0.032, 0.94];
     style.colors[StyleColor::ChildBg as usize] = [0.00, 0.00, 0.00, 0.00];
     style.colors[StyleColor::PopupBg as usize] = [0.08, 0.08, 0.08, 0.94];
-    style.colors[StyleColor::Border as usize] = [0.38, 1.00, 0.00, 0.50];
-    style.colors[StyleColor::BorderShadow as usize] = [0.01, 0.13, 0.00, 0.63];
-    style.colors[StyleColor::FrameBg as usize] = [0.17, 0.48, 0.16, 0.54];
-    style.colors[StyleColor::FrameBgHovered as usize] = [0.26, 0.98, 0.32, 0.40];
-    style.colors[StyleColor::FrameBgActive as usize] = [0.26, 0.98, 0.28, 0.67];
-    style.colors[StyleColor::TitleBg as usize] = [0.01, 0.07, 0.01, 1.00];
-    style.colors[StyleColor::TitleBgActive as usize] = [0.0, 0.56, 0.29, 1.0];
-    style.colors[StyleColor::TitleBgCollapsed as usize] = [0.00, 0.56, 0.09, 0.51];
-    style.colors[StyleColor::MenuBarBg as usize] = [0.0, 0.56, 0.29, 1.0];
-    // style.colors[StyleColor::TitleBg as usize] = [0.01, 0.07, 0.01, 1.00];
-    // style.colors[StyleColor::TitleBgActive as usize] = [0.0, 0.29, 0.68, 1.0];
-    // style.colors[StyleColor::TitleBgCollapsed as usize] = [0.00, 0.56, 0.09, 0.51];
-    // style.colors[StyleColor::MenuBarBg as usize] = [0.0, 0.29, 0.68, 1.0];
-    style.colors[StyleColor::ScrollbarBg as usize] = [0.00, 0.15, 0.00, 0.53];
-    style.colors[StyleColor::ScrollbarGrab as usize] = [0.10, 0.41, 0.06, 1.00];
-    style.colors[StyleColor::ScrollbarGrabHovered as usize] = [0.00, 0.66, 0.04, 1.00];
-    style.colors[StyleColor::ScrollbarGrabActive as usize] = [0.04, 0.87, 0.00, 1.00];
-    style.colors[StyleColor::CheckMark as usize] = [0.26, 0.98, 0.40, 1.00];
-    style.colors[StyleColor::SliderGrab as usize] = [0.21, 0.61, 0.00, 1.00];
-    style.colors[StyleColor::SliderGrabActive as usize] = [0.36, 0.87, 0.22, 1.00];
-    style.colors[StyleColor::Button as usize] = [0.00, 0.60, 0.05, 0.40];
-    style.colors[StyleColor::ButtonHovered as usize] = [0.20, 0.78, 0.32, 1.00];
-    style.colors[StyleColor::ButtonActive as usize] = [0.00, 0.57, 0.07, 1.00];
-    style.colors[StyleColor::Header as usize] = [0.12, 0.82, 0.28, 0.31];
-    style.colors[StyleColor::HeaderHovered as usize] = [0.00, 0.74, 0.11, 0.80];
-    style.colors[StyleColor::HeaderActive as usize] = [0.09, 0.69, 0.04, 1.00];
-    style.colors[StyleColor::Separator as usize] = [0.09, 0.67, 0.01, 0.50];
-    style.colors[StyleColor::SeparatorHovered as usize] = [0.32, 0.75, 0.10, 0.78];
-    style.colors[StyleColor::SeparatorActive as usize] = [0.10, 0.75, 0.11, 1.00];
-    style.colors[StyleColor::ResizeGrip as usize] = [0.32, 0.98, 0.26, 0.20];
-    style.colors[StyleColor::ResizeGripHovered as usize] = [0.26, 0.98, 0.28, 0.67];
-    style.colors[StyleColor::ResizeGripActive as usize] = [0.22, 0.69, 0.06, 0.95];
-    style.colors[StyleColor::Tab as usize] = [0.18, 0.58, 0.18, 0.86];
-    style.colors[StyleColor::TabHovered as usize] = [0.26, 0.98, 0.28, 0.80];
-    style.colors[StyleColor::TabActive as usize] = [0.20, 0.68, 0.24, 1.00];
-    style.colors[StyleColor::TabUnfocused as usize] = [0.07, 0.15, 0.08, 0.97];
-    style.colors[StyleColor::TabUnfocusedActive as usize] = [0.14, 0.42, 0.19, 1.00];
+    style.colors[StyleColor::Border as usize] = [1.00, 1.00, 1.00, 0.24];
+    style.colors[StyleColor::BorderShadow as usize] = [0.00, 0.00, 0.00, 0.55];
+    style.colors[StyleColor::FrameBg as usize] = [1.00, 1.00, 1.00, 0.08];
+    style.colors[StyleColor::FrameBgHovered as usize] = [1.00, 1.00, 1.00, 0.16];
+    style.colors[StyleColor::FrameBgActive as usize] = [1.00, 1.00, 1.00, 0.24];
+    style.colors[StyleColor::TitleBg as usize] = [0.04, 0.04, 0.05, 1.00];
+    style.colors[StyleColor::TitleBgActive as usize] = [0.09, 0.09, 0.10, 1.00];
+    style.colors[StyleColor::TitleBgCollapsed as usize] = [0.04, 0.04, 0.05, 0.72];
+    style.colors[StyleColor::MenuBarBg as usize] = [0.06, 0.06, 0.07, 1.00];
+    style.colors[StyleColor::ScrollbarBg as usize] = [0.00, 0.00, 0.00, 0.42];
+    style.colors[StyleColor::ScrollbarGrab as usize] = [0.42, 0.42, 0.44, 1.00];
+    style.colors[StyleColor::ScrollbarGrabHovered as usize] = [0.68, 0.68, 0.70, 1.00];
+    style.colors[StyleColor::ScrollbarGrabActive as usize] = [0.88, 0.88, 0.90, 1.00];
+    style.colors[StyleColor::CheckMark as usize] = [0.94, 0.94, 0.94, 1.00];
+    style.colors[StyleColor::SliderGrab as usize] = [0.68, 0.68, 0.70, 1.00];
+    style.colors[StyleColor::SliderGrabActive as usize] = [0.96, 0.96, 0.96, 1.00];
+    style.colors[StyleColor::Button as usize] = [1.00, 1.00, 1.00, 0.10];
+    style.colors[StyleColor::ButtonHovered as usize] = [1.00, 1.00, 1.00, 0.20];
+    style.colors[StyleColor::ButtonActive as usize] = [1.00, 1.00, 1.00, 0.28];
+    style.colors[StyleColor::Header as usize] = [1.00, 1.00, 1.00, 0.10];
+    style.colors[StyleColor::HeaderHovered as usize] = [1.00, 1.00, 1.00, 0.20];
+    style.colors[StyleColor::HeaderActive as usize] = [1.00, 1.00, 1.00, 0.28];
+    style.colors[StyleColor::Separator as usize] = [1.00, 1.00, 1.00, 0.22];
+    style.colors[StyleColor::SeparatorHovered as usize] = [1.00, 1.00, 1.00, 0.45];
+    style.colors[StyleColor::SeparatorActive as usize] = [1.00, 1.00, 1.00, 0.70];
+    style.colors[StyleColor::ResizeGrip as usize] = [1.00, 1.00, 1.00, 0.14];
+    style.colors[StyleColor::ResizeGripHovered as usize] = [1.00, 1.00, 1.00, 0.34];
+    style.colors[StyleColor::ResizeGripActive as usize] = [1.00, 1.00, 1.00, 0.54];
+    style.colors[StyleColor::Tab as usize] = [0.12, 0.12, 0.13, 0.86];
+    style.colors[StyleColor::TabHovered as usize] = [0.32, 0.32, 0.34, 0.92];
+    style.colors[StyleColor::TabActive as usize] = [0.24, 0.24, 0.26, 1.00];
+    style.colors[StyleColor::TabUnfocused as usize] = [0.06, 0.06, 0.07, 0.97];
+    style.colors[StyleColor::TabUnfocusedActive as usize] = [0.16, 0.16, 0.17, 1.00];
     style.colors[StyleColor::PlotLines as usize] = [0.61, 0.61, 0.61, 1.00];
     style.colors[StyleColor::PlotLinesHovered as usize] = [1.00, 0.43, 0.35, 1.00];
     style.colors[StyleColor::PlotHistogram as usize] = [0.90, 0.70, 0.00, 1.00];
@@ -87,12 +123,16 @@ fn sc_style(style: &mut Style) {
     style.colors[StyleColor::TableBorderLight as usize] = [0.23, 0.23, 0.25, 1.00];
     style.colors[StyleColor::TableRowBg as usize] = [0.00, 0.00, 0.00, 0.00];
     style.colors[StyleColor::TableRowBgAlt as usize] = [1.00, 1.00, 1.00, 0.06];
-    style.colors[StyleColor::TextSelectedBg as usize] = [0.00, 0.89, 0.20, 0.35];
+    style.colors[StyleColor::TextSelectedBg as usize] = [1.00, 1.00, 1.00, 0.24];
     style.colors[StyleColor::DragDropTarget as usize] = [1.00, 1.00, 0.00, 0.90];
     style.colors[StyleColor::NavHighlight as usize] = [0.26, 0.98, 0.35, 1.00];
     style.colors[StyleColor::NavWindowingHighlight as usize] = [1.00, 1.00, 1.00, 0.70];
     style.colors[StyleColor::NavWindowingDimBg as usize] = [0.80, 0.80, 0.80, 0.20];
-    style.colors[StyleColor::ModalWindowDimBg as usize] = [0.80, 0.80, 0.80, 0.35];
+    style.colors[StyleColor::ModalWindowDimBg as usize] = [0.00, 0.00, 0.00, 0.62];
+    style.window_padding = [20.0, 16.0];
+    style.window_rounding = 7.0;
+    style.frame_rounding = 4.0;
+    style.item_spacing = [10.0, 8.0];
 }
 
 fn setup_fonts(imgui: &mut imgui::Context) -> bool {
@@ -273,14 +313,21 @@ fn format_api_error(error: &crate::api::Error, chinese: bool) -> String {
 impl MyRenderLoop {
     fn render_show(&mut self, ui: &imgui::Ui) {
         let win_size = ui.io().display_size;
-        let title = if self.chinese_ui { "好友邀请" } else { "Friend Invitations" };
+        let title = if self.chinese_ui {
+            "好友邀请##scbl_invites"
+        } else {
+            "Friend Invitations##scbl_invites"
+        };
         let mut accept_index = None;
         ui.window(title)
-            .position([win_size[0] - 10.0, 10.0], imgui::Condition::FirstUseEver)
-            .position_pivot([1.0, 0.0])
+            .position([CARD_X, CARD_TOP], imgui::Condition::Always)
+            .bg_alpha(0.94)
+            .no_decoration()
             .always_auto_resize(true)
             .resizable(false)
             .build(|| {
+                ui.dummy([CARD_WIDTH - 40.0, 0.0]);
+                cinematic_card_header(ui, if self.chinese_ui { "好友邀请" } else { "FRIEND INVITATIONS" });
                 if self.active_invites.is_empty() {
                     ui.text(if self.chinese_ui { "暂无待处理邀请" } else { "No pending invitations" });
                     ui.text_disabled(if self.chinese_ui {
@@ -338,6 +385,7 @@ impl MyRenderLoop {
                         accept_index = Some(index);
                     }
                 }
+                draw_cinematic_card_frame(ui, 1.0);
             });
         if let Some(index) = accept_index {
             self.accept_invite_at(index);
@@ -396,6 +444,7 @@ impl MyRenderLoop {
                     Event::FriendsPrivateBlobInviteAccepted(_, mode) => mode.label(),
                     Event::PartyGameInviteAccepted(_) => "PartyGameInviteAccepted",
                     Event::FriendsGameInviteAccepted(_, _, _) => "FriendsGameInviteAccepted",
+                    Event::FriendsFriendListUpdated => "FriendsFriendListUpdated",
                     Event::UserAccountSharing => "UserAccountSharing",
                 };
                 if kind == 1 {
@@ -452,75 +501,104 @@ impl MyRenderLoop {
 
     fn show_notifications(&mut self, ui: &imgui::Ui) {
         if let Some((created, message)) = self.invite_notification.as_ref() {
-            if created.elapsed() > NOTIFICATION_TIMEOUT {
+            let elapsed = created.elapsed();
+            if elapsed > NOTIFICATION_TIMEOUT {
                 self.invite_notification.take();
             } else {
-                let win_size = ui.io().display_size;
-                ui.window(if self.chinese_ui { "提示" } else { "Notification" })
-                    .bg_alpha(0.45)
-                    .no_decoration()
-                    .no_inputs()
-                    .no_nav()
-                    .movable(false)
-                    .menu_bar(false)
-                    .always_auto_resize(true)
-                    .position([win_size[0] - 10.0, 10.0], imgui::Condition::Always)
-                    .position_pivot([1.0, 0.0])
-                    .build(|| {
-                        ui.text(message);
-                        let diff = NOTIFICATION_TIMEOUT - created.elapsed();
-                        ui.text(format!("{}s", diff.as_secs()));
-                    });
+                let alpha = timed_card_alpha(elapsed, NOTIFICATION_TIMEOUT);
+                let mut y = CARD_TOP;
+                if self.initial_popup.checked_duration_since(Instant::now()).is_some() {
+                    y += CARD_STACK_STEP;
+                }
+                if self.connection_error.is_some() {
+                    y += CARD_STACK_STEP;
+                }
+                let _alpha = ui.push_style_var(StyleVar::Alpha(alpha));
+                ui.window(if self.chinese_ui {
+                    "提示##scbl_notification"
+                } else {
+                    "Notification##scbl_notification"
+                })
+                .bg_alpha(0.90 * alpha)
+                .no_decoration()
+                .no_inputs()
+                .no_nav()
+                .movable(false)
+                .menu_bar(false)
+                .always_auto_resize(true)
+                .position([CARD_X, y], imgui::Condition::Always)
+                .build(|| {
+                    ui.dummy([CARD_WIDTH - 40.0, 0.0]);
+                    cinematic_card_header(ui, if self.chinese_ui { "任务通知" } else { "NOTIFICATION" });
+                    ui.text_wrapped(message);
+                    draw_cinematic_card_frame(ui, alpha);
+                });
             }
         }
     }
 
     fn show_initial_info(&self, ui: &imgui::Ui) {
-        if let Some(dur) = self.initial_popup.checked_duration_since(Instant::now()) {
-            let win_size = ui.io().display_size;
-            ui.window(if self.chinese_ui { "邀请功能已加载" } else { "Overlay loaded" })
-                .bg_alpha(0.45)
-                .no_decoration()
-                .no_inputs()
-                .no_nav()
-                .movable(false)
-                .menu_bar(false)
-                .always_auto_resize(true)
-                .position([win_size[0] - 10.0, 10.0], imgui::Condition::Always)
-                .position_pivot([1.0, 0.0])
-                .build(|| {
-                    ui.text(if self.chinese_ui {
-                        "收到邀请后按 F5 接受"
-                    } else {
-                        "Press F5 to accept invitations"
-                    });
-                    let ws = ui.window_size();
-                    ui.get_window_draw_list()
-                        .add_line(
-                            [0., ws[1]],
-                            [ws[0] * (dur.as_secs_f32() / INITIAL_POPUP_DURATION.as_secs_f32()), ws[1]],
-                            [1.0, 0.0, 0.0, 1.0],
-                        )
-                        .build();
+        if let Some(remaining) = self.initial_popup.checked_duration_since(Instant::now()) {
+            let elapsed = INITIAL_POPUP_DURATION.saturating_sub(remaining);
+            let alpha = timed_card_alpha(elapsed, INITIAL_POPUP_DURATION);
+            let _alpha = ui.push_style_var(StyleVar::Alpha(alpha));
+            ui.window(if self.chinese_ui {
+                "联机组件##scbl_initial"
+            } else {
+                "Online component##scbl_initial"
+            })
+            .bg_alpha(0.90 * alpha)
+            .no_decoration()
+            .no_inputs()
+            .no_nav()
+            .movable(false)
+            .menu_bar(false)
+            .always_auto_resize(true)
+            .position([CARD_X, CARD_TOP], imgui::Condition::Always)
+            .build(|| {
+                ui.dummy([CARD_WIDTH - 40.0, 0.0]);
+                cinematic_card_header(ui, if self.chinese_ui { "联机组件已加载" } else { "ONLINE COMPONENT READY" });
+                ui.text_wrapped(if self.chinese_ui {
+                    "好友与邀请服务已准备就绪"
+                } else {
+                    "Friends and invitation services are ready"
                 });
+                draw_cinematic_card_frame(ui, alpha);
+                let position = ui.window_pos();
+                let size = ui.window_size();
+                let progress = remaining.as_secs_f32() / INITIAL_POPUP_DURATION.as_secs_f32();
+                ui.get_window_draw_list()
+                    .add_line(
+                        [position[0] + 20.0, position[1] + size[1] - 5.0],
+                        [position[0] + 20.0 + (size[0] - 40.0) * progress, position[1] + size[1] - 5.0],
+                        [1.0, 1.0, 1.0, 0.48 * alpha],
+                    )
+                    .build();
+            });
         }
     }
 
     fn show_errors(&mut self, ui: &imgui::Ui) {
         if let Some(error) = &self.connection_error {
-            let win_size = ui.io().display_size;
-            ui.window(if self.chinese_ui { "服务器错误" } else { "Server Error" })
-                .bg_alpha(0.45)
+            let y = if self.initial_popup.checked_duration_since(Instant::now()).is_some() {
+                CARD_TOP + CARD_STACK_STEP
+            } else {
+                CARD_TOP
+            };
+            ui.window(if self.chinese_ui { "服务器错误##scbl_error" } else { "Server Error##scbl_error" })
+                .bg_alpha(0.92)
                 .no_decoration()
                 .no_inputs()
                 .no_nav()
                 .movable(false)
                 .menu_bar(false)
                 .always_auto_resize(true)
-                .position([win_size[0] - 10.0, 10.0], imgui::Condition::Always)
-                .position_pivot([1.0, 0.0])
+                .position([CARD_X, y], imgui::Condition::Always)
                 .build(|| {
-                    ui.text_colored([1.0, 0.0, 0.0, 1.0], format_api_error(error, self.chinese_ui));
+                    ui.dummy([CARD_WIDTH - 40.0, 0.0]);
+                    cinematic_card_header(ui, if self.chinese_ui { "连接异常" } else { "CONNECTION ERROR" });
+                    ui.text_colored([1.0, 0.46, 0.48, 1.0], format_api_error(error, self.chinese_ui));
+                    draw_cinematic_card_frame(ui, 1.0);
                 });
         }
     }
@@ -654,47 +732,6 @@ mod invitation_shortcut_tests {
     }
 }
 
-fn get_game_settings() -> *mut i32 {
-    if let Some(ncaddr) = unsafe { crate::hooks::NET_CORE_ADDR } {
-        unsafe {
-            // let g_netcore = std::ptr::read(0x32b_5dc4 as *mut *mut *mut i32);
-            let g_netcore = ncaddr as *mut *mut i32;
-            if g_netcore.is_null() {
-                return std::ptr::null_mut();
-            }
-            let game_session = std::ptr::read(g_netcore.byte_add(0x5d0));
-            if game_session.is_null() {
-                return std::ptr::null_mut();
-            }
-            game_session.byte_add(0x594)
-        }
-    } else {
-        std::ptr::null_mut()
-    }
-}
-
-fn get_max_players_var() -> *mut i32 {
-    unsafe {
-        let game_settings = get_game_settings();
-        if game_settings.is_null() {
-            return std::ptr::null_mut();
-        }
-
-        game_settings.byte_add(0x20)
-    }
-}
-
-fn get_min_players_var() -> *mut i32 {
-    unsafe {
-        let game_settings = get_game_settings();
-        if game_settings.is_null() {
-            return std::ptr::null_mut();
-        }
-
-        game_settings.byte_add(0x1c)
-    }
-}
-
 impl ImguiRenderLoop for MyRenderLoop {
     fn initialize(&mut self, ctx: &mut imgui::Context, _render_context: &mut dyn hudhook::RenderContext) {
         sc_style(ctx.style_mut());
@@ -786,9 +823,9 @@ impl ImguiRenderLoop for MyRenderLoop {
             }
         }
 
+        self.show_initial_info(ui);
         self.show_errors(ui);
         self.show_notifications(ui);
-        self.show_initial_info(ui);
     }
 
     fn message_filter(&self, _io: &imgui::Io) -> hudhook::MessageFilter {
@@ -810,8 +847,7 @@ impl ImguiRenderLoop for MyRenderLoop {
 }
 
 fn init_hudhook<T: hudhook::Hooks + 'static>(invites: crossbeam_channel::Receiver<Result<Option<InviteEvent>, crate::api::Error>>) -> anyhow::Result<()> {
-    let (tx, rx) = mpsc::channel();
-    EVENTS.get_or_init(|| Mutex::new(rx));
+    let tx = crate::uplay_r1_loader::event_sender();
     hudhook::Hudhook::builder()
         .with::<T>(MyRenderLoop {
             tx,

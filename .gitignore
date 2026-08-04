@@ -4,6 +4,7 @@
 **/obj/
 **/publish/
 **/publish-single/
+client/ScblPublicLauncher/publish-single.locked.*/
 # Rust executable sources also live under src/bin; do not treat them as build output.
 !**/src/bin/
 !**/src/bin/**
@@ -25,9 +26,12 @@ client/easytier/cache/
 
 # Release output
 /dist/
+/.tmp/
 client/dist/
+client/temp/
 server/manager/dist/
 server/packaging/dist/
+server/packaging/dist-*/
 *.zip
 *.tar.gz
 *.sha256

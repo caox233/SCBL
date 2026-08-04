@@ -37,7 +37,7 @@ jobs:
       - name: Test and build full Windows client
         shell: pwsh
         run: |
-          dotnet test client/SCBL.Client.Tests/SCBL.Client.Tests.csproj -c Release -r win-x86 --nologo
+          dotnet test client/SCBL.Client.Tests/SCBL.Client.Tests.csproj -c Release --nologo
           ./client/build_all_windows.ps1 -Fast -Package -OutputDir "$env:GITHUB_WORKSPACE/release-output/client"
       - name: Assemble independently versioned client components
         shell: pwsh

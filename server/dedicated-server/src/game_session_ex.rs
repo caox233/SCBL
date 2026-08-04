@@ -37,6 +37,18 @@ fn is_invitation_search_query(query_id: u32) -> bool {
     query_id == 8
 }
 
+/// Capacity-related values are authored by the unmodified game with the
+/// retail limits (notably coop attribute 105 = 2). SCBL enforces the expanded
+/// limit in the game process and records joins without a server-side capacity
+/// gate, so these legacy values must not make an otherwise compatible room
+/// disappear from matchmaking.
+///
+/// Public/private slot attributes 3 and 4 intentionally remain exact-match:
+/// they describe room visibility and invitation semantics, not just capacity.
+fn matchmaking_attribute_must_match(id: u32) -> bool {
+    !matches!(id, 105 | 112)
+}
+
 impl<CI> GameSessionExProtocolServerTrait<CI> for GameSessionExProtocolServerImpl {
     /// Handles the `SearchSessions` request, providing extended search capabilities for game sessions.
     ///
@@ -142,9 +154,10 @@ impl<CI> GameSessionExProtocolServerTrait<CI> for GameSessionExProtocolServerImp
                 };
                 let sess_attrs = sess_attrs.0.into_iter().map(|p| (p.id, p.value)).collect::<HashMap<_, _>>();
                 for (id, value) in &req_attrs {
-                    if *id == 112 {
-                        // search request says 1 but in the session create request it says 2.
-                        // no idea what they mean, but we would like to find those sessions, so skip this check
+                    if !matchmaking_attribute_must_match(*id) {
+                        // 105 carries the retail coop capacity (2); 112 also
+                        // differs between create/search requests. Neither may
+                        // act as a server-side admission gate in SCBL.
                         continue;
                     }
                     if sess_attrs.get(id) != Some(value) {
@@ -237,6 +250,7 @@ impl<CI> GameSessionExProtocolServerTrait<CI> for GameSessionExProtocolServerImp
 #[cfg(test)]
 mod tests {
     use super::is_invitation_search_query;
+    use super::matchmaking_attribute_must_match;
 
     #[test]
     fn only_query_eight_is_a_manual_invitation_lookup() {
@@ -244,6 +258,20 @@ mod tests {
         for query_id in [0, 1, 2, 7, 9, 10, u32::MAX] {
             assert!(!is_invitation_search_query(query_id));
         }
+    }
+
+    #[test]
+    fn retail_capacity_attributes_do_not_gate_extended_matchmaking() {
+        assert!(!matchmaking_attribute_must_match(105));
+        assert!(!matchmaking_attribute_must_match(112));
+    }
+
+    #[test]
+    fn visibility_and_mode_attributes_still_match_exactly() {
+        assert!(matchmaking_attribute_must_match(3));
+        assert!(matchmaking_attribute_must_match(4));
+        assert!(matchmaking_attribute_must_match(101));
+        assert!(matchmaking_attribute_must_match(103));
     }
 }
 

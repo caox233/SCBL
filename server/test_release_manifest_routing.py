@@ -16,9 +16,13 @@ assert "sha256sum --check --strict" in bootstrap
 assert "server/bootstrap/install.sh" in wrapper
 assert "install_public_server.sh" not in wrapper
 assert 'interpreter="/usr/bin/env python3"' in builder
+assert "raise SystemExit(main())" in builder
 assert 'packageType": "scbl-server-runtime"' in release
 assert "manifest.verify(package_dir)" in provision
 assert "activate_release" in provision
+assert '(Path("/etc/scbl"), 0, 0, 0o711)' in provision
+assert "os.chown(dedicated_config, game, 0)" in provision
+assert "self._configure_firewall(config)" in provision
 assert "_rollback" in provision
 assert "/etc/scbl/server.toml" in config or "server.toml" in bootstrap
 

@@ -51,6 +51,7 @@ from scblctl.release import create_runtime_manifest
 create_runtime_manifest(Path(sys.argv[1]), sys.argv[2])
 PY
 tar -C "$TEMP_DIR" -czf "$OUTPUT" "$PACKAGE_NAME"
-sha256sum "$OUTPUT" > "$OUTPUT.sha256"
+OUTPUT_HASH="$(sha256sum "$OUTPUT" | awk '{print $1}')"
+printf '%s  %s\n' "$OUTPUT_HASH" "$(basename "$OUTPUT")" > "$OUTPUT.sha256"
 echo "已生成：$OUTPUT"
-echo "SHA256：$(sha256sum "$OUTPUT" | awk '{print $1}')"
+echo "SHA256：$OUTPUT_HASH"

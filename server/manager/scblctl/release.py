@@ -134,10 +134,12 @@ def stage_release(package_dir: Path, releases_dir: Path) -> tuple[Path, RuntimeM
         raise ReleaseError(f"发布目录已存在：{target}")
     temporary = Path(tempfile.mkdtemp(prefix=f".{release_id}.", dir=releases_dir))
     try:
+        os.chmod(temporary, 0o755)
         for name in manifest.files:
             source = package_dir / Path(*PurePosixPath(name).parts)
             destination = temporary / Path(*PurePosixPath(name).parts)
             destination.parent.mkdir(parents=True, exist_ok=True)
+            _make_parents_traversable(destination.parent, temporary)
             shutil.copy2(source, destination, follow_symlinks=False)
             os.chmod(destination, 0o755 if name in EXECUTABLE_FILES else 0o644)
         shutil.copy2(package_dir / MANIFEST_NAME, temporary / MANIFEST_NAME)
@@ -147,6 +149,15 @@ def stage_release(package_dir: Path, releases_dir: Path) -> tuple[Path, RuntimeM
         shutil.rmtree(temporary, ignore_errors=True)
         raise
     return target, manifest
+
+
+def _make_parents_traversable(directory: Path, release_root: Path) -> None:
+    current = directory
+    while current != release_root.parent:
+        os.chmod(current, 0o755)
+        if current == release_root:
+            break
+        current = current.parent
 
 
 def extract_runtime_archive(archive_path: Path, destination: Path) -> Path:

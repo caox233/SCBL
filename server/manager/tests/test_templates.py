@@ -4,6 +4,7 @@ import unittest
 
 from scblctl.config import ServerConfig
 from scblctl.templates import (
+    WAIT_SCBL0,
     render_dedicated_config,
     render_easytier_config,
     render_runtime_env,
@@ -45,7 +46,27 @@ class TemplateTests(unittest.TestCase):
             self.assertIn("NoNewPrivileges=true", unit)
             self.assertIn("ProtectSystem=strict", unit)
         self.assertIn("CAP_NET_ADMIN", units["scbl-tunnel.service"])
+        self.assertIn(
+            "ExecStartPost=/usr/local/lib/scbl/wait-scbl0 10.66.0.1 30",
+            units["scbl-tunnel.service"],
+        )
         self.assertIn("CAP_NET_BIND_SERVICE", units["scbl-dedicated.service"])
+        self.assertIn("AF_NETLINK", units["scbl-dedicated.service"])
+        self.assertIn("AF_NETLINK", units["scbl-control-plane.service"])
+        for name in (
+            "scbl-dedicated.service",
+            "scbl-control-plane.service",
+            "scbl-update.service",
+        ):
+            self.assertIn("PrivateDevices=true", units[name])
+            self.assertIn("ProtectKernelTunables=true", units[name])
+            self.assertIn("RestrictNamespaces=true", units[name])
+        self.assertIn("CapabilityBoundingSet=\n", units["scbl-control-plane.service"])
+        self.assertIn("CapabilityBoundingSet=\n", units["scbl-update.service"])
+
+    def test_wait_scbl0_supports_a_bounded_custom_timeout(self) -> None:
+        self.assertIn('timeout="${2:-20}"', WAIT_SCBL0)
+        self.assertIn('seq 1 "$timeout"', WAIT_SCBL0)
 
 
 if __name__ == "__main__":

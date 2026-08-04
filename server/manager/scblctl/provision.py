@@ -9,6 +9,7 @@ from pathlib import Path
 
 from . import __version__
 from .config import ServerConfig
+from .firewall import ufw_commands
 from .paths import DEPLOYMENT_PATHS
 from .release import RuntimeManifest, activate_release, extract_runtime_archive, stage_release
 from .services import SERVICES, SystemdManager
@@ -50,6 +51,7 @@ class Provisioner:
         try:
             self._install_runtime_files(config, target)
             self._write_systemd_units(config)
+            self._configure_firewall(config)
             self._start_and_verify(config)
         except Exception:
             self._rollback(current, previous)
@@ -68,7 +70,7 @@ class Provisioner:
             raise ProvisionError("服务端安装只能在 Linux 上运行")
         if os.geteuid() != 0:
             raise ProvisionError("服务端安装需要 root 权限")
-        for command in ("systemctl", "useradd", "groupadd", "ip"):
+        for command in ("systemctl", "useradd", "groupadd", "ip", "ufw"):
             if not self.runner.available(command):
                 raise ProvisionError(f"系统缺少必要命令：{command}")
 
@@ -105,7 +107,9 @@ class Provisioner:
         game = pwd.getpwnam("scbl-game").pw_uid
         update = pwd.getpwnam("scbl-update").pw_uid
         definitions = (
-            (Path("/etc/scbl"), 0, 0, 0o700),
+            # Service-specific files remain private, while non-root services can
+            # traverse the directory to files explicitly owned by them.
+            (Path("/etc/scbl"), 0, 0, 0o711),
             (Path("/usr/local/lib/scbl"), 0, 0, 0o755),
             (Path(DEPLOYMENT_PATHS.releases), 0, 0, 0o755),
             (Path(DEPLOYMENT_PATHS.cache), 0, group, 0o750),
@@ -142,9 +146,9 @@ class Provisioner:
         _atomic_write_text(
             dedicated_config,
             render_dedicated_config(config, ticket_key=ticket_key),
-            0o640,
+            0o400,
         )
-        os.chown(dedicated_config, 0, group)
+        os.chown(dedicated_config, game, 0)
 
         balancing_source = target / "data" / "mp_balancing.ini"
         balancing_target = Path(DEPLOYMENT_PATHS.data) / "dedicated" / "data" / "mp_balancing.ini"
@@ -174,6 +178,10 @@ class Provisioner:
                 raise ProvisionError(f"发现未知 systemd drop-in，请先处理：{dropin}")
             _atomic_write_text(unit_root / name, content, 0o644)
         self._run_checked(("systemctl", "daemon-reload"))
+
+    def _configure_firewall(self, config: ServerConfig) -> None:
+        for command in ufw_commands(config):
+            self._run_checked(command)
 
     def _start_and_verify(self, config: ServerConfig) -> None:
         units = tuple(service.unit for service in SERVICES if service.required)

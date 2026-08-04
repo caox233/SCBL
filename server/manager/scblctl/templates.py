@@ -151,6 +151,25 @@ force_joins = false
 '''
 
 
+UNPRIVILEGED_SERVICE_HARDENING = '''NoNewPrivileges=true
+PrivateTmp=true
+PrivateDevices=true
+ProtectHome=true
+ProtectSystem=strict
+ProtectClock=true
+ProtectControlGroups=true
+ProtectKernelLogs=true
+ProtectKernelModules=true
+ProtectKernelTunables=true
+ProtectHostname=true
+RestrictNamespaces=true
+RestrictRealtime=true
+RestrictSUIDSGID=true
+SystemCallArchitectures=native
+RemoveIPC=true
+LockPersonality=true'''
+
+
 def render_systemd_units(config: ServerConfig) -> dict[str, str]:
     current = DEPLOYMENT_PATHS.current
     data = DEPLOYMENT_PATHS.data
@@ -164,8 +183,10 @@ Wants=network-online.target
 Type=simple
 ExecStartPre=/bin/sh -c 'ip link delete scbl0 2>/dev/null || true'
 ExecStart={current}/easytier-core --config-file /etc/scbl/easytier.toml --rpc-portal 127.0.0.1:{config.easytier.rpc_port} --console-log-level warn --file-log-level off
+ExecStartPost=/usr/local/lib/scbl/wait-scbl0 {config.network.virtual_ip} 30
 Restart=on-failure
 RestartSec=3
+TimeoutStartSec=35
 LimitNOFILE=1048576
 NoNewPrivileges=true
 PrivateTmp=true
@@ -200,16 +221,12 @@ RestartSec=3
 TimeoutStartSec=25
 TimeoutStopSec=15
 LimitNOFILE=1048576
-NoNewPrivileges=true
-PrivateTmp=true
-ProtectHome=true
-ProtectSystem=strict
+{UNPRIVILEGED_SERVICE_HARDENING}
 ReadOnlyPaths={current} /etc/scbl
 ReadWritePaths={data}/dedicated
 CapabilityBoundingSet=CAP_NET_BIND_SERVICE
 AmbientCapabilities=CAP_NET_BIND_SERVICE
-RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
-LockPersonality=true
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX AF_NETLINK
 
 [Install]
 WantedBy=multi-user.target
@@ -236,13 +253,10 @@ TimeoutStopSec=8
 TasksMax=128
 MemoryHigh=192M
 MemoryMax=256M
-NoNewPrivileges=true
-PrivateTmp=true
-ProtectHome=true
-ProtectSystem=strict
+{UNPRIVILEGED_SERVICE_HARDENING}
 ReadOnlyPaths={current} /etc/scbl {data}
-RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
-LockPersonality=true
+CapabilityBoundingSet=
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX AF_NETLINK
 
 [Install]
 WantedBy=multi-user.target
@@ -265,13 +279,10 @@ TimeoutStopSec=8
 TasksMax=128
 MemoryHigh=192M
 MemoryMax=256M
-NoNewPrivileges=true
-PrivateTmp=true
-ProtectHome=true
-ProtectSystem=strict
+{UNPRIVILEGED_SERVICE_HARDENING}
 ReadOnlyPaths={current} {data}/client-updates
+CapabilityBoundingSet=
 RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
-LockPersonality=true
 
 [Install]
 WantedBy=multi-user.target
@@ -287,12 +298,13 @@ WantedBy=multi-user.target
 WAIT_SCBL0 = '''#!/usr/bin/env bash
 set -euo pipefail
 expected="${1:?expected virtual IP is required}"
-for _ in $(seq 1 20); do
+timeout="${2:-20}"
+for _ in $(seq 1 "$timeout"); do
   if ip -4 addr show dev scbl0 2>/dev/null | grep -Fq "$expected"; then
     exit 0
   fi
   sleep 1
 done
-echo "scbl0 did not receive $expected within 20 seconds" >&2
+echo "scbl0 did not receive $expected within $timeout seconds" >&2
 exit 1
 '''

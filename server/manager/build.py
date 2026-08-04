@@ -21,11 +21,14 @@ def main() -> int:
     with tempfile.TemporaryDirectory(prefix="scblctl-build-") as temporary:
         staging = Path(temporary)
         shutil.copytree(package, staging / "scblctl")
+        (staging / "__main__.py").write_text(
+            "from scblctl.cli import main\nraise SystemExit(main())\n",
+            encoding="utf-8",
+        )
         zipapp.create_archive(
             staging,
             target=args.output,
             interpreter="/usr/bin/env python3",
-            main="scblctl.cli:main",
             compressed=True,
         )
     digest = hashlib.sha256(args.output.read_bytes()).hexdigest()

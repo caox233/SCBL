@@ -32,6 +32,21 @@ class ReleaseTests(unittest.TestCase):
             loaded.verify(root)
             self.assertTrue((root / MANIFEST_NAME).exists())
 
+    def test_staged_release_is_traversable_by_service_users(self) -> None:
+        if __import__("os").name != "posix":
+            self.skipTest("POSIX permission assertion")
+        from scblctl.release import stage_release
+
+        with tempfile.TemporaryDirectory() as temporary:
+            workspace = Path(temporary)
+            package = workspace / "package"
+            package.mkdir()
+            self.make_package(package)
+            create_runtime_manifest(package, "2.0.0")
+            target, _ = stage_release(package, workspace / "releases")
+            self.assertEqual(0o755, target.stat().st_mode & 0o777)
+            self.assertEqual(0o755, (target / "data").stat().st_mode & 0o777)
+
     def test_modified_file_is_rejected(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)

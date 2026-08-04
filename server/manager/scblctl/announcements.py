@@ -12,8 +12,10 @@ from typing import Any
 from .paths import DEPLOYMENT_PATHS
 
 try:
+    import grp
     import pwd
 except ImportError:  # pragma: no cover - Windows build/test host
+    grp = None  # type: ignore[assignment]
     pwd = None  # type: ignore[assignment]
 
 
@@ -231,13 +233,14 @@ class AnnouncementManager:
 
     @staticmethod
     def _set_owner(path: Path) -> None:
-        if pwd is None:
+        if pwd is None or grp is None:
             return
         try:
             uid = pwd.getpwnam("scbl-update").pw_uid
+            gid = grp.getgrnam("scbl").gr_gid
         except KeyError:
             return
-        os.chown(path, uid, -1)
+        os.chown(path, uid, gid)
 
 
 def _text(value: Any) -> str:

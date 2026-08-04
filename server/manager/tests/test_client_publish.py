@@ -6,6 +6,7 @@ import tempfile
 import unittest
 import zipfile
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import patch
 
 from scblctl.client_publish import CLIENT_MANIFEST, REQUIRED_FILES, ClientPublishError, ClientPublisher
@@ -97,6 +98,20 @@ class ClientPublishTests(unittest.TestCase):
                 "server-network-secret",
                 manifest["networkBootstrap"]["tunnelSecret"],
             )
+
+    def test_published_files_keep_shared_scbl_group(self) -> None:
+        account = SimpleNamespace(pw_uid=1201)
+        group = SimpleNamespace(gr_gid=1202)
+        target = Path("/var/lib/scbl/client-updates/client_update_manifest.json")
+        with (
+            patch("scblctl.client_publish.pwd") as pwd_module,
+            patch("scblctl.client_publish.grp") as grp_module,
+            patch("scblctl.client_publish.os.chown", create=True) as chown,
+        ):
+            pwd_module.getpwnam.return_value = account
+            grp_module.getgrnam.return_value = group
+            ClientPublisher._set_update_owner(target)
+        chown.assert_called_once_with(target, 1201, 1202)
 
 
 if __name__ == "__main__":

@@ -1,0 +1,77 @@
+name: Hooks component
+
+on:
+  pull_request:
+    paths:
+      - "client/hooks/**"
+      - "client/hooks-source/**"
+      - "scripts/build-rust-components.ps1"
+      - "client/prepare_bootstrap_hooks.ps1"
+      - "COMPONENT_VERSIONS.json"
+      - "scripts/release/publish-client-component.ps1"
+      - ".github/workflows/hooks-component.yml"
+  push:
+    branches: [main]
+    paths:
+      - "client/hooks/**"
+      - "client/hooks-source/**"
+      - "scripts/build-rust-components.ps1"
+      - "client/prepare_bootstrap_hooks.ps1"
+      - "COMPONENT_VERSIONS.json"
+      - "scripts/release/publish-client-component.ps1"
+      - ".github/workflows/hooks-component.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: hooks-component-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  hooks-win-x86:
+    runs-on: windows-2022
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: nightly-2025-10-15
+          targets: i686-pc-windows-msvc
+          components: rustfmt
+      - uses: arduino/setup-protoc@v3
+      - name: Build Hooks
+        shell: pwsh
+        run: ./scripts/build-rust-components.ps1 -Release -HooksOnly
+      - name: Assemble immutable Hooks component
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          New-Item -ItemType Directory -Force component-output | Out-Null
+          Copy-Item target/i686-pc-windows-msvc/release/hooks.dll component-output/uplay_r1_loader.dll
+          $file = 'component-output/uplay_r1_loader.dll'
+          $hash = (Get-FileHash $file -Algorithm SHA256).Hash.ToLowerInvariant()
+          "$hash  uplay_r1_loader.dll" | Set-Content "$file.sha256" -Encoding ASCII
+          $versions = Get-Content COMPONENT_VERSIONS.json -Raw | ConvertFrom-Json
+          [ordered]@{
+            schemaVersion = 2
+            component = 'hooks'
+            version = [string]$versions.hooksVersion
+            commit = '${{ github.event.pull_request.head.sha || github.sha }}'
+            file = 'uplay_r1_loader.dll'
+            sha256 = $hash
+            size = (Get-Item $file).Length
+            minLauncherVersion = (Get-Content VERSION_CLIENT -Raw).Trim()
+            updateMode = 'before-game-start'
+          } | ConvertTo-Json -Depth 5 | Set-Content component-output/component.json -Encoding UTF8
+      - uses: actions/upload-artifact@v4
+        with:
+          name: scbl-hooks-win-x86
+          path: component-output/*
+          if-no-files-found: error
+          retention-days: 14
+      - name: Publish server-selectable stable component
+        if: github.event_name != 'pull_request'
+        env: { GH_TOKEN: '${{ github.token }}' }
+        shell: pwsh
+        run: ./scripts/release/publish-client-component.ps1 -Directory component-output -Channel stable

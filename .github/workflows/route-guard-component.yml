@@ -5,6 +5,9 @@ on:
     paths:
       - "client/scbl-process-router/**"
       - "client/WINDIVERT_NOTICE.txt"
+      - "COMPONENT_VERSIONS.json"
+      - "scripts/release/publish-client-component.ps1"
+      - "scripts/release/new-deterministic-zip.ps1"
       - ".github/workflows/route-guard-component.yml"
   push:
     branches:
@@ -12,6 +15,9 @@ on:
     paths:
       - "client/scbl-process-router/**"
       - "client/WINDIVERT_NOTICE.txt"
+      - "COMPONENT_VERSIONS.json"
+      - "scripts/release/publish-client-component.ps1"
+      - "scripts/release/new-deterministic-zip.ps1"
       - ".github/workflows/route-guard-component.yml"
   workflow_dispatch:
 
@@ -20,7 +26,7 @@ concurrency:
   cancel-in-progress: true
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
   route-guard-win-x86:
@@ -29,7 +35,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
         with:
-          go-version: stable
+          go-version: 1.23.2
           cache: true
           cache-dependency-path: client/scbl-process-router/go.mod
       - name: Build Route Guard
@@ -48,16 +54,12 @@ jobs:
           Copy-Item client/scbl-process-router/scbl-process-router.exe "$stage/scbl-process-router.exe"
           Copy-Item client/scbl-process-router/WinDivert.dll "$stage/WinDivert.dll"
           Copy-Item client/scbl-process-router/WinDivert64.sys "$stage/WinDivert64.sys"
-          Compress-Archive -Path "$stage/*" -DestinationPath "$out/route-guard.zip" -Force
+          ./scripts/release/new-deterministic-zip.ps1 -SourceDirectory $stage -Destination "$out/route-guard.zip"
           $hash = (Get-FileHash "$out/route-guard.zip" -Algorithm SHA256).Hash.ToLowerInvariant()
           "$hash  route-guard.zip" | Set-Content "$out/route-guard.zip.sha256" -Encoding ASCII
           "${{ github.event.pull_request.head.sha || github.sha }}" | Set-Content "$out/commit_sha.txt" -Encoding ASCII
 
-          $source = Get-Content client/scbl-process-router/main.go -Raw
-          $match = [regex]::Match($source, 'routerVersion\s*=\s*"(?<version>[0-9]+\.[0-9]+\.[0-9]+)"')
-          if (!$match.Success) { throw "Route Guard semantic version was not found in main.go" }
-          $routerVersion = $match.Groups['version'].Value
-          $version = $routerVersion + ".${{ github.run_number }}"
+          $version = [string](Get-Content COMPONENT_VERSIONS.json -Raw | ConvertFrom-Json).routeGuardVersion
           [ordered]@{
             schemaVersion = 2
             component = "route-guard"
@@ -75,3 +77,8 @@ jobs:
           path: component-output/*
           if-no-files-found: error
           retention-days: 14
+      - name: Publish server-selectable stable component
+        if: github.event_name != 'pull_request'
+        env: { GH_TOKEN: '${{ github.token }}' }
+        shell: pwsh
+        run: ./scripts/release/publish-client-component.ps1 -Directory component-output -Channel stable

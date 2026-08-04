@@ -52,12 +52,16 @@ jobs:
           grep -Fq 'read_server_tool_version' server/install_public_server.sh
           grep -Fq 'SCBLControlPlane/{SERVER_TOOL_VERSION}' server/scbl_control_plane.py
           grep -Fq "Windows 客户端：**v${client_version}**" README.md
-          python3 - "$client_version" "$server_version" <<'PY'
+          python3 - "$client_version" "$server_version" "$router_version" <<'PY'
           import json, sys
-          client_version, server_version = sys.argv[1:3]
+          client_version, server_version, router_version = sys.argv[1:4]
           data = json.load(open('COMPONENT_VERSIONS.json', encoding='utf-8'))
           assert data['clientVersion'] == client_version
           assert data['serverToolVersion'] == server_version
+          assert data['routeGuardVersion'] == router_version
+          assert data['hooksVersion']
+          assert data['easyTierVersion'] == '2.6.4'
+          assert data['updaterVersion']
           assert data['controlApiVersion'] == 1
           assert data['dedicatedServer']['repository'] == 'caox233/SCBL'
           assert data['dedicatedServer']['releaseTag'] == 'scbl-public-stable-latest'

@@ -367,7 +367,7 @@ def _client_publish_menu(paths: RuntimePaths) -> None:
                     )
                     print(f"客户端 v{published.version} 已发布：{published.archive}")
             elif choice == "2":
-                _client_component_menu()
+                _client_component_menu(config.updates.repository)
             elif choice == "3":
                 _announcement_menu()
             elif choice == "4":
@@ -390,20 +390,21 @@ def _show_client_history(publisher) -> None:
         print(f"  {version}")
 
 
-def _client_component_menu() -> None:
+def _client_component_menu(repository: str) -> None:
     from pathlib import Path
 
     from .client_components import (
         COMPONENTS,
         ClientComponentError,
         ClientComponentPublisher,
+        download_online_component,
     )
     from .client_publish import ClientPublishError, receive_with_rz
 
     publisher = ClientComponentPublisher()
     while True:
         print("\n客户端组件更新")
-        print("  1. 发布到本地测试通道")
+        print("  1. 更新单个组件")
         print("  2. 将测试组件提升为正式组件")
         print("  3. 查看组件版本")
         print("  0. 返回")
@@ -417,27 +418,54 @@ def _client_component_menu() -> None:
                 if component not in COMPONENTS:
                     print("无效组件。")
                     continue
-                version = input("组件版本：").strip()
+                print("  1. 正式通道")
+                print("  2. 测试通道")
+                channel_choice = input("请选择目标通道：").strip()
+                channel = {"1": "stable", "2": "test"}.get(channel_choice)
+                if channel is None:
+                    print("无效通道。")
+                    continue
                 import tempfile
 
                 cache = Path("/var/cache/scbl")
                 cache.mkdir(parents=True, exist_ok=True)
                 with tempfile.TemporaryDirectory(prefix="component-", dir=cache) as temporary:
                     root = Path(temporary)
-                    print("  1. Xshell rz 手动上传")
-                    print("  2. 使用服务端已有文件路径")
+                    print("  1. 从 GitHub 下载该组件")
+                    print("  2. Xshell rz 手动上传")
+                    print("  3. 使用服务端已有文件路径")
                     source_choice = input("请选择来源：").strip()
                     if source_choice == "1":
+                        downloaded = download_online_component(
+                            repository,
+                            component,
+                            channel=channel,
+                            destination=root,
+                        )
+                        version = downloaded.version
+                        source = downloaded.source
+                        print(
+                            f"GitHub 组件校验通过：{component}@{version}，"
+                            f"SHA256={downloaded.sha256}"
+                        )
+                    elif source_choice == "2":
                         print(f"请选择 {COMPONENTS[component].filename}。")
                         source = receive_with_rz(root)
-                    elif source_choice == "2":
+                        version = input("组件版本：").strip()
+                    elif source_choice == "3":
                         source = Path(input("组件文件路径：").strip())
+                        version = input("组件版本：").strip()
                     else:
                         print("无效来源。")
                         continue
-                    entry = publisher.publish(component, version, source, channel="test")
+                    if channel == "stable":
+                        confirmation = input("确认立即发布给正式客户端 [y/N]：").strip().lower()
+                        if confirmation not in {"y", "yes"}:
+                            print("已取消。")
+                            continue
+                    entry = publisher.publish(component, version, source, channel=channel)
                     print(
-                        f"测试组件已发布：{component}@{entry['version']}，"
+                        f"{channel} 组件已发布：{component}@{entry['version']}，"
                         f"SHA256={entry['sha256']}"
                     )
             elif choice == "2":

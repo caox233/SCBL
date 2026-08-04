@@ -6,6 +6,8 @@ on:
       - "client/SCBL.Updater/**"
       - "client/SCBL.Version.props"
       - "VERSION_CLIENT"
+      - "COMPONENT_VERSIONS.json"
+      - "scripts/release/publish-client-component.ps1"
       - ".github/workflows/updater-component.yml"
   push:
     branches:
@@ -14,6 +16,8 @@ on:
       - "client/SCBL.Updater/**"
       - "client/SCBL.Version.props"
       - "VERSION_CLIENT"
+      - "COMPONENT_VERSIONS.json"
+      - "scripts/release/publish-client-component.ps1"
       - ".github/workflows/updater-component.yml"
   workflow_dispatch:
 
@@ -22,7 +26,7 @@ concurrency:
   cancel-in-progress: true
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
   updater-win-x86:
@@ -56,7 +60,7 @@ jobs:
           $hash = (Get-FileHash "$out/SCBL.Updater.exe" -Algorithm SHA256).Hash.ToLowerInvariant()
           "$hash  SCBL.Updater.exe" | Set-Content "$out/SCBL.Updater.exe.sha256" -Encoding ASCII
           "${{ github.event.pull_request.head.sha || github.sha }}" | Set-Content "$out/commit_sha.txt" -Encoding ASCII
-          $version = (Get-Content VERSION_CLIENT -Raw).Trim() + ".${{ github.run_number }}"
+          $version = [string](Get-Content COMPONENT_VERSIONS.json -Raw | ConvertFrom-Json).updaterVersion
           [ordered]@{
             schemaVersion = 2
             component = "updater"
@@ -74,3 +78,8 @@ jobs:
           path: component-output/*
           if-no-files-found: error
           retention-days: 14
+      - name: Publish server-selectable stable component
+        if: github.event_name != 'pull_request'
+        env: { GH_TOKEN: '${{ github.token }}' }
+        shell: pwsh
+        run: ./scripts/release/publish-client-component.ps1 -Directory component-output -Channel stable

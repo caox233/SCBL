@@ -7,7 +7,7 @@ on:
       - 'THIRD_PARTY_LICENSES/**'
       - 'VERSION_CLIENT'
       - '.github/workflows/build-client.yml'
-      - '.github/workflows/client-release.yml'
+      - '.github/workflows/stable-release.yml'
   workflow_dispatch:
 
 permissions:

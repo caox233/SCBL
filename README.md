@@ -20,26 +20,31 @@ SCBL-Client-v2.0.0-win-x86.zip
 ### Linux 服务端
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/caox233/SCBL/main/scripts/install-server.sh | sudo bash
+curl -fsSL https://raw.githubusercontent.com/caox233/SCBL/main/server/bootstrap/install.sh \
+  | sudo bash -s -- --public-host 你的域名或IP --online
 ```
 
-安装脚本读取 `VERSION_SERVER_TOOL`，下载对应的 **[SERVER] Server Tool vX.Y.Z** 完整包并校验文件。服务端管理工具与 dedicated server 二进制保持独立版本和独立更新边界。
+安装器只在服务器执行 GitHub 已构建的二进制包，不在生产服务器编译源码。它会下载并校验
+`server-tool-vX.Y.Z` 中的管理器，再从 `scbl-stable-latest` 安装完整服务端包。
 
 ## 版本和更新
 
 - `VERSION_CLIENT` 是 Windows 客户端正式版本来源。
 - `VERSION_SERVER_TOOL` 是 Linux 服务端工具版本来源。
-- Release 标签分别为 `client-vX.Y.Z` 和 `server-tool-vX.Y.Z`。
+- 完整 Release 标签分别为 `client-vX.Y.Z`、`server-tool-vX.Y.Z` 和滚动入口 `scbl-stable-latest`。
 - Release 标题分别以 `[CLIENT]` 和 `[SERVER]` 开头，便于在同一列表中区分。
 - Hooks 源码位于 `client/hooks`，dedicated server 源码位于 `server/dedicated-server`；两者由同一个 SCBL Commit 统一追踪，但仍作为独立组件构建和发布。
 
-正式客户端版本门禁仍然优先执行，组件清单不能绕过或替代该门禁。客户端通过服务器更新服务读取组件清单，并逐项核对本地组件：
+正式客户端版本门禁仍然优先执行，组件清单不能绕过或替代该门禁。组件分发的权威链路是：
 
 ```text
-本地文件不存在          → 下载该组件
-本地大小或 SHA256 不同  → 重新下载该组件
-本地文件与清单一致      → 直接复用，不重复下载
+GitHub 单组件 Release ──> SCBL 服务端校验并发布 ──> 客户端读取服务端清单
 ```
+
+客户端永远不直接读取 GitHub 组件地址。服务端可从 GitHub 只下载选中的一个组件，也可通过
+`rz` 或已有文件路径手动上传；三种来源最终都生成同一种服务端同源清单。完整包内记录四个
+组件的基线版本，客户端仅在服务端组件版本更高时下载；同版本直接使用完整包文件，较旧版本
+拒绝降级，已下载版本继续核对大小和 SHA256。
 
 当前组件目录包括：
 
@@ -64,7 +69,10 @@ updater       SCBL.Updater.exe
 
 客户端生成的设置、日志、网络状态、组件缓存、更新工作文件和诊断包统一保存在 `temp/计算机名/`。Hooks 使用游戏 `SYSTEM` 目录中的标准 `scbl.toml`；旧 `5th_auth.dat` 不再读取或保留。
 
-`stable` 与 `test` 组件都使用不可变版本目录、同源下载、大小和 SHA256 校验。测试组件先发布到 `test`，验证后以同一文件和同一 SHA256 提升到 `stable`；正式通道下载失败时继续使用完整包自带的 bootstrap 组件。
+`stable` 与 `test` 组件都使用不可变版本目录、同源下载、大小和 SHA256 校验。GitHub 滚动
+标签使用 `client-component-组件名-stable`；服务端取得文件后仍写入自己的不可变版本目录。
+测试组件可先发布到 `test`，验证后以同一文件和同一 SHA256 提升到 `stable`；正式通道下载
+失败时继续使用完整包自带的组件。
 
 ## 构建方式
 
@@ -84,7 +92,10 @@ powershell -ExecutionPolicy Bypass -File .\client\build_all_windows.ps1 -Fast -P
 powershell -ExecutionPolicy Bypass -File .\scripts\build-rust-components.ps1
 ```
 
-组件拥有独立 GitHub Actions 工作流和缓存。普通 PR 只验证受影响组件，不组装完整客户端；正式完整包工作流并行获取 Launcher、Updater、Route Guard、EasyTier 产物，加入已验证的 bootstrap Hooks 后组装 ZIP，不重新编译已经测试过的组件。
+组件拥有独立 GitHub Actions 工作流和缓存。修改组件时必须同步提升
+`COMPONENT_VERSIONS.json` 中对应版本；工作流拒绝同版本替换为不同 SHA256。正式发布统一由
+`Publish SCBL stable release` 工作流在 GitHub 同时构建 Windows 客户端、Linux 服务端、
+二进制部署包和四个单组件 Release。
 
 完整客户端包主要用于：
 
@@ -94,26 +105,12 @@ powershell -ExecutionPolicy Bypass -File .\scripts\build-rust-components.ps1
 - Launcher 或平台级正式升级；
 - 灾难恢复。
 
-## 本地测试候选
-
-Server Tool v2.0.0 的菜单 `16. 测试管理` 使用本地测试包流程：
-
-- `16-1` 通过 Xshell/ZMODEM 从当前电脑上传测试 ZIP；
-- `16-2` 从已上传 ZIP 中选择并部署；
-- `16-3` 部署最新上传 ZIP；
-- `16-6` 收集服务端诊断包，并可通过 ZMODEM 发回当前电脑。
-
-完整的 Windows Hooks、WSL/Ubuntu dedicated server 编译及测试 ZIP 组装步骤见：
-
-```text
-docs/guides/LOCAL_TEST_CANDIDATE.md
-```
-
 ## 服务端组件仓库
 
 服务端在更新根目录维护不可变组件版本及 `stable` / `test` 清单。组件管理器支持：
 
-- 发布确定 SHA256 的组件到 `test`；
+- 从 GitHub 按名称取得单个组件，或通过 `rz` / 路径手动发布；
+- 发布确定 SHA256 的组件到 `stable` 或 `test`；
 - 将同一个已测试二进制提升到 `stable`，不重新编译；
 - 回滚到现有不可变版本；
 - 校验所有清单、组件大小和 SHA256；

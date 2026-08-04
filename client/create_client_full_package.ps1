@@ -48,6 +48,20 @@ if ($BootstrapActual -ne $BootstrapExpected) {
     throw "Bootstrap Hooks checksum mismatch. expected=$BootstrapExpected actual=$BootstrapActual"
 }
 
+$ComponentVersionsPath = Join-Path $PSScriptRoot "..\COMPONENT_VERSIONS.json"
+$ComponentVersionsSource = Get-Content -LiteralPath $ComponentVersionsPath -Raw -Encoding UTF8 | ConvertFrom-Json
+$ComponentVersions = [ordered]@{
+    hooks = [string]$ComponentVersionsSource.hooksVersion
+    'route-guard' = [string]$ComponentVersionsSource.routeGuardVersion
+    easytier = [string]$ComponentVersionsSource.easyTierVersion
+    updater = [string]$ComponentVersionsSource.updaterVersion
+}
+foreach ($Entry in $ComponentVersions.GetEnumerator()) {
+    if ($Entry.Value -notmatch '^[A-Za-z0-9][A-Za-z0-9._+-]{0,79}$' -or $Entry.Value -notmatch '\d') {
+        throw "Invalid packaged component version: $($Entry.Key)=$($Entry.Value)"
+    }
+}
+
 New-Item -ItemType Directory -Force -Path $OutputDir | Out-Null
 $Zip = Join-Path $OutputDir ("SCBL-Client-v{0}-win-x86.zip" -f $Version)
 if (Test-Path -LiteralPath $Zip) { Remove-Item -LiteralPath $Zip -Force }
@@ -78,6 +92,7 @@ $PackageManifest = [ordered]@{
     clientVersion = $Version
     generatedAt = [DateTimeOffset]::UtcNow.ToString('o')
     bootstrapHooksSha256 = $BootstrapActual
+    componentVersions = $ComponentVersions
     files = $PackageFiles
 }
 $ManifestJson = $PackageManifest | ConvertTo-Json -Depth 6

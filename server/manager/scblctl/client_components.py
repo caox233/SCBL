@@ -7,6 +7,8 @@ import os
 import re
 import shutil
 import tempfile
+import urllib.error
+import urllib.request
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -38,6 +40,15 @@ COMPONENTS = {
 
 class ClientComponentError(RuntimeError):
     pass
+
+
+@dataclass(frozen=True, slots=True)
+class DownloadedComponent:
+    component: str
+    version: str
+    source: Path
+    sha256: str
+    size: int
 
 
 class ClientComponentPublisher:
@@ -264,6 +275,56 @@ class ClientComponentPublisher:
             os.chown(path, uid, -1)
 
 
+def download_online_component(
+    repository: str,
+    component: str,
+    *,
+    channel: str,
+    destination: Path,
+) -> DownloadedComponent:
+    if not re.fullmatch(r"[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+", repository):
+        raise ClientComponentError("GitHub 仓库必须是 owner/repository 格式")
+    if channel not in {"stable", "test"}:
+        raise ClientComponentError(f"未知客户端组件通道：{channel}")
+    try:
+        spec = COMPONENTS[component]
+    except KeyError as exc:
+        raise ClientComponentError(f"未知客户端组件：{component}") from exc
+
+    tag = f"client-component-{component}-{channel}"
+    base = f"https://github.com/{repository}/releases/download/{tag}"
+    metadata_bytes = _download_https(f"{base}/component.json", 64 * 1024)
+    try:
+        metadata = json.loads(metadata_bytes.decode("utf-8-sig"))
+    except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise ClientComponentError("GitHub 组件元数据不是有效 UTF-8 JSON") from exc
+    if not isinstance(metadata, dict) or metadata.get("schemaVersion") != SCHEMA_VERSION:
+        raise ClientComponentError("GitHub 组件元数据版本无效")
+    if metadata.get("component") != component or metadata.get("file") != spec.filename:
+        raise ClientComponentError("GitHub 组件名称或文件名不匹配")
+    if metadata.get("updateMode") != spec.update_mode:
+        raise ClientComponentError("GitHub 组件更新方式不匹配")
+    version = _validate_version(str(metadata.get("version", "")))
+    digest = str(metadata.get("sha256", "")).lower()
+    size = metadata.get("size")
+    if not re.fullmatch(r"[0-9a-f]{64}", digest):
+        raise ClientComponentError("GitHub 组件 SHA256 无效")
+    if type(size) is not int or not 0 < size <= 512 * 1024 * 1024:
+        raise ClientComponentError("GitHub 组件大小无效")
+
+    destination.mkdir(parents=True, exist_ok=True)
+    target = destination / spec.filename
+    payload = _download_https(f"{base}/{spec.filename}", size)
+    if len(payload) != size:
+        raise ClientComponentError(
+            f"GitHub 组件大小不符：expected={size}, actual={len(payload)}"
+        )
+    if hashlib.sha256(payload).hexdigest() != digest:
+        raise ClientComponentError("GitHub 组件 SHA256 校验失败")
+    _atomic_write(target, payload, 0o600)
+    return DownloadedComponent(component, version, target, digest, size)
+
+
 def _validate_version(value: str) -> str:
     value = value.strip()
     if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._+-]{0,79}", value):
@@ -276,6 +337,29 @@ def _version_tuple(value: str) -> tuple[int, ...]:
     if not numbers:
         raise ClientComponentError("组件版本号必须包含数字")
     return numbers
+
+
+def _download_https(url: str, maximum_size: int) -> bytes:
+    if not url.startswith("https://github.com/"):
+        raise ClientComponentError("只允许从 GitHub HTTPS Release 下载组件")
+    request = urllib.request.Request(
+        url,
+        headers={
+            "User-Agent": "SCBL-Server-Manager/2",
+            "Accept": "application/octet-stream",
+        },
+    )
+    try:
+        with urllib.request.urlopen(request, timeout=60) as response:
+            final_url = response.geturl()
+            if not final_url.startswith("https://"):
+                raise ClientComponentError("GitHub 组件下载发生了不安全重定向")
+            payload = response.read(maximum_size + 1)
+    except (OSError, urllib.error.URLError) as exc:
+        raise ClientComponentError(f"GitHub 组件下载失败：{url}") from exc
+    if len(payload) > maximum_size:
+        raise ClientComponentError("GitHub 组件下载超过允许大小")
+    return payload
 
 
 def _utc_now() -> str:

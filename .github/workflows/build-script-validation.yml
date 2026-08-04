@@ -7,8 +7,9 @@ on:
       - "client/build_launcher_incremental.ps1"
       - "client/prepare_bootstrap_hooks.ps1"
       - "client/create_client_full_package.ps1"
+      - "scripts/release/*.ps1"
       - ".github/workflows/*component*.yml"
-      - ".github/workflows/assemble-client-package.yml"
+      - ".github/workflows/stable-release.yml"
       - ".github/workflows/build-script-validation.yml"
   push:
     branches:
@@ -18,8 +19,9 @@ on:
       - "client/build_launcher_incremental.ps1"
       - "client/prepare_bootstrap_hooks.ps1"
       - "client/create_client_full_package.ps1"
+      - "scripts/release/*.ps1"
       - ".github/workflows/*component*.yml"
-      - ".github/workflows/assemble-client-package.yml"
+      - ".github/workflows/stable-release.yml"
       - ".github/workflows/build-script-validation.yml"
   workflow_dispatch:
 
@@ -43,7 +45,10 @@ jobs:
             "client/build_all_windows.ps1",
             "client/build_launcher_incremental.ps1",
             "client/prepare_bootstrap_hooks.ps1",
-            "client/create_client_full_package.ps1"
+            "client/create_client_full_package.ps1",
+            "scripts/release/assemble-client-components.ps1",
+            "scripts/release/new-deterministic-zip.ps1",
+            "scripts/release/publish-client-component.ps1"
           )
           foreach ($file in $files) {
             $tokens = $null

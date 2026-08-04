@@ -9,6 +9,7 @@ from unittest.mock import patch
 from scblctl.client_components import (
     ClientComponentError,
     ClientComponentPublisher,
+    download_online_component,
 )
 
 
@@ -55,6 +56,63 @@ class ClientComponentTests(unittest.TestCase):
                     "easytier", "easytier-2026.08.04.12", source, channel="test"
                 )
             self.assertEqual("easytier-2026.08.04.12", entry["version"])
+
+    def test_online_download_fetches_only_metadata_and_selected_component(self) -> None:
+        metadata = {
+            "schemaVersion": 2,
+            "component": "hooks",
+            "version": "2.0.1",
+            "file": "uplay_r1_loader.dll",
+            "sha256": "",
+            "size": 5,
+            "updateMode": "before-game-start",
+        }
+        payload = b"hooks"
+        import hashlib
+
+        metadata["sha256"] = hashlib.sha256(payload).hexdigest()
+        with tempfile.TemporaryDirectory() as temporary:
+            destination = Path(temporary)
+            with patch(
+                "scblctl.client_components._download_https",
+                side_effect=[json.dumps(metadata).encode(), payload],
+            ) as download:
+                result = download_online_component(
+                    "caox233/SCBL",
+                    "hooks",
+                    channel="stable",
+                    destination=destination,
+                )
+            self.assertEqual("2.0.1", result.version)
+            self.assertEqual(payload, result.source.read_bytes())
+            self.assertEqual(2, download.call_count)
+            self.assertIn(
+                "/client-component-hooks-stable/component.json",
+                download.call_args_list[0].args[0],
+            )
+
+    def test_online_download_rejects_metadata_for_another_component(self) -> None:
+        metadata = {
+            "schemaVersion": 2,
+            "component": "updater",
+            "version": "2.0.1",
+            "file": "SCBL.Updater.exe",
+            "sha256": "0" * 64,
+            "size": 1,
+            "updateMode": "next-launch",
+        }
+        with tempfile.TemporaryDirectory() as temporary:
+            with patch(
+                "scblctl.client_components._download_https",
+                return_value=json.dumps(metadata).encode(),
+            ):
+                with self.assertRaisesRegex(ClientComponentError, "名称或文件名"):
+                    download_online_component(
+                        "caox233/SCBL",
+                        "hooks",
+                        channel="stable",
+                        destination=Path(temporary),
+                    )
 
 
 if __name__ == "__main__":

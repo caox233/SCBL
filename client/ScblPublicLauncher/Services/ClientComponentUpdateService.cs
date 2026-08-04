@@ -80,7 +80,16 @@ public sealed class ClientComponentUpdateService
                 ValidateDefinition(name, definition, manifestUri);
                 EnsureLauncherCompatibility(definition.MinLauncherVersion);
                 if (installed.TryGetValue(name, out (string Version, string Sha256) current))
+                {
                     ValidateComponentProgression(name, current.Version, current.Sha256, definition.Version, definition.Sha256);
+                    if (CompareComponentVersions(current.Version, definition.Version) == 0
+                        && string.IsNullOrWhiteSpace(current.Sha256))
+                    {
+                        LogService.Info(
+                            $"Component already provided by full package: component={name}, version={current.Version}; download skipped.");
+                        continue;
+                    }
+                }
                 VerifiedClientComponent component = await EnsureCachedComponentAsync(
                     name,
                     definition,
@@ -234,6 +243,7 @@ public sealed class ClientComponentUpdateService
             throw new InvalidDataException($"组件 {name} 拒绝降级：current={currentVersion}, candidate={candidateVersion}。");
         if (comparison == 0
             && currentVersion.Equals(candidateVersion, StringComparison.OrdinalIgnoreCase)
+            && Sha256Pattern.IsMatch(currentSha256)
             && !currentSha256.Equals(candidateSha256, StringComparison.OrdinalIgnoreCase))
         {
             throw new InvalidDataException(
@@ -265,7 +275,9 @@ public sealed class ClientComponentUpdateService
 
     private static IReadOnlyDictionary<string, (string Version, string Sha256)> ReadInstalledComponentVersions(string channel)
     {
-        var result = new Dictionary<string, (string Version, string Sha256)>(StringComparer.OrdinalIgnoreCase);
+        var result = new Dictionary<string, (string Version, string Sha256)>(
+            ReadPackagedComponentVersions(AppContext.BaseDirectory),
+            StringComparer.OrdinalIgnoreCase);
         string statePath = Path.Combine(LogService.ComponentsDirectory, "component_state.json");
         try
         {
@@ -294,6 +306,35 @@ public sealed class ClientComponentUpdateService
         catch (Exception ex)
         {
             LogService.Warning("Installed component version state is unreadable; immutable progression check skipped: " + ex.Message);
+        }
+        return result;
+    }
+
+    internal static IReadOnlyDictionary<string, (string Version, string Sha256)> ReadPackagedComponentVersions(
+        string baseDirectory)
+    {
+        var result = new Dictionary<string, (string Version, string Sha256)>(StringComparer.OrdinalIgnoreCase);
+        string manifestPath = Path.Combine(baseDirectory, "client_package_manifest.json");
+        try
+        {
+            if (!File.Exists(manifestPath))
+                return result;
+            using JsonDocument document = JsonDocument.Parse(File.ReadAllText(manifestPath));
+            if (!document.RootElement.TryGetProperty("componentVersions", out JsonElement versions)
+                || versions.ValueKind != JsonValueKind.Object)
+                return result;
+            foreach (JsonProperty property in versions.EnumerateObject())
+            {
+                if (!SupportedComponents.ContainsKey(property.Name))
+                    continue;
+                string version = property.Value.GetString() ?? "";
+                if (!string.IsNullOrWhiteSpace(version) && Regex.IsMatch(version, "[0-9]"))
+                    result[property.Name] = (version, "");
+            }
+        }
+        catch (Exception ex)
+        {
+            LogService.Warning("Packaged component versions are unreadable; server reconciliation will verify components: " + ex.Message);
         }
         return result;
     }

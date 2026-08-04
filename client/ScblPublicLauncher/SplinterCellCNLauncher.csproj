@@ -46,9 +46,8 @@
   </ItemGroup>
 
   <!-- Save templates remain embedded because they are tiny and versioned with Launcher behavior.
-       Hooks is deliberately excluded: the full package carries it under tools/
-       and test runtime updates resolve it through a verified component cache.
-       Stable external activation remains disabled until manifest signatures land. -->
+       Hooks is deliberately excluded: the full package carries it under tools/ and
+       stable/test runtime updates resolve newer versions through the server-owned cache. -->
   <ItemGroup>
     <None Remove="EmbeddedFiles\**\*" />
     <EmbeddedResource Include="EmbeddedFiles\**\*" Exclude="EmbeddedFiles\uplay_r1_loader.dll" />

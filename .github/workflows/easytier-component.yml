@@ -6,6 +6,9 @@ on:
       - "client/easytier/**"
       - "THIRD_PARTY_LICENSES/EasyTier-LGPL-3.0.txt"
       - "VERSION_CLIENT"
+      - "COMPONENT_VERSIONS.json"
+      - "scripts/release/publish-client-component.ps1"
+      - "scripts/release/new-deterministic-zip.ps1"
       - ".github/workflows/easytier-component.yml"
   push:
     branches:
@@ -14,6 +17,9 @@ on:
       - "client/easytier/**"
       - "THIRD_PARTY_LICENSES/EasyTier-LGPL-3.0.txt"
       - "VERSION_CLIENT"
+      - "COMPONENT_VERSIONS.json"
+      - "scripts/release/publish-client-component.ps1"
+      - "scripts/release/new-deterministic-zip.ps1"
       - ".github/workflows/easytier-component.yml"
   workflow_dispatch:
 
@@ -22,7 +28,7 @@ concurrency:
   cancel-in-progress: true
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
   easytier-win-x86_64:
@@ -44,11 +50,11 @@ jobs:
           New-Item -ItemType Directory -Force -Path $stage,$out | Out-Null
           Copy-Item client/easytier/bin/easytier-core.exe "$stage/easytier-core.exe"
           Copy-Item client/easytier/bin/easytier-cli.exe "$stage/easytier-cli.exe"
-          Compress-Archive -Path "$stage/*" -DestinationPath "$out/easytier-windows-x86_64.zip" -Force
+          ./scripts/release/new-deterministic-zip.ps1 -SourceDirectory $stage -Destination "$out/easytier-windows-x86_64.zip"
           $hash = (Get-FileHash "$out/easytier-windows-x86_64.zip" -Algorithm SHA256).Hash.ToLowerInvariant()
           "$hash  easytier-windows-x86_64.zip" | Set-Content "$out/easytier-windows-x86_64.zip.sha256" -Encoding ASCII
           "${{ github.event.pull_request.head.sha || github.sha }}" | Set-Content "$out/commit_sha.txt" -Encoding ASCII
-          $version = "easytier-" + (Get-Date).ToUniversalTime().ToString("yyyy.MM.dd") + ".${{ github.run_number }}"
+          $version = [string](Get-Content COMPONENT_VERSIONS.json -Raw | ConvertFrom-Json).easyTierVersion
           [ordered]@{
             schemaVersion = 2
             component = "easytier"
@@ -66,3 +72,8 @@ jobs:
           path: component-output/*
           if-no-files-found: error
           retention-days: 14
+      - name: Publish server-selectable stable component
+        if: github.event_name != 'pull_request'
+        env: { GH_TOKEN: '${{ github.token }}' }
+        shell: pwsh
+        run: ./scripts/release/publish-client-component.ps1 -Directory component-output -Channel stable

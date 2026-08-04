@@ -24,6 +24,11 @@ $Header = [System.IO.File]::ReadAllBytes($SourceDll)
 if ($Header.Length -lt 2 -or $Header[0] -ne 0x4D -or $Header[1] -ne 0x5A) {
     throw "Local Hooks output is not a Windows PE file: $SourceDll"
 }
+$ProtocolMarker = 'SCBL_HOOKS_CONFIG=scbl.toml.v1'
+$HasProtocolMarker = [System.Text.Encoding]::ASCII.GetString($Header).Contains($ProtocolMarker)
+if (!$HasProtocolMarker) {
+    throw "Local Hooks output does not support the SCBL 2.0 scbl.toml protocol: $SourceDll"
+}
 
 $Destination = Join-Path $PublishRoot "tools"
 New-Item -ItemType Directory -Force -Path $Destination | Out-Null

@@ -4,6 +4,7 @@ using System.Diagnostics;
 using System.IO;
 using System.Linq;
 using System.Security.Cryptography;
+using System.Text;
 using System.Text.Json;
 using System.Text.RegularExpressions;
 
@@ -11,6 +12,8 @@ namespace SplinterCellCNLauncher.Services;
 
 public sealed class HookDllService
 {
+    internal const string RequiredHooksConfigProtocol = "SCBL_HOOKS_CONFIG=scbl.toml.v1";
+
     private static readonly string[] RequiredEmbeddedFiles =
     [
         "00000001.meta",
@@ -85,6 +88,8 @@ public sealed class HookDllService
         if (string.IsNullOrWhiteSpace(expectedHash) || !File.Exists(sourcePath))
             throw new Exception("专用联机组件部署失败：没有可用且已校验的 Hooks 组件。请使用完整客户端修复安装。");
 
+        ValidateHooksConfigProtocol(sourcePath);
+
         string beforeHash = ComputeFileSha256BestEffort(dllPath);
         if (beforeHash.Equals(expectedHash, StringComparison.OrdinalIgnoreCase))
         {
@@ -103,6 +108,8 @@ public sealed class HookDllService
         string afterHash = ComputeFileSha256BestEffort(dllPath);
         if (!afterHash.Equals(expectedHash, StringComparison.OrdinalIgnoreCase))
             throw new Exception("专用联机组件部署失败：写入后的 uplay_r1_loader.dll 校验不一致。请检查杀软或文件权限。");
+
+        ValidateHooksConfigProtocol(dllPath);
 
         WriteDeployMarker(gameDir, afterHash, sourceChannel, sourceVersion, sourceDescription);
     }
@@ -253,6 +260,27 @@ public sealed class HookDllService
         catch
         {
             return "";
+        }
+    }
+
+    internal static void ValidateHooksConfigProtocol(string path)
+    {
+        byte[] marker = Encoding.ASCII.GetBytes(RequiredHooksConfigProtocol);
+        byte[] content;
+        try
+        {
+            content = File.ReadAllBytes(path);
+        }
+        catch (Exception ex)
+        {
+            throw new IOException("无法读取 Hooks 组件以验证配置协议。", ex);
+        }
+
+        if (content.AsSpan().IndexOf(marker) < 0)
+        {
+            throw new InvalidDataException(
+                "Hooks 组件与 SCBL 2.0 启动器不兼容（组件仍可能读取已停用的 5th_auth.dat）。" +
+                Environment.NewLine + "请使用完整的最新客户端修复安装。");
         }
     }
 

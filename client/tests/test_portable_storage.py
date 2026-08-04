@@ -7,6 +7,7 @@ launcher = root / "client/ScblPublicLauncher"
 log_service = (launcher / "Services/LogService.cs").read_text(encoding="utf-8")
 settings = (launcher / "Services/LauncherSettingsService.cs").read_text(encoding="utf-8")
 hook_writer = (launcher / "Services/HookConfigService.cs").read_text(encoding="utf-8")
+hook_deployer = (launcher / "Services/HookDllService.cs").read_text(encoding="utf-8")
 game_launch = (launcher / "Services/GameLaunchService.cs").read_text(encoding="utf-8")
 hooks_config = (root / "client/hooks/hooks-config/src/lib.rs").read_text(encoding="utf-8")
 hooks_log = (root / "client/hooks/src/lib.rs").read_text(encoding="utf-8")
@@ -77,5 +78,8 @@ assert 'IpAddress = ""{TomlEscape(bindIp)}""' in hook_writer
 assert 'path.as_ref().join("scbl.toml")' in hooks_config
 assert "CnAuthConfig" not in hooks_config
 assert "parse_cn_or_standard_config" not in hooks_config
+assert 'RequiredHooksConfigProtocol = "SCBL_HOOKS_CONFIG=scbl.toml.v1"' in hook_deployer
+assert "ValidateHooksConfigProtocol(sourcePath)" in hook_deployer
+assert 'SCBL_HOOKS_CONFIG_PROTOCOL: [u8; 31] = *b"SCBL_HOOKS_CONFIG=scbl.toml.v1\\0"' in hooks_log
 
 print("portable per-machine client storage and strict scbl.toml checks passed")

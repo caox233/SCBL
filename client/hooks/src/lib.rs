@@ -30,6 +30,13 @@ use windows::Win32::System::SystemServices::DLL_THREAD_DETACH;
 use windows::Win32::UI::WindowsAndMessaging::MessageBoxA;
 use windows::Win32::UI::WindowsAndMessaging::MB_OK;
 
+// The launcher checks this marker before deploying the DLL. A file-version match
+// is not sufficient because an older Hooks build can share the same product
+// version while still expecting the retired 5th_auth.dat contract.
+#[used]
+#[no_mangle]
+pub static SCBL_HOOKS_CONFIG_PROTOCOL: [u8; 31] = *b"SCBL_HOOKS_CONFIG=scbl.toml.v1\0";
+
 mod addresses;
 mod api;
 mod dll_utils;

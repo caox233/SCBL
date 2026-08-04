@@ -1406,9 +1406,33 @@ where
     }
 }
 
+unsafe fn optional_trace_hook_with_name<T, F>(hook: &retour::StaticDetour<T>, target: Option<T>, f: F, name: &str)
+where
+    T: retour::Function,
+    F: Fn<T::Arguments, Output = T::Output> + Send + 'static,
+    <T as retour::Function>::Arguments: std::marker::Tuple,
+{
+    let Some(target) = target else {
+        info!("Optional diagnostic hook {name} is unavailable for this game build");
+        return;
+    };
+    let res = hook.initialize(target, f).and_then(|h| h.enable());
+    if let Err(err) = res {
+        error!("Optional diagnostic hook {} failed: {:?}", name, err);
+    } else {
+        info!("Optional diagnostic hook {} enabled with address {:?}", name, target.to_ptr());
+    }
+}
+
 macro_rules! hook {
     ($hook:expr, $addr:expr, $func:ident) => {
         $crate::hooks::hook_with_name(&$hook, $addr.map(|a| unsafe { ::std::mem::transmute(a) }), $func, stringify!($hook));
+    };
+}
+
+macro_rules! optional_trace_hook {
+    ($hook:expr, $addr:expr, $func:ident) => {
+        $crate::hooks::optional_trace_hook_with_name(&$hook, $addr.map(|a| unsafe { ::std::mem::transmute(a) }), $func, stringify!($hook));
     };
 }
 
@@ -1462,8 +1486,10 @@ pub unsafe fn init(config: &Config, addr: &Addresses) {
     hook!(AsmRdvCompletionRouterHook, addr.func_rdv_completion_router_trace, asm_rdv_completion_router);
     hook!(AsmRdvRouteFilterHook, addr.func_rdv_route_filter_trace, asm_rdv_route_filter);
     hook!(AsmStateJoinResetHook, addr.func_state_join_reset_trace, asm_state_join_reset);
-    hook!(AsmRdvEventFanoutHook, addr.func_rdv_event_fanout_trace, asm_rdv_event_fanout);
-    hook!(AsmRdvListenerFactoryHook, addr.func_rdv_listener_factory_trace, asm_rdv_listener_factory);
+    // These .42 proof hooks are diagnostic-only. Their addresses were never
+    // established for every retail executable, so absence is not a runtime error.
+    optional_trace_hook!(AsmRdvEventFanoutHook, addr.func_rdv_event_fanout_trace, asm_rdv_event_fanout);
+    optional_trace_hook!(AsmRdvListenerFactoryHook, addr.func_rdv_listener_factory_trace, asm_rdv_listener_factory);
     // if config.enable_all_hooks || config.enable_hooks.contains(&Hook::GetAdaptersInfo)
     {
         let lib = LoadLibraryA(s!("iphlpapi.dll")).unwrap();

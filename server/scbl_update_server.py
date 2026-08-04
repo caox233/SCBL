@@ -44,7 +44,10 @@ class UpdateRequestHandler(SimpleHTTPRequestHandler):
         self.send_error(HTTPStatus.METHOD_NOT_ALLOWED, "Only GET and HEAD are supported")
 
     def end_headers(self) -> None:
-        if self.path.split("?", 1)[0].endswith(".json"):
+        # parse_request can reject malformed or TLS-on-HTTP traffic before it
+        # creates self.path. Error responses must still be safe to send.
+        request_path = getattr(self, "path", "")
+        if request_path.split("?", 1)[0].endswith(".json"):
             self.send_header("Cache-Control", "no-store")
         else:
             self.send_header("Cache-Control", "public, max-age=300")

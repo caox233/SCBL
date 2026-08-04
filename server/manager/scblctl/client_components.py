@@ -107,6 +107,10 @@ class ClientComponentPublisher:
                 tempfile.mkdtemp(prefix=f".{version}.", dir=target_dir.parent)
             )
             try:
+                # Component artifacts are public update payloads. The update
+                # service runs as scbl-update and must be able to traverse a
+                # version directory initially created by root.
+                os.chmod(temporary, 0o755)
                 _copy_file(source, temporary / spec.filename, 0o640)
                 self._write_json(
                     temporary / "component.json",
@@ -121,6 +125,8 @@ class ClientComponentPublisher:
             except Exception:
                 shutil.rmtree(temporary, ignore_errors=True)
                 raise
+        # Repair permissions from releases created before the traversal rule.
+        os.chmod(target_dir, 0o755)
         self._set_update_owner(target, metadata)
         manifest = self.load_manifest(channel)
         existing = manifest["components"].get(component)

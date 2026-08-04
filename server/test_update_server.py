@@ -30,6 +30,11 @@ with tempfile.TemporaryDirectory() as temporary:
     thread.start()
     opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
     try:
+        with socket.create_connection(("127.0.0.1", port), timeout=3) as raw:
+            raw.sendall(b"NOT HTTP\r\n\r\n")
+            malformed_response = raw.recv(4096)
+            assert b"400" in malformed_response
+
         with opener.open(
             f"http://127.0.0.1:{port}/client_update_manifest.json", timeout=3
         ) as response:

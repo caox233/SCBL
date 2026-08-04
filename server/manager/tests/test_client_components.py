@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import json
+import os
+import stat
 import tempfile
 import unittest
 from pathlib import Path
@@ -56,6 +58,17 @@ class ClientComponentTests(unittest.TestCase):
                     "easytier", "easytier-2026.08.04.12", source, channel="test"
                 )
             self.assertEqual("easytier-2026.08.04.12", entry["version"])
+
+    def test_artifact_version_directory_is_traversable_by_update_service(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            publisher, _ = self.publish(root, "2.0.1")
+            directory = publisher.artifacts_root / "hooks" / "2.0.1"
+            mode = stat.S_IMODE(directory.stat().st_mode)
+            if os.name == "posix":
+                self.assertEqual(0o755, mode)
+            else:
+                self.assertEqual(0o111, mode & 0o111)
 
     def test_online_download_fetches_only_metadata_and_selected_component(self) -> None:
         metadata = {

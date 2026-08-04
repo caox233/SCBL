@@ -1,0 +1,114 @@
+name: Publish SCBL stable server
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: scbl-stable-release
+  cancel-in-progress: false
+
+jobs:
+  server:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: nightly-2025-10-15
+          components: rustfmt
+      - uses: arduino/setup-protoc@v3
+      - name: Install native dependencies
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends pkg-config libsodium-dev unzip
+      - name: Test server manager and dedicated server
+        run: |
+          set -euo pipefail
+          PYTHONPATH=server/manager python3 -m unittest discover -s server/manager/tests -v
+          python3 server/test_migration_compatibility.py
+          bash -n server/bootstrap/install.sh
+          bash -n server/packaging/build-runtime.sh
+          cargo fmt --all --check
+          cargo test --locked -p dedicated_server
+          cargo build --locked --release -p dedicated_server
+          file target/release/dedicated_server | grep -F 'ELF 64-bit'
+      - name: Build binary-only server packages
+        run: |
+          set -euo pipefail
+          version="$(tr -d '[:space:]' < VERSION_SERVER_TOOL)"
+          easytier_version="v$(python3 -c "import json; print(json.load(open('COMPONENT_VERSIONS.json'))['easyTierVersion'])")"
+          work="$RUNNER_TEMP/easytier"
+          mkdir -p "$work" release-output/server server/manager/dist server/packaging/dist
+          curl -fL --retry 3 --retry-all-errors --connect-timeout 10 --max-time 300 \
+            "https://github.com/EasyTier/EasyTier/releases/download/$easytier_version/easytier-linux-x86_64-$easytier_version.zip" \
+            -o "$work/easytier.zip"
+          unzip -q "$work/easytier.zip" -d "$work/extract"
+          core="$(find "$work/extract" -type f -name easytier-core -print -quit)"
+          cli="$(find "$work/extract" -type f -name easytier-cli -print -quit)"
+          test -n "$core" -a -n "$cli"
+          bash server/packaging/build-runtime.sh \
+            --output "server/packaging/dist/SCBL-Server-Runtime-v${version}-linux-x86_64.tar.gz" \
+            --dedicated target/release/dedicated_server \
+            --easytier-core "$core" \
+            --easytier-cli "$cli"
+          python3 server/manager/build.py --output server/manager/dist/scblctl.pyz
+          python3 server/packaging/build-deployment-package.py \
+            --kind full --version "$version" \
+            --manager server/manager/dist/scblctl.pyz --manager-version "$version" \
+            --runtime "server/packaging/dist/SCBL-Server-Runtime-v${version}-linux-x86_64.tar.gz" --runtime-version "$version" \
+            --output server/packaging/dist/SCBL-Server-Full.scblfull
+          python3 server/packaging/build-deployment-package.py \
+            --kind patch --version "$version" \
+            --manager server/manager/dist/scblctl.pyz --manager-version "$version" \
+            --runtime "server/packaging/dist/SCBL-Server-Runtime-v${version}-linux-x86_64.tar.gz" --runtime-version "$version" \
+            --output server/packaging/dist/SCBL-Server-Patch.scblpatch
+          install -m 0755 target/release/dedicated_server release-output/server/dedicated_server-linux-x86_64
+          install -m 0755 server/bootstrap/install.sh release-output/server/install.sh
+          (cd release-output/server && sha256sum dedicated_server-linux-x86_64 > dedicated_server-linux-x86_64.sha256)
+          cp server/manager/dist/* server/packaging/dist/* release-output/server/
+          (cd release-output/server && sha256sum $(find . -maxdepth 1 -type f ! -name SHA256SUMS.txt -printf '%f\n' | sort) > SHA256SUMS.txt)
+      - uses: actions/upload-artifact@v4
+        with:
+          name: scbl-stable-server
+          path: release-output/**
+          if-no-files-found: error
+          retention-days: 7
+
+  publish:
+    needs: server
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with: { name: scbl-stable-server, path: release-output }
+      - name: Publish versioned and rolling server releases
+        env: { GH_TOKEN: '${{ github.token }}' }
+        shell: bash
+        run: |
+          set -euo pipefail
+          server_version="$(tr -d '[:space:]' < VERSION_SERVER_TOOL)"
+          server_tag="server-tool-v$server_version"
+          if gh release view "$server_tag" >/dev/null 2>&1; then
+            gh release upload "$server_tag" release-output/server/* --clobber
+            gh release edit "$server_tag" --title "[SERVER] Server v$server_version" --notes-file "docs/releases/SERVER_TOOL_v${server_version}.md" --latest=false
+          else
+            gh release create "$server_tag" release-output/server/* --title "[SERVER] Server v$server_version" --notes-file "docs/releases/SERVER_TOOL_v${server_version}.md" --target main --latest=false
+          fi
+          rolling=scbl-stable-latest
+          rolling_assets=(release-output/server/SCBL-Server-Full.scblfull release-output/server/SCBL-Server-Full.scblfull.sha256 release-output/server/SCBL-Server-Patch.scblpatch release-output/server/SCBL-Server-Patch.scblpatch.sha256)
+          if gh release view "$rolling" >/dev/null 2>&1; then
+            gh release upload "$rolling" "${rolling_assets[@]}" --clobber
+            gh release edit "$rolling" --title "SCBL stable server deployment" --notes "Binary-only server packages consumed by SCBL Server Manager." --latest=false
+          else
+            gh release create "$rolling" "${rolling_assets[@]}" --title "SCBL stable server deployment" --notes "Binary-only server packages consumed by SCBL Server Manager." --target main --latest=false
+          fi
+          dedicated=scbl-public-stable-latest
+          dedicated_assets=(release-output/server/dedicated_server-linux-x86_64 release-output/server/dedicated_server-linux-x86_64.sha256)
+          if gh release view "$dedicated" >/dev/null 2>&1; then
+            gh release upload "$dedicated" "${dedicated_assets[@]}" --clobber
+            gh release edit "$dedicated" --title "SCBL Dedicated Server v$server_version" --notes "Built from the SCBL stable source tree." --latest=false
+          else
+            gh release create "$dedicated" "${dedicated_assets[@]}" --title "SCBL Dedicated Server v$server_version" --notes "Built from the SCBL stable source tree." --target main --latest=false
+          fi

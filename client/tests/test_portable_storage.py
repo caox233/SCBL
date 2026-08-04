@@ -15,6 +15,8 @@ package = (root / "client/create_client_full_package.ps1").read_text(encoding="u
 updater = (root / "client/SCBL.Updater/Program.cs").read_text(encoding="utf-8")
 maintenance = (launcher / "Services/ClientStorageMaintenanceService.cs").read_text(encoding="utf-8")
 credentials = (launcher / "Services/CredentialProtectionService.cs").read_text(encoding="utf-8")
+main_window_xaml = (launcher / "MainWindow.xaml").read_text(encoding="utf-8")
+server_settings = (launcher / "MainWindow.Settings.cs").read_text(encoding="utf-8")
 
 assert 'Path.Combine(ClientRootDirectory, "temp", MachineName)' in log_service
 assert 'Path.Combine(PersistentDataDirectory, "config")' in log_service
@@ -30,6 +32,16 @@ assert "MigrateLegacySettingsIfNeeded" not in settings
 assert "PruneComponentVersions" in maintenance
 assert "RotateIfOversized" in maintenance
 assert "SCBL 2.0 never accepts plaintext secrets" in credentials
+
+assert 'x:Name="btnSettings"' in main_window_xaml
+assert 'x:Name="miServerSettings"' in main_window_xaml
+assert 'x:Name="serverSettingsOverlay"' in main_window_xaml
+assert 'x:Name="btnLanguageToggle"' not in main_window_xaml
+assert 'x:Name="btnMusicToggle"' not in main_window_xaml
+assert 'x:Name="btnGuide"' not in main_window_xaml
+assert "ServerSettingsValidator.TryValidate" in server_settings
+assert "_settings.PublicEndpoint = validated.PublicEndpoint" in server_settings
+assert "_settings.PublicUpdatePort = validated.UpdatePort" in server_settings
 
 assert 'Path.Combine(gameDir, "scbl.toml")' in hook_writer
 assert "[User]" in hook_writer

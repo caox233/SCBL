@@ -411,6 +411,65 @@
             </Setter>
         </Style>
 
+        <Style x:Key="SettingsMenuItemStyle" TargetType="{x:Type MenuItem}">
+            <Setter Property="Foreground" Value="{StaticResource TextMainBrush}"/>
+            <Setter Property="Background" Value="Transparent"/>
+            <Setter Property="FontFamily" Value="Microsoft YaHei UI"/>
+            <Setter Property="FontSize" Value="13"/>
+            <Setter Property="Cursor" Value="Hand"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="{x:Type MenuItem}">
+                        <Border x:Name="menuBorder"
+                                Background="{TemplateBinding Background}"
+                                CornerRadius="8"
+                                Padding="13,9"
+                                Margin="4,2">
+                            <ContentPresenter ContentSource="Header"
+                                              RecognizesAccessKey="False"
+                                              VerticalAlignment="Center"/>
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsHighlighted" Value="True">
+                                <Setter TargetName="menuBorder" Property="Background" Value="#20384D"/>
+                                <Setter Property="Foreground" Value="#7DFFAE"/>
+                            </Trigger>
+                            <Trigger Property="IsEnabled" Value="False">
+                                <Setter Property="Opacity" Value="0.45"/>
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
+        <Style x:Key="SettingsContextMenuStyle" TargetType="{x:Type ContextMenu}">
+            <Setter Property="MinWidth" Value="190"/>
+            <Setter Property="Background" Value="Transparent"/>
+            <Setter Property="BorderThickness" Value="0"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="{x:Type ContextMenu}">
+                        <Border Background="#111C28"
+                                BorderBrush="#35506B"
+                                BorderThickness="1"
+                                CornerRadius="10"
+                                Padding="0,5"
+                                SnapsToDevicePixels="True">
+                            <Border.Effect>
+                                <DropShadowEffect Color="#000000"
+                                                  BlurRadius="18"
+                                                  ShadowDepth="5"
+                                                  Opacity="0.48"/>
+                            </Border.Effect>
+                            <StackPanel IsItemsHost="True"
+                                        KeyboardNavigation.DirectionalNavigation="Cycle"/>
+                        </Border>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
         <Style x:Key="ModeListBox" TargetType="{x:Type ListBox}">
             <Setter Property="Height" Value="42"/>
             <Setter Property="Background" Value="#0A131D"/>
@@ -547,21 +606,36 @@
                     HorizontalAlignment="Right"
                     VerticalAlignment="Top"
                     Margin="0,10,12,0">
-            <Button x:Name="btnLanguageToggle"
-                    Content="中文 / EN"
-                    Style="{StaticResource TitleBarTextButton}"
-                    Click="LanguageToggleButton_Click"
-                    Margin="0,0,4,0"/>
-            <Button x:Name="btnMusicToggle"
-                    Content="🔊"
+            <Button x:Name="btnSettings"
+                    Content="⚙"
                     Style="{StaticResource WindowChromeButton}"
-                    Click="MusicToggleButton_Click"
-                    Margin="0,0,4,0"/>
-            <Button x:Name="btnGuide"
-                    Content="?"
-                    Style="{StaticResource WindowChromeButton}"
-                    Click="GuideButton_Click"
-                    Margin="0,0,4,0"/>
+                    Click="SettingsButton_Click"
+                    Margin="0,0,4,0">
+                <Button.ContextMenu>
+                    <ContextMenu x:Name="settingsMenu"
+                                 Placement="Bottom"
+                                 Style="{StaticResource SettingsContextMenuStyle}"
+                                 Opened="SettingsMenu_Opened">
+                        <MenuItem x:Name="miGuide"
+                                  Header="❓ 使用指引"
+                                  Style="{StaticResource SettingsMenuItemStyle}"
+                                  Click="GuideButton_Click"/>
+                        <MenuItem x:Name="miLanguageToggle"
+                                  Header="🌐 中文 / English"
+                                  Style="{StaticResource SettingsMenuItemStyle}"
+                                  Click="LanguageToggleButton_Click"/>
+                        <MenuItem x:Name="miMusicToggle"
+                                  Header="🔊 声音：开启"
+                                  Style="{StaticResource SettingsMenuItemStyle}"
+                                  Click="MusicToggleButton_Click"/>
+                        <Separator Margin="9,4" Background="#35506B"/>
+                        <MenuItem x:Name="miServerSettings"
+                                  Header="🖧 服务器设置"
+                                  Style="{StaticResource SettingsMenuItemStyle}"
+                                  Click="ServerSettingsMenuItem_Click"/>
+                    </ContextMenu>
+                </Button.ContextMenu>
+            </Button>
             <Button x:Name="btnWindowMinimize"
                     Content="—"
                     Style="{StaticResource WindowChromeButton}"
@@ -882,6 +956,86 @@
                                 Click="DialogYesButton_Click"/>
                     </StackPanel>
                 </Grid>
+            </Border>
+        </Grid>
+
+        <Grid x:Name="serverSettingsOverlay"
+              Grid.RowSpan="2"
+              Panel.ZIndex="80"
+              Visibility="Collapsed"
+              Background="#88000000">
+            <Border Width="350"
+                    Background="#121F2D"
+                    BorderBrush="#35506B"
+                    BorderThickness="1"
+                    CornerRadius="18"
+                    Padding="22"
+                    HorizontalAlignment="Center"
+                    VerticalAlignment="Center">
+                <Border.Effect>
+                    <DropShadowEffect Color="#000000"
+                                      BlurRadius="28"
+                                      ShadowDepth="8"
+                                      Opacity="0.48"/>
+                </Border.Effect>
+                <StackPanel>
+                    <TextBlock x:Name="txtServerSettingsTitle"
+                               Text="服务器设置"
+                               FontSize="17"
+                               FontWeight="Bold"
+                               Margin="0,0,0,7"/>
+                    <TextBlock x:Name="txtServerSettingsDescription"
+                               Text="修改服务器域名或 IP。设置将在下次启动时生效。"
+                               Style="{StaticResource CaptionText}"
+                               TextWrapping="Wrap"
+                               LineHeight="19"
+                               Margin="0,0,0,17"/>
+
+                    <TextBlock x:Name="txtServerEndpointLabel"
+                               Text="服务器地址（域名/IP:端口）"
+                               Style="{StaticResource FieldLabel}"/>
+                    <TextBox x:Name="txtServerEndpoint"
+                             Height="41"
+                             Margin="0,0,0,13"/>
+
+                    <TextBlock x:Name="txtServerUpdatePortLabel"
+                               Text="更新服务端口"
+                               Style="{StaticResource FieldLabel}"/>
+                    <TextBox x:Name="txtServerUpdatePort"
+                             Height="41"
+                             PreviewTextInput="ServerPort_PreviewTextInput"
+                             DataObject.Pasting="ServerPort_Pasting"/>
+
+                    <TextBlock x:Name="txtServerSettingsMessage"
+                               MinHeight="20"
+                               Foreground="#F6A7AF"
+                               FontSize="12"
+                               TextWrapping="Wrap"
+                               Margin="2,10,0,0"/>
+
+                    <Grid Margin="0,15,0,0">
+                        <Button x:Name="btnServerSettingsReset"
+                                HorizontalAlignment="Left"
+                                MinWidth="86"
+                                Content="恢复默认"
+                                Style="{StaticResource DialogSecondaryButton}"
+                                Click="ServerSettingsResetButton_Click"/>
+                        <StackPanel Orientation="Horizontal"
+                                    HorizontalAlignment="Right">
+                            <Button x:Name="btnServerSettingsCancel"
+                                    MinWidth="72"
+                                    Content="取消"
+                                    Style="{StaticResource DialogSecondaryButton}"
+                                    Click="ServerSettingsCancelButton_Click"
+                                    Margin="0,0,10,0"/>
+                            <Button x:Name="btnServerSettingsSave"
+                                    MinWidth="72"
+                                    Content="保存"
+                                    Style="{StaticResource DialogPrimaryButton}"
+                                    Click="ServerSettingsSaveButton_Click"/>
+                        </StackPanel>
+                    </Grid>
+                </StackPanel>
             </Border>
         </Grid>
 

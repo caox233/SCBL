@@ -279,14 +279,12 @@ public partial class MainWindow : Window
             txtConnectionStatusCaption.Text = L("连接状态", "Connection Status");
             UpdateCheckNetworkButtonAvailability();
             txtLaunchModeLabel.Text = L("启动模式", "Launch Mode");
-            btnLanguageToggle.Content = "中文 / EN";
-            btnGuide.Content = "?";
             UpdateMusicButton();
             RefreshServerStatusTextFromKind();
             RefreshLaunchButtonTextFromState();
             txtFooterNotice.Text = L(
-                "友情提示：本启动器基于开源项目 5th Echelon 优化制作。公网版会自动接入专用公网隧道，无需手动填写服务器地址。原项目地址：https://github.com/unixoide/5th-echelon\n国内联机交流群：709112052  等你来♂战！",
-                "Tip: This launcher is optimized from the open-source 5th Echelon project. The public edition automatically connects to a dedicated public tunnel, with no host mode or manual server address required. Original project: https://github.com/unixoide/5th-echelon\nCN co-op group: 709112052  Come fight ♂");
+                "友情提示：本启动器基于开源项目 5th Echelon 优化制作。公网版默认自动接入专用公网隧道，也可在右上角设置中修改服务器地址。原项目地址：https://github.com/unixoide/5th-echelon\n国内联机交流群：709112052  等你来♂战！",
+                "Tip: This launcher is optimized from the open-source 5th Echelon project. The public edition connects to its dedicated tunnel automatically; the server address can also be changed from Settings. Original project: https://github.com/unixoide/5th-echelon\nCN co-op group: 709112052  Come fight ♂");
             txtLauncherVersion.Text = L($"公网专版 v{GetDisplayVersion()}", $"Public Edition v{GetDisplayVersion()}");
             if (txtPlayersTitle != null)
                 txtPlayersTitle.Text = L("当前在线玩家", "Online Players");
@@ -2079,6 +2077,8 @@ public partial class MainWindow : Window
         _settings.Language = IsEnglish ? "zh-CN" : "en-US";
         _settingsService.Save(_settings);
         ApplyLocalization();
+        if (serverSettingsOverlay.Visibility == Visibility.Visible)
+            ApplyServerSettingsLocalization(saved: !btnServerSettingsSave.IsEnabled);
         if (guideOverlay.Visibility == Visibility.Visible)
             RefreshGuideStep();
     }
@@ -2094,8 +2094,7 @@ public partial class MainWindow : Window
 
     private void UpdateMusicButton()
     {
-        if (btnMusicToggle != null)
-            btnMusicToggle.Content = _settings.MusicEnabled ? "🔊" : "🔇";
+        UpdateSettingsMenuText();
     }
 
     private void PlayStartupMusicIfEnabled(bool forceReplay = false)
@@ -2188,7 +2187,7 @@ public partial class MainWindow : Window
             new() { Target = btnPlayers, TitleZh = "在线玩家", TitleEn = "Online Players", MessageZh = "这里会显示当前发现的玩家数量。点击后可以查看玩家 ID、虚拟 IP 和本机到对方的延迟。", MessageEn = "Shows the discovered player count. Click to view player ID, virtual IP and latency from this client." },
             new() { Target = cmbGameExecutable, TitleZh = "启动模式", TitleEn = "Launch Mode", MessageZh = "默认使用 DX9。需要时可以切换 DX11。", MessageEn = "DX9 is selected by default. Switch to DX11 when needed." },
             new() { Target = btnLaunch, TitleZh = "启动游戏", TitleEn = "Start Game", MessageZh = "确认绿灯后点击启动游戏。\n启动中按钮会显示正在启动中；点击后可确认是否重新启动。\n游戏运行后按钮会变成结束游戏。", MessageEn = "Click Launch when green.\nDuring startup it shows Starting; click it to confirm a restart.\nWhen running it becomes End Game." },
-            new() { Target = spTitleButtons, TitleZh = "右上角按钮", TitleEn = "Top-right Buttons", MessageZh = "中文 / EN：切换语言。\n🔊 / 🔇：开关背景音乐。\n?：重新查看本指引。", MessageEn = "中文 / EN: switch language.\n🔊 / 🔇: toggle background music.\n?: show this guide again." }
+            new() { Target = btnSettings, TitleZh = "设置菜单", TitleEn = "Settings Menu", MessageZh = "点击 ⚙ 可以打开使用指引、切换中英文、开关声音，以及修改服务器地址。", MessageEn = "Click ⚙ to open the guide, switch language, toggle sound, or change the server address." }
         };
     }
 

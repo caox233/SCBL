@@ -12,7 +12,7 @@ public sealed class LauncherSettings
     public string GameDirectory { get; set; } = "";
     public string GameExecutable { get; set; } = "Blacklist_game.exe";
 
-    // Hidden maintenance setting. PublicEndpoint accepts host:port and tcp://host:port.
+    // User-configurable in the Settings menu. Accepts a domain or IP with a tunnel port.
     public string PublicEndpoint { get; set; } = "";
     public string TunnelSecret { get; set; } = "";
     public string TunnelSecretProtected { get; set; } = "";

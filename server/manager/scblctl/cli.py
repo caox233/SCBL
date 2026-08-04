@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import getpass
 import json
 import os
 import sys
@@ -70,6 +71,28 @@ def build_parser() -> argparse.ArgumentParser:
     restart = service_commands.add_parser("restart", help="只重启指定组件")
     restart.add_argument("component")
     restart.set_defaults(handler=cmd_service_restart)
+
+    ddns = subcommands.add_parser("ddns", help="在脚本内管理 IPv6 DDNS")
+    ddns_commands = ddns.add_subparsers(dest="ddns_command", required=True)
+    ddns_install = ddns_commands.add_parser("install", help="安装或更新官方 DDNS-Go")
+    ddns_install.set_defaults(handler=cmd_ddns_install)
+    ddns_configure = ddns_commands.add_parser("configure", help="配置阿里云 A/AAAA 动态解析")
+    ddns_configure.add_argument("--domain")
+    ddns_configure.add_argument("--interface")
+    ddns_configure.add_argument("--access-key-id")
+    ddns_configure.add_argument(
+        "--enable-ipv4", action="store_true", help="同时更新 A 记录（默认关闭）"
+    )
+    ddns_configure.set_defaults(handler=cmd_ddns_configure)
+    ddns_start = ddns_commands.add_parser("start", help="启用并立即运行 DDNS")
+    ddns_start.set_defaults(handler=cmd_ddns_start)
+    ddns_restart = ddns_commands.add_parser("restart", help="立即重新检测并更新")
+    ddns_restart.set_defaults(handler=cmd_ddns_restart)
+    ddns_stop = ddns_commands.add_parser("stop", help="停止并禁用 DDNS")
+    ddns_stop.set_defaults(handler=cmd_ddns_stop)
+    ddns_status = ddns_commands.add_parser("status", help="查看 IPv6 与 AAAA 同步状态")
+    ddns_status.add_argument("--log", action="store_true")
+    ddns_status.set_defaults(handler=cmd_ddns_status)
 
     menu = subcommands.add_parser("menu", help="打开交互式管理菜单")
     menu.set_defaults(handler=cmd_menu)
@@ -202,6 +225,85 @@ def cmd_service_restart(args: argparse.Namespace) -> int:
     SystemdManager().restart(args.component)
     print(f"组件 {args.component} 已重启。")
     return 0
+
+
+def _ddns_manager(args: argparse.Namespace):
+    from .ddns import DdnsManager
+
+    return DdnsManager(load_config(_paths(args).config).ddns)
+
+
+def cmd_ddns_install(args: argparse.Namespace) -> int:
+    version = _ddns_manager(args).install()
+    print(f"DDNS-Go {version} 已通过官方 SHA256 校验并安装。")
+    return 0
+
+
+def cmd_ddns_configure(args: argparse.Namespace) -> int:
+    manager = _ddns_manager(args)
+    domain = (args.domain or input("AAAA 域名：")).strip()
+    interface = (args.interface or "").strip() or manager.detect_interface()
+    access_key_id = (args.access_key_id or input("阿里云 AccessKey ID：")).strip()
+    access_key_secret = getpass.getpass("阿里云 AccessKey Secret（输入不回显）：").strip()
+    address = manager.configure_alidns(
+        domain=domain,
+        access_key_id=access_key_id,
+        access_key_secret=access_key_secret,
+        interface=interface,
+        enable_ipv4=args.enable_ipv4,
+    )
+    mode = "A + AAAA" if args.enable_ipv4 else "仅 AAAA"
+    print(f"{mode} 配置已安全保存；{interface} 当前公网 IPv6：{address}")
+    print("凭据未写入 server.toml；请执行 SCBL ddns start 启用服务。")
+    return 0
+
+
+def cmd_ddns_start(args: argparse.Namespace) -> int:
+    paths = _paths(args)
+    config = load_config(paths.config)
+    from .ddns import DdnsManager
+
+    DdnsManager(config.ddns).enable()
+    config.ddns.enabled = True
+    save_config(config, paths.config)
+    print("DDNS 已启用并立即执行。")
+    return 0
+
+
+def cmd_ddns_restart(args: argparse.Namespace) -> int:
+    _ddns_manager(args).restart()
+    print("DDNS 已重新检测并执行更新。")
+    return 0
+
+
+def cmd_ddns_stop(args: argparse.Namespace) -> int:
+    paths = _paths(args)
+    config = load_config(paths.config)
+    from .ddns import DdnsManager
+
+    DdnsManager(config.ddns).stop()
+    config.ddns.enabled = False
+    save_config(config, paths.config)
+    print("DDNS 已停止并禁止开机启动；配置和凭据仍保留。")
+    return 0
+
+
+def cmd_ddns_status(args: argparse.Namespace) -> int:
+    manager = _ddns_manager(args)
+    status = manager.status()
+    print(f"程序：{'已安装' if status.installed else '未安装'}")
+    print(f"配置：{'已配置' if status.configured else '未配置'}")
+    print(f"服务：{status.active} / {status.enabled}")
+    print(f"域名：{status.domain or '-'}")
+    print(f"网卡：{status.interface or '-'}")
+    print(f"公网 IPv6：{status.local_ipv6 or '-'}")
+    print(f"DNS AAAA：{', '.join(status.dns_ipv6) or '-'}")
+    print(f"记录模式：{'A + AAAA' if status.ipv4_enabled else '仅 AAAA'}")
+    print(f"同步：{'一致' if status.synchronized else '尚未一致'}")
+    if args.log:
+        print("\n最近日志：")
+        print(manager.recent_log() or "（无日志）")
+    return 0 if status.synchronized and status.active == "active" else 1
 
 
 def cmd_menu(args: argparse.Namespace) -> int:

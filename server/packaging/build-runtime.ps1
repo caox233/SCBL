@@ -36,15 +36,15 @@ if ($WslListExitCode -ne 0 -or [string]::IsNullOrWhiteSpace($WslList)) {
     throw "No WSL2 Linux distro is installed. Run as administrator: wsl --install -d Ubuntu"
 }
 
-$RepositoryRootForWsl = (& wsl.exe -d $Distro -- wslpath -a $RepositoryRoot).Trim()
-if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($RepositoryRootForWsl)) {
-    throw "Could not convert the repository path for WSL: $RepositoryRoot"
+if ($RepositoryRoot -notmatch '^([A-Za-z]):\\(.*)$') {
+    throw "The repository must be on a Windows drive: $RepositoryRoot"
 }
+$DriveLetter = $Matches[1].ToLowerInvariant()
+$RelativePath = $Matches[2].Replace('\', '/')
+$RepositoryRootForWsl = "/mnt/$DriveLetter/$RelativePath"
 if ($RepositoryRootForWsl -notmatch '^/[A-Za-z0-9_./ -]+$') {
     throw "The WSL repository path contains unsupported characters: $RepositoryRootForWsl"
 }
-$QuotedRoot = "'" + $RepositoryRootForWsl + "'"
-
 if (-not $SkipToolchainSetup) {
     Write-Host "[SCBL] Preparing the WSL build environment on Windows..."
     Invoke-Wsl -Root -Command @'
@@ -66,49 +66,12 @@ rustup toolchain install nightly-2025-10-15 --profile minimal
 '@
 }
 
-$BuildCommand = @"
-set -euo pipefail
-source "`$HOME/.cargo/env"
-repo=$QuotedRoot
-build_root="`$(mktemp -d -t scbl-linux-build.XXXXXX)"
-download_root="`$(mktemp -d -t scbl-easytier.XXXXXX)"
-cleanup() { rm -rf "`$build_root" "`$download_root"; }
-trap cleanup EXIT
-
-export RUSTUP_TOOLCHAIN=nightly-2025-10-15
-export CARGO_TARGET_DIR="`$build_root/target"
-cd "`$repo"
-cargo build --locked --release --package dedicated_server
-dedicated="`$CARGO_TARGET_DIR/release/dedicated_server"
-file "`$dedicated" | grep -Fq 'ELF 64-bit'
-if ldd "`$dedicated" 2>&1 | grep -Fq 'not found'; then
-  echo 'Dedicated Server has unresolved shared-library dependencies:' >&2
-  ldd "`$dedicated" >&2
-  exit 1
-fi
-
-easytier_zip="`$download_root/easytier.zip"
-curl -fL --retry 3 --retry-all-errors --connect-timeout 10 --max-time 300 \
-  "https://github.com/EasyTier/EasyTier/releases/download/$EasyTierVersion/easytier-linux-x86_64-$EasyTierVersion.zip" \
-  -o "`$easytier_zip"
-unzip -q "`$easytier_zip" -d "`$download_root/extract"
-easytier_core="`$(find "`$download_root/extract" -type f -name easytier-core -print -quit)"
-easytier_cli="`$(find "`$download_root/extract" -type f -name easytier-cli -print -quit)"
-[[ -n "`$easytier_core" && -n "`$easytier_cli" ]]
-file "`$easytier_core" | grep -Fq 'ELF 64-bit'
-file "`$easytier_cli" | grep -Fq 'ELF 64-bit'
-
-output="`$repo/server/packaging/dist/SCBL-Server-Runtime-v$Version-linux-x86_64.tar.gz"
-bash "`$repo/server/packaging/build-runtime.sh" \
-  --output "`$output" \
-  --dedicated "`$dedicated" \
-  --easytier-core "`$easytier_core" \
-  --easytier-cli "`$easytier_cli"
-echo "SCBL_RUNTIME_OUTPUT=`$output"
-"@
-
 Write-Host "[SCBL] Building the Linux Dedicated Server and runtime package..."
-Invoke-Wsl -Command $BuildCommand
+$WslBuildScript = "$RepositoryRootForWsl/server/packaging/build-runtime-wsl.sh"
+& wsl.exe -d $Distro -u root -- bash $WslBuildScript $EasyTierVersion $Version
+if ($LASTEXITCODE -ne 0) {
+    throw "WSL build failed with exit code $LASTEXITCODE"
+}
 
 $Output = Join-Path $PSScriptRoot "dist\SCBL-Server-Runtime-v$Version-linux-x86_64.tar.gz"
 if (-not (Test-Path -LiteralPath $Output)) {

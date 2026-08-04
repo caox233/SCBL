@@ -8,6 +8,7 @@ release = Path("server/manager/scblctl/release.py").read_text(encoding="utf-8")
 provision = Path("server/manager/scblctl/provision.py").read_text(encoding="utf-8")
 config = Path("server/manager/scblctl/config.py").read_text(encoding="utf-8")
 windows_builder = Path("server/packaging/build-runtime.ps1").read_text(encoding="utf-8")
+wsl_builder = Path("server/packaging/build-runtime-wsl.sh").read_text(encoding="utf-8")
 
 assert "VERSION_SERVER_TOOL" in bootstrap
 assert "server-tool-v$VERSION/scblctl.pyz" in bootstrap
@@ -35,8 +36,9 @@ combined = "\n".join((bootstrap, wrapper, builder, release, provision, config))
 assert "scbl.env" not in combined
 assert "/opt/scbl-public" not in combined
 assert "migrate_legacy" not in combined
-assert "cargo build --locked --release --package dedicated_server" in windows_builder
-assert "ELF 64-bit" in windows_builder
-assert "SCBL-Server-Runtime-v$Version-linux-x86_64.tar.gz" in windows_builder
+assert "build-runtime-wsl.sh" in windows_builder
+assert "cargo build --locked --release --package dedicated_server" in wsl_builder
+assert "ELF 64-bit" in wsl_builder
+assert "SCBL-Server-Runtime-v$VERSION-linux-x86_64.tar.gz" in wsl_builder
 
 print("SCBL 2.0 clean-install, verified runtime and rollback routing checks passed")

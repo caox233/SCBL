@@ -94,25 +94,29 @@ def cmd_init(args: argparse.Namespace) -> int:
 def cmd_install(args: argparse.Namespace) -> int:
     import tempfile
 
-    from .provision import Provisioner
-    from .release import extract_runtime_archive
+    from .release import RuntimeManifest, extract_runtime_archive
 
     config = load_config(_paths(args).config)
-    provisioner = Provisioner()
-    if args.runtime_dir is not None:
-        manifest = provisioner.verify(args.runtime_dir)
+    if args.dry_run and args.runtime_dir is not None:
+        manifest = RuntimeManifest.load(args.runtime_dir)
+        manifest.verify(args.runtime_dir)
         print(f"运行时包校验通过：v{manifest.version}，{len(manifest.files)} 个文件")
-        if args.dry_run:
-            print("仅预检，未写入系统。")
-            return 0
-        target = provisioner.install(config, args.runtime_dir)
-    elif args.dry_run:
+        print("仅预检，未写入系统。")
+        return 0
+    if args.dry_run:
         with tempfile.TemporaryDirectory(prefix="scbl-runtime-check-") as temporary:
             package_dir = extract_runtime_archive(args.runtime_package, Path(temporary))
-            manifest = provisioner.verify(package_dir)
+            manifest = RuntimeManifest.load(package_dir)
+            manifest.verify(package_dir)
             print(f"运行时包校验通过：v{manifest.version}，{len(manifest.files)} 个文件")
             print("仅预检，未写入系统。")
             return 0
+
+    from .provision import Provisioner
+
+    provisioner = Provisioner()
+    if args.runtime_dir is not None:
+        target = provisioner.install(config, args.runtime_dir)
     else:
         target = provisioner.install_archive(config, args.runtime_package)
     print(f"SCBL 服务端安装完成：{target}")

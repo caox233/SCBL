@@ -4,6 +4,8 @@
 **/obj/
 **/publish/
 **/publish-single/
+!client/hooks/src/bin/
+!client/hooks/src/bin/hook-loader.rs
 **/publish-smoke*/
 *.user
 *.suo

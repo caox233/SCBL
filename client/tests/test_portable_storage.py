@@ -61,7 +61,9 @@ assert "BuildPrivateUpdateBaseUrl(_getUpdatePort())" in component_updates
 assert 'http://10.66.0.1:18080/' not in announcements
 assert 'http://10.66.0.1:18080/' not in component_updates
 assert ".GetAwaiter().GetResult()" not in component_updates
-assert "Stable component activation is disabled" in component_updates
+assert "Component already provided by full package" in component_updates
+assert "Stable component manifest check skipped; packaged bootstrap components remain active" in component_updates
+assert "EnsureCachedComponentAsync" in component_updates
 
 assert "AddPortRule(" not in firewall
 assert 'private const string ScblVirtualSubnet = "10.66.0.0/24"' in firewall

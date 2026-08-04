@@ -23,5 +23,6 @@ assert 'bash -n "$diagnostics_new"' in manager
 assert 'install -m 0755 "$diagnostics_new" "$MANAGER_DIR/scbl_server_diagnostics.sh"' in manager
 assert 'install -m 0755 "$diagnostics_new" /usr/local/bin/scbl-server-diagnostics' in manager
 assert 'scbl-server-diagnostics.command' in manager
-assert "菜单15" in release and "在线升级" in release
+assert "GitHub Actions" in release and "生产服务器不编译源码" in release
+assert "单组件支持 GitHub 在线下载" in release
 print(f"Server Tool {version} diagnostics installation and control-plane guarantees passed")

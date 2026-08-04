@@ -329,7 +329,15 @@ pub(crate) fn event_sender() -> mpsc::Sender<Event> {
 
 type FriendPresenceSnapshot = BTreeMap<String, (String, bool)>;
 
-fn update_friend_presence_snapshot(snapshot: &mut Option<FriendPresenceSnapshot>, friends: Vec<crate::api::Friend>) -> bool {
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum FriendSnapshotChange {
+    None,
+    Initial,
+    Roster,
+    Presence,
+}
+
+fn update_friend_presence_snapshot(snapshot: &mut Option<FriendPresenceSnapshot>, friends: Vec<crate::api::Friend>) -> FriendSnapshotChange {
     let next = friends
         .into_iter()
         .map(|friend| (friend.id, (friend.username, friend.is_online)))
@@ -337,9 +345,21 @@ fn update_friend_presence_snapshot(snapshot: &mut Option<FriendPresenceSnapshot>
     // The game's first GetFriendList call can race this background poll. Emit
     // one initial refresh so a player who came online during startup is not
     // missed, then emit only when the snapshot actually changes.
-    let changed = snapshot.as_ref().is_none_or(|current| current != &next);
+    let change = match snapshot.as_ref() {
+        None => FriendSnapshotChange::Initial,
+        Some(current) if current == &next => FriendSnapshotChange::None,
+        Some(current)
+            if current.len() != next.len()
+                || current
+                    .iter()
+                    .any(|(id, (username, _))| next.get(id).is_none_or(|(next_username, _)| next_username != username)) =>
+        {
+            FriendSnapshotChange::Roster
+        }
+        Some(_) => FriendSnapshotChange::Presence,
+    };
     *snapshot = Some(next);
-    changed
+    change
 }
 
 const PRIVATE_INVITE_REPLAY_DELAY: Duration = Duration::from_secs(5);
@@ -765,6 +785,8 @@ unsafe extern "cdecl" fn UPLAY_Startup(uplay_id: usize, game_version: usize, lan
                         let mut failures = 0;
                         let mut friend_presence = None;
                         let mut friend_poll_countdown = 0u8;
+                        let mut friend_roster_replay_countdown = None::<u8>;
+                        let mut friend_roster_replays_remaining = 0u8;
                         loop {
                             tokio::time::sleep(Duration::from_secs(1)).await;
                             let event: Option<std::result::Result<_, _>> = crate::api::event().await.map(|resp| resp.invite).transpose();
@@ -786,10 +808,20 @@ unsafe extern "cdecl" fn UPLAY_Startup(uplay_id: usize, game_version: usize, lan
                                 friend_poll_countdown = 1;
                                 match crate::api::list_friends_async().await {
                                     Ok(friends) => {
-                                        if update_friend_presence_snapshot(&mut friend_presence, friends) {
-                                            info!("FriendPresenceChanged event=FriendsFriendListUpdated");
+                                        let change = update_friend_presence_snapshot(&mut friend_presence, friends);
+                                        if change != FriendSnapshotChange::None {
+                                            info!("FriendSnapshotChanged change={change:?} event=FriendsFriendListUpdated");
                                             if game_event_tx.send(Event::FriendsFriendListUpdated).is_err() {
-                                                warn!("FriendPresenceChanged event queue is unavailable");
+                                                warn!("FriendSnapshotChanged event queue is unavailable");
+                                            }
+                                            // A newly registered account can appear while Uplay and the
+                                            // game's ShadowNet friend cache are still starting. The first
+                                            // event is then consumed correctly but too early to populate
+                                            // the visible friend roster. Replay roster changes after the
+                                            // surrounding game systems have finished initializing.
+                                            if matches!(change, FriendSnapshotChange::Initial | FriendSnapshotChange::Roster) {
+                                                friend_roster_replay_countdown = Some(5);
+                                                friend_roster_replays_remaining = 2;
                                             }
                                         }
                                     }
@@ -797,6 +829,23 @@ unsafe extern "cdecl" fn UPLAY_Startup(uplay_id: usize, game_version: usize, lan
                                 }
                             } else {
                                 friend_poll_countdown -= 1;
+                            }
+
+                            if let Some(countdown) = friend_roster_replay_countdown.as_mut() {
+                                if *countdown > 0 {
+                                    *countdown -= 1;
+                                } else {
+                                    info!("FriendRosterRefreshReplay event=FriendsFriendListUpdated remaining={friend_roster_replays_remaining}");
+                                    if game_event_tx.send(Event::FriendsFriendListUpdated).is_err() {
+                                        warn!("FriendRosterRefreshReplay event queue is unavailable");
+                                    }
+                                    friend_roster_replays_remaining = friend_roster_replays_remaining.saturating_sub(1);
+                                    if friend_roster_replays_remaining == 0 {
+                                        friend_roster_replay_countdown = None;
+                                    } else {
+                                        *countdown = 9;
+                                    }
+                                }
                             }
                         }
                     });
@@ -831,14 +880,24 @@ mod friend_presence_tests {
     #[test]
     fn initial_friend_snapshot_emits_a_synchronization_update() {
         let mut snapshot = None;
-        assert!(update_friend_presence_snapshot(&mut snapshot, vec![friend("test2", false)]));
+        assert_eq!(update_friend_presence_snapshot(&mut snapshot, vec![friend("test2", false)]), FriendSnapshotChange::Initial);
     }
 
     #[test]
     fn later_online_change_emits_one_update() {
         let mut snapshot = None;
-        assert!(update_friend_presence_snapshot(&mut snapshot, vec![friend("test2", false)]));
-        assert!(update_friend_presence_snapshot(&mut snapshot, vec![friend("test2", true)]));
-        assert!(!update_friend_presence_snapshot(&mut snapshot, vec![friend("test2", true)]));
+        assert_eq!(update_friend_presence_snapshot(&mut snapshot, vec![friend("test2", false)]), FriendSnapshotChange::Initial);
+        assert_eq!(update_friend_presence_snapshot(&mut snapshot, vec![friend("test2", true)]), FriendSnapshotChange::Presence);
+        assert_eq!(update_friend_presence_snapshot(&mut snapshot, vec![friend("test2", true)]), FriendSnapshotChange::None);
+    }
+
+    #[test]
+    fn newly_registered_friend_is_a_roster_change() {
+        let mut snapshot = None;
+        assert_eq!(update_friend_presence_snapshot(&mut snapshot, vec![friend("test2", true)]), FriendSnapshotChange::Initial);
+        assert_eq!(
+            update_friend_presence_snapshot(&mut snapshot, vec![friend("test2", true), friend("new-player", true)]),
+            FriendSnapshotChange::Roster
+        );
     }
 }

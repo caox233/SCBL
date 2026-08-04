@@ -38,7 +38,7 @@ public partial class MainWindow
             {
                 var startup = await _announcementService.GetStartupAnnouncementAsync();
                 if (startup != null)
-                    await ShowDismissibleAnnouncementAsync(startup, isStartup: true);
+                    await ShowStartupAnnouncementAsync(startup);
             }
             catch (Exception ex)
             {
@@ -168,12 +168,11 @@ public partial class MainWindow
     private void AnnouncementClip_SizeChanged(object sender, SizeChangedEventArgs e)
         => ResetAnnouncementScroll();
 
-    private async Task ShowDismissibleAnnouncementAsync(LauncherAnnouncement announcement, bool isStartup)
+    private async Task ShowStartupAnnouncementAsync(LauncherAnnouncement announcement)
     {
         if (announcement.ShowOnce)
         {
-            string dismissedId = isStartup ? _settings.DismissedStartupAnnouncementId : _settings.DismissedActiveAnnouncementId;
-            if (string.Equals(dismissedId, announcement.Id, StringComparison.OrdinalIgnoreCase))
+            if (string.Equals(_settings.DismissedStartupAnnouncementId, announcement.Id, StringComparison.OrdinalIgnoreCase))
                 return;
         }
 
@@ -187,10 +186,7 @@ public partial class MainWindow
 
         if (result == MessageBoxResult.Yes)
         {
-            if (isStartup)
-                _settings.DismissedStartupAnnouncementId = announcement.Id;
-            else
-                _settings.DismissedActiveAnnouncementId = announcement.Id;
+            _settings.DismissedStartupAnnouncementId = announcement.Id;
             _settingsService.Save(_settings);
         }
     }

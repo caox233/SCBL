@@ -128,8 +128,11 @@ public static class PublicTunnelConfig
         return $"http://{BuildEndpoint(GetEndpointHost(endpoint), port)}/";
     }
 
-    public static string PrivateUpdateBaseUrl
-        => $"http://{ServerVirtualIp}:{DefaultPublicUpdatePort}/";
+    public static string BuildPrivateUpdateBaseUrl(int updatePort)
+    {
+        int port = updatePort is > 0 and <= 65535 ? updatePort : DefaultPublicUpdatePort;
+        return $"http://{ServerVirtualIp}:{port}/";
+    }
 
     public static string NormalizeTunnelSecret(string? value)
     {

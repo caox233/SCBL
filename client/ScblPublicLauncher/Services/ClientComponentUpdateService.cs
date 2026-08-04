@@ -30,6 +30,12 @@ public sealed class ClientComponentUpdateService
         PropertyNameCaseInsensitive = true,
         WriteIndented = true
     };
+    private readonly Func<int> _getUpdatePort;
+
+    public ClientComponentUpdateService(Func<int>? getUpdatePort = null)
+    {
+        _getUpdatePort = getUpdatePort ?? (() => PublicTunnelConfig.DefaultPublicUpdatePort);
+    }
 
     private sealed record ComponentSpec(string FileName, string UpdateMode);
 
@@ -117,10 +123,10 @@ public sealed class ClientComponentUpdateService
         return client;
     }
 
-    private static Uri BuildManifestUri(string channel)
+    private Uri BuildManifestUri(string channel)
     {
         string normalized = channel.Equals("test", StringComparison.OrdinalIgnoreCase) ? "test" : "stable";
-        string baseUrl = $"http://{PublicTunnelConfig.ServerVirtualIp}:18080/";
+        string baseUrl = PublicTunnelConfig.BuildPrivateUpdateBaseUrl(_getUpdatePort());
         return new Uri(new Uri(baseUrl, UriKind.Absolute), $"components/channels/{normalized}/client_components_v2.json");
     }
 

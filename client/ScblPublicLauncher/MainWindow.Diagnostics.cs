@@ -1,10 +1,8 @@
 using SplinterCellCNLauncher.Services;
 using System;
 using System.Diagnostics;
-using System.Reflection;
 using System.Threading.Tasks;
 using System.Windows;
-using System.Windows.Input;
 
 namespace SplinterCellCNLauncher;
 
@@ -12,43 +10,12 @@ public partial class MainWindow
 {
     private bool _diagnosticPromptActive;
     private bool _diagnosticExportInProgress;
-    private int _versionDiagnosticClickCount;
-    private DateTime _lastVersionDiagnosticClickUtc = DateTime.MinValue;
 
-    private const int DiagnosticVersionClickThreshold = 3;
-    private const int DiagnosticVersionClickWindowMs = 2000;
-
-    private static string GetDisplayVersion()
+    private async void ExportDiagnosticsMenuItem_Click(object sender, RoutedEventArgs e)
     {
-        var assembly = Assembly.GetExecutingAssembly();
-        var informational = assembly
-            .GetCustomAttribute<AssemblyInformationalVersionAttribute>()
-            ?.InformationalVersion;
-        if (!string.IsNullOrWhiteSpace(informational))
-            return informational.Split('+')[0].Trim();
-
-        var version = assembly.GetName().Version;
-        if (version != null)
-            return $"{version.Major}.{version.Minor}.{Math.Max(0, version.Build)}";
-
-        return "0.0.0";
-    }
-
-    private async void LauncherVersion_MouseLeftButtonUp(object sender, MouseButtonEventArgs e)
-    {
+        settingsMenu.IsOpen = false;
         if (_diagnosticPromptActive || _diagnosticExportInProgress || _allowClose)
             return;
-
-        DateTime now = DateTime.UtcNow;
-        if ((now - _lastVersionDiagnosticClickUtc).TotalMilliseconds > DiagnosticVersionClickWindowMs)
-            _versionDiagnosticClickCount = 0;
-
-        _lastVersionDiagnosticClickUtc = now;
-        _versionDiagnosticClickCount++;
-        if (_versionDiagnosticClickCount < DiagnosticVersionClickThreshold)
-            return;
-
-        _versionDiagnosticClickCount = 0;
         _diagnosticPromptActive = true;
         try
         {

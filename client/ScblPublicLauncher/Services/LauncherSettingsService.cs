@@ -61,8 +61,6 @@ public sealed class LauncherSettingsService
             TunnelSecretProtected = CredentialProtectionService.Protect(effectiveSecret),
             EasyTierInstanceId = settings.EasyTierInstanceId,
             EasyTierNetworkName = settings.EasyTierNetworkName,
-            EasyTierLatencyFirst = settings.EasyTierLatencyFirst,
-            EasyTierEnableP2P = settings.EasyTierEnableP2P,
             EasyTierWssPort = settings.EasyTierWssPort,
             ForceGameVirtualAdapter = settings.ForceGameVirtualAdapter,
             SaveOverwritePromptHandled = settings.SaveOverwritePromptHandled,
@@ -74,7 +72,6 @@ public sealed class LauncherSettingsService
             LastServerVirtualIp = string.IsNullOrWhiteSpace(settings.LastServerVirtualIp) ? PublicTunnelConfig.ServerVirtualIp : settings.LastServerVirtualIp,
             LastTunnelConnectedAt = settings.LastTunnelConnectedAt,
             LastLatencyMs = settings.LastLatencyMs,
-            DismissedActiveAnnouncementId = settings.DismissedActiveAnnouncementId,
             DismissedStartupAnnouncementId = settings.DismissedStartupAnnouncementId
         });
 
@@ -143,10 +140,6 @@ public sealed class LauncherSettingsService
             settings.EasyTierNetworkName = PublicTunnelConfig.EasyTierNetworkName;
         if (!Guid.TryParse(settings.EasyTierInstanceId, out _))
             settings.EasyTierInstanceId = Guid.NewGuid().ToString("D");
-        // Production topology: clients proactively establish direct P2P links, do not
-        // become third-party data relays, and use the fixed server only when direct P2P fails.
-        settings.EasyTierEnableP2P = true;
-        settings.EasyTierLatencyFirst = false;
         // v1.0.2 reuses TCP 11010 for the fixed server WSS fallback. Migrate the
         // former default 10443 automatically while preserving deliberate custom ports.
         if (settings.EasyTierWssPort is <= 0 or > 65535 || settings.EasyTierWssPort == 10443)

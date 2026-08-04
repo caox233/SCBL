@@ -17,6 +17,9 @@ maintenance = (launcher / "Services/ClientStorageMaintenanceService.cs").read_te
 credentials = (launcher / "Services/CredentialProtectionService.cs").read_text(encoding="utf-8")
 main_window_xaml = (launcher / "MainWindow.xaml").read_text(encoding="utf-8")
 server_settings = (launcher / "MainWindow.Settings.cs").read_text(encoding="utf-8")
+saves_ui = (launcher / "MainWindow.Saves.cs").read_text(encoding="utf-8")
+announcements = (launcher / "Services/AnnouncementService.cs").read_text(encoding="utf-8")
+component_updates = (launcher / "Services/ClientComponentUpdateService.cs").read_text(encoding="utf-8")
 
 assert 'Path.Combine(ClientRootDirectory, "temp", MachineName)' in log_service
 assert 'Path.Combine(PersistentDataDirectory, "config")' in log_service
@@ -36,12 +39,23 @@ assert "SCBL 2.0 never accepts plaintext secrets" in credentials
 assert 'x:Name="btnSettings"' in main_window_xaml
 assert 'x:Name="miServerSettings"' in main_window_xaml
 assert 'x:Name="serverSettingsOverlay"' in main_window_xaml
+assert 'x:Name="miOverwriteSaves"' in main_window_xaml
+assert 'x:Name="miRepairNetwork"' in main_window_xaml
+assert 'x:Name="miExportDiagnostics"' in main_window_xaml
 assert 'x:Name="btnLanguageToggle"' not in main_window_xaml
 assert 'x:Name="btnMusicToggle"' not in main_window_xaml
 assert 'x:Name="btnGuide"' not in main_window_xaml
 assert "ServerSettingsValidator.TryValidate" in server_settings
 assert "_settings.PublicEndpoint = validated.PublicEndpoint" in server_settings
 assert "_settings.PublicUpdatePort = validated.UpdatePort" in server_settings
+assert "ScheduleLauncherRestartAfterExit" in server_settings
+assert "ShowTimedConfirmDialogAsync" in saves_ui
+assert "BackupExistingSaves" in saves_ui
+assert "DeployBaseSavesOverwrite" in saves_ui
+assert "BuildPrivateUpdateBaseUrl(_getUpdatePort())" in announcements
+assert "BuildPrivateUpdateBaseUrl(_getUpdatePort())" in component_updates
+assert 'http://10.66.0.1:18080/' not in announcements
+assert 'http://10.66.0.1:18080/' not in component_updates
 
 assert 'Path.Combine(gameDir, "scbl.toml")' in hook_writer
 assert "[User]" in hook_writer

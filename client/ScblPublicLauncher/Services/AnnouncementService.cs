@@ -15,9 +15,14 @@ namespace SplinterCellCNLauncher.Services;
 /// </summary>
 public sealed class AnnouncementService
 {
-    private const string BaseUrl = "http://10.66.0.1:18080/";
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
     private static readonly HttpClient Http = new() { Timeout = TimeSpan.FromSeconds(4) };
+    private readonly Func<int> _getUpdatePort;
+
+    public AnnouncementService(Func<int>? getUpdatePort = null)
+    {
+        _getUpdatePort = getUpdatePort ?? (() => PublicTunnelConfig.DefaultPublicUpdatePort);
+    }
 
     public async Task<LauncherAnnouncement?> GetActiveAnnouncementAsync(CancellationToken cancellationToken = default)
         => await GetAnnouncementAsync("active_announcement.json", cancellationToken).ConfigureAwait(false);
@@ -25,11 +30,12 @@ public sealed class AnnouncementService
     public async Task<LauncherAnnouncement?> GetStartupAnnouncementAsync(CancellationToken cancellationToken = default)
         => await GetAnnouncementAsync("startup_announcement.json", cancellationToken).ConfigureAwait(false);
 
-    private static async Task<LauncherAnnouncement?> GetAnnouncementAsync(string fileName, CancellationToken cancellationToken)
+    private async Task<LauncherAnnouncement?> GetAnnouncementAsync(string fileName, CancellationToken cancellationToken)
     {
         try
         {
-            using var response = await Http.GetAsync(BaseUrl + fileName, cancellationToken).ConfigureAwait(false);
+            string baseUrl = PublicTunnelConfig.BuildPrivateUpdateBaseUrl(_getUpdatePort());
+            using var response = await Http.GetAsync(baseUrl + fileName, cancellationToken).ConfigureAwait(false);
             if (!response.IsSuccessStatusCode)
                 return null;
 

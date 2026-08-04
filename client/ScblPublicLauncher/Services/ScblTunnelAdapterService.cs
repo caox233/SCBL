@@ -129,32 +129,6 @@ foreach ($a in $adapters) {
         }
     }
 
-    public void CleanupOnLauncherExitBestEffort()
-    {
-        // EasyTier normally owns adapter lifecycle. Only remove numbered stale duplicates;
-        // never remove the primary adapter during ordinary launcher shutdown.
-        try
-        {
-            string script = @"
-$ErrorActionPreference = 'SilentlyContinue'
-$adapters = @(Get-NetAdapter -Name 'SCBLEasyTier*' -ErrorAction SilentlyContinue | Sort-Object Name)
-foreach ($a in $adapters) {
-  if ($a.Name -eq 'SCBLEasyTier') {
-    Write-Output ('Preserving primary EasyTier adapter ' + $a.Name)
-    continue
-  }
-  Write-Output ('Removing duplicate EasyTier adapter ' + $a.Name + ' ' + $a.PnPDeviceID)
-  if ($a.PnPDeviceID) { pnputil /remove-device $a.PnPDeviceID | Out-Null }
-}
-";
-            RunPowerShell(script, "cleanup duplicate EasyTier adapters on exit");
-        }
-        catch (Exception ex)
-        {
-            LogService.Error($"EasyTier exit cleanup failed: {ex.Message}");
-        }
-    }
-
     public void FullRepairCleanupBestEffort()
     {
         try

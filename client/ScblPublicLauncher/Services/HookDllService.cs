@@ -19,7 +19,12 @@ public sealed class HookDllService
         "00000002.sav"
     ];
 
-    private readonly ClientComponentUpdateService _componentUpdateService = new();
+    private readonly ClientComponentUpdateService _componentUpdateService;
+
+    public HookDllService(Func<int>? getUpdatePort = null)
+    {
+        _componentUpdateService = new ClientComponentUpdateService(getUpdatePort);
+    }
 
     public void ValidateEmbeddedFiles()
     {

@@ -28,7 +28,7 @@ public partial class MainWindow : Window
     private readonly LauncherSettingsService _settingsService = new();
     private readonly AuthService _authService = new();
     private readonly GameLocatorService _gameLocatorService = new();
-    private readonly HookDllService _hookDllService = new();
+    private readonly HookDllService _hookDllService;
     private readonly HookConfigService _hookConfigService = new();
     private readonly SaveGameService _saveGameService = new();
     private readonly DxModeCompatibilityService _dxModeCompatibilityService = new();
@@ -40,7 +40,7 @@ public partial class MainWindow : Window
     private readonly ScblTunnelAdapterService _adapterService = new();
     private readonly LocalClientUpdateService _localUpdateService = new();
     private readonly RemoteClientUpdateService _remoteUpdateService = new();
-    private readonly AnnouncementService _announcementService = new();
+    private readonly AnnouncementService _announcementService;
     private readonly DiagnosticExportService _diagnosticExportService = new();
     private readonly UpdaterBootstrapService _updaterBootstrapService = new();
     private readonly WinDivertBootstrapService _winDivertBootstrapService = new();
@@ -67,8 +67,6 @@ public partial class MainWindow : Window
     private bool _networkReady;
     private bool _networkLifecycleStarted;
     private bool _networkShutdownStarted;
-    private DateTime _lastGreenStatusUtc = DateTime.MinValue;
-    private DateTime _lastYellowStatusUtc = DateTime.MinValue;
     private ServerStatusKind _serverStatusKind = ServerStatusKind.Unknown;
     private long? _lastServerLatencyMs;
     private string _lastConnectionTransport = "";
@@ -118,8 +116,6 @@ public partial class MainWindow : Window
 
     private const string PublicServerAddress = PublicTunnelConfig.ServerVirtualIp;
     private static readonly string LauncherVersion = GetDisplayVersion();
-    private const int GreenStatusHoldSeconds = 12;
-    private const int YellowStatusDebounceMs = 450;
 
 
     private enum ServerStatusKind
@@ -143,8 +139,6 @@ public partial class MainWindow : Window
         Server,
         GamePath,
         HookFiles,
-        Firewall,
-        GameStart,
         Account,
         General
     }
@@ -164,6 +158,8 @@ public partial class MainWindow : Window
         InitializeAnnouncementTicker();
         ForceEnglishInputForPlainTextBoxes();
         LoadSettingsToUi();
+        _hookDllService = new HookDllService(() => _settings.PublicUpdatePort);
+        _announcementService = new AnnouncementService(() => _settings.PublicUpdatePort);
         _networkOrchestrator = new NetworkOrchestrator(
             _tunnelService,
             _processRouterService,
@@ -259,8 +255,8 @@ public partial class MainWindow : Window
         => new(
             _settings.EasyTierInstanceId,
             _settings.EasyTierNetworkName,
-            _settings.EasyTierLatencyFirst,
-            _settings.EasyTierEnableP2P,
+            LatencyFirst: false,
+            EnableP2P: true,
             StableRelayMode: false,
             EnableUdpBroadcastRelay: true,
             ForceGameVirtualAdapter: _settings.ForceGameVirtualAdapter,
@@ -347,14 +343,8 @@ public partial class MainWindow : Window
         LogService.Info($"Public endpoint loaded: {GetConfiguredPublicEndpoint()}");
     }
 
-    private void SaveSettingsFromUi(bool saveCredentials)
+    private void SaveRuntimeSettings()
     {
-        if (saveCredentials)
-        {
-            _settings.Username = txtUsername.Text.Trim();
-            _settings.Password = txtPassword.Password;
-        }
-
         _settings.GameDirectory = _gameDir;
         _settings.GameExecutable = GetSelectedGameExecutable();
         _settings.LastAssignedVirtualIp = _assignedIp;
@@ -368,13 +358,7 @@ public partial class MainWindow : Window
     {
         _settings.Username = username.Trim();
         _settings.Password = password;
-        _settings.GameDirectory = _gameDir;
-        _settings.GameExecutable = GetSelectedGameExecutable();
-        _settings.LastAssignedVirtualIp = _assignedIp;
-        _settings.LastServerVirtualIp = PublicTunnelConfig.ServerVirtualIp;
-        _settings.PublicEndpoint = GetConfiguredPublicEndpoint();
-        _settings.TunnelSecret = GetConfiguredTunnelSecret();
-        _settingsService.Save(_settings);
+        SaveRuntimeSettings();
         LogService.Info("Login credentials saved for current Windows user.");
     }
 
@@ -592,55 +576,7 @@ public partial class MainWindow : Window
     }
 
     private async Task HandleFirstRunSaveOverwritePromptAsync()
-    {
-        if (_settings.SaveOverwritePromptHandled)
-            return;
-
-        try
-        {
-            _settings.SaveOverwritePromptHandled = true;
-            _settingsService.Save(_settings);
-
-            if (!_saveGameService.HasExistingSaves())
-            {
-                LogService.Info("First-run save overwrite prompt handled: no existing saves found.");
-                return;
-            }
-
-            var first = await ShowTimedConfirmDialogAsync(
-                title: L("检测到已有本地存档", "Existing Saves Detected"),
-                message: L(
-                    "如果继续，当前存档可能会被启动器专用存档替换。\n启动器会先自动备份原存档。\n\n是否继续？",
-                    "If you continue, your current saves may be replaced by launcher saves.\nA backup will be created first.\n\nContinue?"),
-                yesText: L("继续", "Continue"),
-                noText: L("取消", "Cancel"),
-                seconds: 5);
-
-            if (first != MessageBoxResult.Yes)
-                return;
-
-            var second = await ShowTimedConfirmDialogAsync(
-                title: L("再次确认覆盖存档", "Confirm Save Overwrite Again"),
-                message: L(
-                    "再次确认：继续后会替换当前本地存档，并自动备份原存档。",
-                    "Confirm again: continuing will replace current local saves after creating a backup."),
-                yesText: L("继续", "Continue"),
-                noText: L("取消", "Cancel"),
-                seconds: 5);
-
-            if (second != MessageBoxResult.Yes)
-                return;
-
-            string backupDir = _saveGameService.BackupExistingSaves(GetLauncherBaseDirectory());
-            _saveGameService.DeployBaseSavesOverwrite();
-            await ShowInfoDialogAsync(L("存档已覆盖", "Saves Overwritten"), L("已写入启动器内置基础全解锁存档。\n\n原存档已备份到：\n", "Built-in saves have been deployed.\n\nBackup folder:\n") + backupDir);
-        }
-        catch (Exception ex)
-        {
-            LogService.Error($"First-run save overwrite prompt failed: {ex}");
-            await ShowInfoDialogAsync(L("存档检查失败", "Save Check Failed"), ex.Message);
-        }
-    }
+        => await ConfirmAndOverwriteFullUnlockSavesAsync(firstRun: true);
 
     private async void CheckNetworkButton_Click(object sender, RoutedEventArgs e)
     {
@@ -765,7 +701,7 @@ public partial class MainWindow : Window
             if (string.IsNullOrWhiteSpace(password))
                 throw new Exception(L("请先填写密码。", "Please enter your password."));
 
-            SaveSettingsFromUi(saveCredentials: false);
+            SaveRuntimeSettings();
             EnsureGameDirectoryReady();
             string selectedExecutable = GetSelectedGameExecutable();
             _gameLocatorService.ValidateGameDirectory(_gameDir, selectedExecutable);
@@ -1487,28 +1423,7 @@ public partial class MainWindow : Window
         if (_networkShutdownStarted)
             return;
 
-        bool isYellow = kind == ServerStatusKind.NetworkCreating || kind == ServerStatusKind.TunnelConnecting || kind == ServerStatusKind.ServerConnecting || kind == ServerStatusKind.TunnelReconnecting;
-        if (isYellow)
-        {
-            // 绿色成功状态保持一小段时间，后台维护或瞬时检测不能轻易把绿灯改回黄灯。
-            if (_serverStatusKind == ServerStatusKind.Normal && (DateTime.UtcNow - _lastGreenStatusUtc).TotalSeconds < GreenStatusHoldSeconds)
-            {
-                LogService.Info($"Network status debounce: keep green, suppress yellow={kind}");
-                return;
-            }
-
-            // 黄灯之间切换做短防抖，避免“网络创建中/隧道连接中/服务器连接中”快速来回跳。
-            if ((DateTime.UtcNow - _lastYellowStatusUtc).TotalMilliseconds < YellowStatusDebounceMs && _serverStatusKind != ServerStatusKind.Unknown)
-            {
-                LogService.Info($"Network status debounce: suppress rapid yellow transition {_serverStatusKind}->{kind}");
-                return;
-            }
-            _lastYellowStatusUtc = DateTime.UtcNow;
-        }
-
         _serverStatusKind = kind;
-        if (kind == ServerStatusKind.Normal)
-            _lastGreenStatusUtc = DateTime.UtcNow;
 
         serverStatusLight.Fill = brush;
         string display = string.IsNullOrWhiteSpace(text) ? FormatServerStatusText(kind) : text;
@@ -2175,302 +2090,6 @@ public partial class MainWindow : Window
         catch { }
     }
 
-    private void GuideButton_Click(object sender, RoutedEventArgs e) => ShowGuide(markCompletedOnClose: false);
-
-    private void BuildGuideSteps()
-    {
-        _guideSteps = new List<GuideStep>
-        {
-            new() { Target = txtUsername, TitleZh = "填写账号密码", TitleEn = "Account Login", MessageZh = "输入你的联机账号和密码。\n账号不存在会自动注册。\n账号已存在请使用原密码。", MessageEn = "Enter your online username and password.\nNew accounts are registered automatically.\nExisting accounts must use the previous password." },
-            new() { Target = bdStatusPanel, TitleZh = "公网连接状态", TitleEn = "Public Connection", MessageZh = "绿灯：连接成功，并显示延迟及 TCP / UDP / UDP中继模式。\n黄灯：网络准备、连接或重连中。\n红灯：当前阶段失败。", MessageEn = "Green: connected, with latency and TCP / UDP / UDP Relay mode.\nYellow: preparing, connecting, or reconnecting.\nRed: the current stage failed." },
-            new() { Target = btnCheckNetwork, TitleZh = "检测网络", TitleEn = "Check Network", MessageZh = "点击后启动器会自动检查当前网络是否可以正常联机。", MessageEn = "The launcher checks whether online play is available." },
-            new() { Target = btnPlayers, TitleZh = "在线玩家", TitleEn = "Online Players", MessageZh = "这里会显示当前发现的玩家数量。点击后可以查看玩家 ID、虚拟 IP 和本机到对方的延迟。", MessageEn = "Shows the discovered player count. Click to view player ID, virtual IP and latency from this client." },
-            new() { Target = cmbGameExecutable, TitleZh = "启动模式", TitleEn = "Launch Mode", MessageZh = "默认使用 DX9。需要时可以切换 DX11。", MessageEn = "DX9 is selected by default. Switch to DX11 when needed." },
-            new() { Target = btnLaunch, TitleZh = "启动游戏", TitleEn = "Start Game", MessageZh = "确认绿灯后点击启动游戏。\n启动中按钮会显示正在启动中；点击后可确认是否重新启动。\n游戏运行后按钮会变成结束游戏。", MessageEn = "Click Launch when green.\nDuring startup it shows Starting; click it to confirm a restart.\nWhen running it becomes End Game." },
-            new() { Target = btnSettings, TitleZh = "设置菜单", TitleEn = "Settings Menu", MessageZh = "点击 ⚙ 可以打开使用指引、切换中英文、开关声音，以及修改服务器地址。", MessageEn = "Click ⚙ to open the guide, switch language, toggle sound, or change the server address." }
-        };
-    }
-
-    private void ShowGuide(bool markCompletedOnClose)
-    {
-        BuildGuideSteps();
-        if (_guideSteps.Count == 0)
-            return;
-        guideOverlay.Tag = markCompletedOnClose;
-        _guideIndex = 0;
-        guideOverlay.Visibility = Visibility.Visible;
-        RefreshGuideStep();
-    }
-
-    private void RefreshGuideStep()
-    {
-        if (_guideSteps.Count == 0 || guideOverlay.Visibility != Visibility.Visible)
-            return;
-        _guideIndex = Math.Max(0, Math.Min(_guideIndex, _guideSteps.Count - 1));
-        var step = _guideSteps[_guideIndex];
-        txtGuideStep.Text = $"{_guideIndex + 1} / {_guideSteps.Count}";
-        txtGuideTitle.Text = IsEnglish ? step.TitleEn : step.TitleZh;
-        txtGuideMessage.Text = IsEnglish ? step.MessageEn : step.MessageZh;
-        btnGuideSkip.Content = L("跳过", "Skip");
-        btnGuidePrev.Content = L("上一步", "Back");
-        btnGuideNext.Content = _guideIndex >= _guideSteps.Count - 1 ? L("完成", "Done") : L("下一步", "Next");
-        btnGuidePrev.IsEnabled = _guideIndex > 0;
-        PositionGuideVisuals(step.Target);
-    }
-
-    private void PositionGuideVisuals(FrameworkElement target)
-    {
-        try
-        {
-            target.UpdateLayout();
-            rootGrid.UpdateLayout();
-            double windowWidth = rootGrid.ActualWidth > 0 ? rootGrid.ActualWidth : ActualWidth;
-            double windowHeight = rootGrid.ActualHeight > 0 ? rootGrid.ActualHeight : ActualHeight;
-            Point topLeft = target.TranslatePoint(new Point(0, 0), rootGrid);
-            double pad = 8;
-            double highlightLeft = Clamp(topLeft.X - pad, 10, Math.Max(10, windowWidth - 20));
-            double highlightTop = Clamp(topLeft.Y - pad, 10, Math.Max(10, windowHeight - 20));
-            double highlightWidth = Math.Min(Math.Max(40, target.ActualWidth + pad * 2), Math.Max(40, windowWidth - highlightLeft - 10));
-            double highlightHeight = Math.Min(Math.Max(28, target.ActualHeight + pad * 2), Math.Max(28, windowHeight - highlightTop - 10));
-            Canvas.SetLeft(guideHighlight, highlightLeft);
-            Canvas.SetTop(guideHighlight, highlightTop);
-            guideHighlight.Width = highlightWidth;
-            guideHighlight.Height = highlightHeight;
-
-            double cardWidth = Math.Min(330, Math.Max(260, windowWidth - 24));
-            guideCard.Width = cardWidth;
-            guideCard.Measure(new Size(cardWidth, double.PositiveInfinity));
-            double cardHeight = Math.Min(guideCard.DesiredSize.Height > 0 ? guideCard.DesiredSize.Height : 220, Math.Max(190, windowHeight - 32));
-            double left = Clamp(highlightLeft + highlightWidth / 2 - cardWidth / 2, 14, Math.Max(14, windowWidth - cardWidth - 14));
-            double belowTop = highlightTop + highlightHeight + 10;
-            double aboveTop = highlightTop - cardHeight - 10;
-            bool below = belowTop + cardHeight <= windowHeight - 14;
-            double top = below ? belowTop : aboveTop >= 14 ? aboveTop : Clamp(highlightTop + highlightHeight / 2 - cardHeight / 2, 14, Math.Max(14, windowHeight - cardHeight - 14));
-            Canvas.SetLeft(guideCard, left);
-            Canvas.SetTop(guideCard, top);
-            guideArrow.Text = below ? "▲" : "▼";
-            Canvas.SetLeft(guideArrow, Clamp(highlightLeft + highlightWidth / 2 - 8, left + 10, Math.Max(left + 10, left + cardWidth - 26)));
-            Canvas.SetTop(guideArrow, below ? top - 19 : top + cardHeight - 2);
-        }
-        catch (Exception ex)
-        {
-            LogService.Error($"PositionGuideVisuals failed: {ex.Message}");
-        }
-    }
-
-    private static double Clamp(double value, double min, double max)
-    {
-        if (max < min) return min;
-        if (value < min) return min;
-        return value > max ? max : value;
-    }
-
-    private void GuideNextButton_Click(object sender, RoutedEventArgs e)
-    {
-        if (_guideIndex >= _guideSteps.Count - 1) { CloseGuide(); return; }
-        _guideIndex++;
-        RefreshGuideStep();
-    }
-
-    private void GuidePrevButton_Click(object sender, RoutedEventArgs e)
-    {
-        if (_guideIndex <= 0) return;
-        _guideIndex--;
-        RefreshGuideStep();
-    }
-
-    private void GuideSkipButton_Click(object sender, RoutedEventArgs e) => CloseGuide();
-
-    private void CloseGuide()
-    {
-        bool markCompleted = guideOverlay.Tag is bool b && b;
-        guideOverlay.Visibility = Visibility.Collapsed;
-        if (markCompleted && !_settings.GuideCompleted)
-        {
-            _settings.GuideCompleted = true;
-            _settingsService.Save(_settings);
-        }
-    }
-
-    private async Task ShowNetworkFailureDialogAsync(NetworkReadyResult result)
-    {
-        FriendlyErrorKind kind = result.FailureStage switch
-        {
-            NetworkFailureStage.Network => FriendlyErrorKind.Tunnel,
-            NetworkFailureStage.Tunnel => FriendlyErrorKind.Tunnel,
-            NetworkFailureStage.Server => FriendlyErrorKind.Server,
-            _ => FriendlyErrorKind.General
-        };
-
-        string stage = result.FailureStage switch
-        {
-            NetworkFailureStage.Network => L("网络创建阶段", "Network preparation"),
-            NetworkFailureStage.Tunnel => L("隧道连接阶段", "Tunnel connection"),
-            NetworkFailureStage.Server => L("服务器连接阶段", "Server connection"),
-            _ => L("网络检测阶段", "Network check")
-        };
-
-        string configuredEndpoint = GetConfiguredPublicEndpoint();
-        string advice = result.FailureStage switch
-        {
-            NetworkFailureStage.Network => L("1. 以管理员身份运行启动器；\n2. 检查杀毒软件是否拦截 EasyTier/SCBLEasyTier；\n3. 如反复失败，请在服务端脚本执行修复防火墙和转发规则。",
-                                      "1. Run the launcher as administrator;\n2. Check whether antivirus blocks EasyTier/SCBLEasyTier;\n3. If it keeps failing, run server firewall/forwarding repair."),
-            NetworkFailureStage.Tunnel => L($"1. 检查本机网络是否正常；\n2. 确认 {configuredEndpoint} 可以访问；\n3. 允许 easytier-core.exe 通过防火墙/杀毒软件。",
-                                     $"1. Check your internet connection;\n2. Confirm {configuredEndpoint} is reachable;\n3. Allow easytier-core.exe through firewall/antivirus."),
-            NetworkFailureStage.Server => L("1. 等待几秒后重新检测；\n2. 确认服务端 scbl-dedicated.service / scbl-update.service 正常；\n3. 在服务端脚本中执行检查服务状态和修复防火墙。",
-                                     "1. Wait a few seconds and check again;\n2. Confirm scbl-dedicated.service / scbl-update.service are running;\n3. Use the server script to check status and repair firewall."),
-            _ => L("请稍后重试；如果反复失败，请把日志发给维护人员。", "Try again later. If it keeps failing, send the logs to the maintainer.")
-        };
-
-        await ShowFriendlyErrorDialogAsync(kind, $"{L("失败过程", "Failed stage")}：{stage}\n\n{L("处理建议", "Suggestion")}：\n{advice}\n\n{result.Message}");
-    }
-
-    private FriendlyErrorKind ClassifyLaunchError(Exception ex)
-    {
-        string m = ex.ToString();
-        if (m.Contains("公网隧道", StringComparison.OrdinalIgnoreCase) ||
-            m.Contains("Public tunnel", StringComparison.OrdinalIgnoreCase) ||
-            m.Contains("assigned", StringComparison.OrdinalIgnoreCase) ||
-            m.Contains("SCBLEasyTier", StringComparison.OrdinalIgnoreCase))
-            return FriendlyErrorKind.Tunnel;
-        if (m.Contains("50051", StringComparison.OrdinalIgnoreCase) ||
-            m.Contains("gRPC", StringComparison.OrdinalIgnoreCase) ||
-            m.Contains("无法连接服务器", StringComparison.OrdinalIgnoreCase) ||
-            m.Contains("连接服务器超时", StringComparison.OrdinalIgnoreCase))
-            return FriendlyErrorKind.Server;
-        if (m.Contains("游戏目录", StringComparison.OrdinalIgnoreCase) ||
-            m.Contains("Blacklist", StringComparison.OrdinalIgnoreCase) && m.Contains("not", StringComparison.OrdinalIgnoreCase))
-            return FriendlyErrorKind.GamePath;
-        if (m.Contains("uplay_r1_loader", StringComparison.OrdinalIgnoreCase) ||
-            m.Contains("scbl.toml", StringComparison.OrdinalIgnoreCase) ||
-            m.Contains("写入", StringComparison.OrdinalIgnoreCase))
-            return FriendlyErrorKind.HookFiles;
-        if (m.Contains("密码", StringComparison.OrdinalIgnoreCase) ||
-            m.Contains("账号", StringComparison.OrdinalIgnoreCase) ||
-            m.Contains("password", StringComparison.OrdinalIgnoreCase) ||
-            m.Contains("account", StringComparison.OrdinalIgnoreCase))
-            return FriendlyErrorKind.Account;
-        return FriendlyErrorKind.General;
-    }
-
-    private async Task ShowFriendlyErrorDialogAsync(FriendlyErrorKind kind, Exception ex, string? extraDetails = null)
-        => await ShowFriendlyErrorDialogAsync(kind, ex.ToString() + (string.IsNullOrWhiteSpace(extraDetails) ? "" : "\n" + extraDetails));
-
-    private async Task ShowFriendlyErrorDialogAsync(FriendlyErrorKind kind, string technicalDetails)
-    {
-        LogService.Error($"Friendly error [{kind}]: {technicalDetails}");
-        var (title, message) = BuildFriendlyErrorMessage(kind);
-        await ShowInfoDialogAsync(title, message + L("\n\n详细错误已写入日志。", "\n\nDetailed error has been written to the log."));
-    }
-
-    private (string Title, string Message) BuildFriendlyErrorMessage(FriendlyErrorKind kind)
-    {
-        return kind switch
-        {
-            FriendlyErrorKind.Tunnel => (
-                L("隧道连接失败", "Tunnel Connection Failed"),
-                L("失败过程：隧道连接中。\n\n解决方法：\n1. 检查本机网络是否正常；\n2. 允许启动器、easytier-core.exe、scbl-process-router.exe 通过防火墙/杀毒软件；\n3. 重新打开启动器再试。",
-                  "Stage: connecting tunnel.\n\nFixes:\n1. Check your local network;\n2. Allow the launcher, easytier-core.exe and scbl-process-router.exe through firewall/antivirus;\n3. Reopen the launcher and try again.")),
-            FriendlyErrorKind.Server => (
-                L("服务端通信异常", "Server Communication Error"),
-                L("失败过程：服务器连接中。\n\n解决方法：\n1. 等待几秒后重新检测；\n2. 如果一直失败，请在服务端检查 scbl-dedicated.service、scbl-update.service 是否正常；\n3. 确认服务端防火墙和转发规则已修复。",
-                  "Stage: connecting server.\n\nFixes:\n1. Wait a few seconds and check again;\n2. If it keeps failing, check scbl-dedicated.service and scbl-update.service on the server;\n3. Make sure firewall and forwarding rules are repaired.")),
-            FriendlyErrorKind.GamePath => (
-                L("游戏目录不正确", "Invalid Game Folder"),
-                L("启动器没有找到正确的游戏文件。\n\n请选择游戏目录下的：\nTom Clancy's Splinter Cell Blacklist\\src\\SYSTEM",
-                  "The launcher could not find the correct game files.\n\nPlease select the folder:\nTom Clancy's Splinter Cell Blacklist\\src\\SYSTEM")),
-            FriendlyErrorKind.HookFiles => (
-                L("游戏文件写入失败", "Game File Write Failed"),
-                L("启动器无法写入联机所需文件。\n\n请关闭游戏后重试。\n如果仍然失败，请检查杀毒软件是否拦截启动器。",
-                  "The launcher could not write files required for online play.\n\nClose the game and try again.\nIf it still fails, check whether antivirus software is blocking the launcher.")),
-            FriendlyErrorKind.Firewall => (
-                L("防火墙设置异常", "Firewall Setup Warning"),
-                L("Windows 防火墙规则设置不完整。\n\n启动器会继续尝试运行。\n如果无法联机，请允许启动器和游戏通过 Windows 防火墙。",
-                  "Windows Firewall rules may be incomplete.\n\nThe launcher will keep trying.\nIf online play fails, allow the launcher and game through Windows Firewall.")),
-            FriendlyErrorKind.GameStart => (
-                L("游戏启动失败", "Game Launch Failed"),
-                L("游戏没有正常启动。\n\n请确认游戏未被杀毒软件拦截。\n也可以尝试切换 DX9 / DX11 后重新启动。",
-                  "The game did not start correctly.\n\nMake sure it is not blocked by antivirus software.\nYou can also try switching DX9 / DX11 and launching again.")),
-            FriendlyErrorKind.Account => (
-                L("账号或密码异常", "Account Error"),
-                L("账号登录失败。\n\n如果账号已存在，请使用之前设置的密码。\n如果是新账号，启动器会自动注册。",
-                  "Account login failed.\n\nIf the account already exists, use the previous password.\nNew accounts are registered automatically.")),
-            _ => (
-                L("操作失败", "Operation Failed"),
-                L("启动器执行操作时遇到问题。\n\n请稍后重试；如果反复失败，请把日志发给维护人员。",
-                  "The launcher encountered a problem.\n\nTry again later. If it keeps failing, send the log to the maintainer."))
-        };
-    }
-
-    private async Task<MessageBoxResult> ShowInfoDialogAsync(string title, string message)
-    {
-        return await ShowDialogAsync(title, message, L("确定", "OK"), null);
-    }
-
-    private async Task<MessageBoxResult> ShowInfoDialogAsync(string title, string message, string okText)
-    {
-        return await ShowDialogAsync(title, message, okText, null);
-    }
-
-    private async Task<MessageBoxResult> ShowConfirmDialogAsync(string title, string message, string yesText, string noText)
-    {
-        return await ShowDialogAsync(title, message, yesText, noText);
-    }
-
-    private async Task<MessageBoxResult> ShowTimedConfirmDialogAsync(string title, string message, string yesText, string noText, int seconds)
-    {
-        btnDialogYes.IsEnabled = false;
-        var task = ShowDialogAsync(title, message, $"{yesText} ({seconds})", noText);
-        for (int i = seconds - 1; i >= 0; i--)
-        {
-            await Task.Delay(1000);
-            if (dialogOverlay.Visibility != Visibility.Visible) break;
-            btnDialogYes.Content = i <= 0 ? yesText : $"{yesText} ({i})";
-        }
-        btnDialogYes.IsEnabled = true;
-        return await task;
-    }
-
-    private string CompactDialogText(string value, int maxChars)
-    {
-        if (string.IsNullOrWhiteSpace(value))
-            return "";
-        string normalized = value.Replace("\r\n", "\n").Replace("\r", "\n").Trim();
-        if (normalized.Length <= maxChars)
-            return normalized;
-        LogService.Error("Dialog text was truncated for UI display. Full text:\n" + normalized);
-        return normalized[..Math.Max(0, maxChars)] + L("\n……\n详细内容已写入日志。", "\n...\nFull details have been written to the log.");
-    }
-
-    private Task<MessageBoxResult> ShowDialogAsync(string title, string message, string yesText, string? noText)
-    {
-        if (_dialogTcs != null)
-            _dialogTcs.TrySetResult(MessageBoxResult.None);
-        _dialogTcs = new TaskCompletionSource<MessageBoxResult>();
-        txtDialogTitle.Text = CompactDialogText(title, 80);
-        txtDialogMessage.Text = CompactDialogText(message, 520);
-        btnDialogYes.Content = yesText;
-        btnDialogNo.Content = noText ?? "";
-        btnDialogNo.Visibility = string.IsNullOrWhiteSpace(noText) ? Visibility.Collapsed : Visibility.Visible;
-        btnDialogYes.IsEnabled = true;
-        dialogOverlay.Visibility = Visibility.Visible;
-        return _dialogTcs.Task;
-    }
-
-    private void DialogYesButton_Click(object sender, RoutedEventArgs e)
-    {
-        dialogOverlay.Visibility = Visibility.Collapsed;
-        _dialogTcs?.TrySetResult(MessageBoxResult.Yes);
-        _dialogTcs = null;
-    }
-
-    private void DialogNoButton_Click(object sender, RoutedEventArgs e)
-    {
-        dialogOverlay.Visibility = Visibility.Collapsed;
-        _dialogTcs?.TrySetResult(MessageBoxResult.No);
-        _dialogTcs = null;
-    }
-
     private void ForceEnglishInputForPlainTextBoxes()
     {
         InputMethod.SetIsInputMethodEnabled(txtUsername, false);
@@ -2636,6 +2255,21 @@ public partial class MainWindow : Window
         if (errors.Count > 0)
             throw new Exception("scbl.toml 写入后校验失败，已取消启动。\n\n" + string.Join("\n", errors));
         LogService.Info($"scbl.toml read-back validation succeeded: {path}");
+    }
+
+    private static string GetDisplayVersion()
+    {
+        var assembly = Assembly.GetExecutingAssembly();
+        var informational = assembly
+            .GetCustomAttribute<AssemblyInformationalVersionAttribute>()
+            ?.InformationalVersion;
+        if (!string.IsNullOrWhiteSpace(informational))
+            return informational.Split('+')[0].Trim();
+
+        var version = assembly.GetName().Version;
+        return version == null
+            ? "0.0.0"
+            : $"{version.Major}.{version.Minor}.{Math.Max(0, version.Build)}";
     }
 
     private static Dictionary<string, string> ReadScblTomlValues(string path)

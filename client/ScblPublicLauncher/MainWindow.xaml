@@ -633,6 +633,19 @@
                                   Header="🖧 服务器设置"
                                   Style="{StaticResource SettingsMenuItemStyle}"
                                   Click="ServerSettingsMenuItem_Click"/>
+                        <Separator Margin="9,4" Background="#35506B"/>
+                        <MenuItem x:Name="miOverwriteSaves"
+                                  Header="💾 覆盖全解锁存档"
+                                  Style="{StaticResource SettingsMenuItemStyle}"
+                                  Click="OverwriteSavesMenuItem_Click"/>
+                        <MenuItem x:Name="miRepairNetwork"
+                                  Header="🛠 修复网络"
+                                  Style="{StaticResource SettingsMenuItemStyle}"
+                                  Click="RepairNetworkMenuItem_Click"/>
+                        <MenuItem x:Name="miExportDiagnostics"
+                                  Header="📦 导出诊断信息"
+                                  Style="{StaticResource SettingsMenuItemStyle}"
+                                  Click="ExportDiagnosticsMenuItem_Click"/>
                     </ContextMenu>
                 </Button.ContextMenu>
             </Button>
@@ -797,7 +810,6 @@
                    Foreground="#70869C"
                    FontSize="10"
                    FontWeight="SemiBold"
-                   MouseLeftButtonUp="LauncherVersion_MouseLeftButtonUp"
                    Text="公网专版 v0.3.7"/>
 
 

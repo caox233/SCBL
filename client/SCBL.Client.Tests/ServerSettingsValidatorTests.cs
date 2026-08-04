@@ -4,6 +4,13 @@ namespace SCBL.Client.Tests;
 
 public sealed class ServerSettingsValidatorTests
 {
+    [Fact]
+    public void Private_update_url_uses_the_configured_port()
+    {
+        Assert.Equal("http://10.66.0.1:18081/", PublicTunnelConfig.BuildPrivateUpdateBaseUrl(18081));
+        Assert.Equal("http://10.66.0.1:18080/", PublicTunnelConfig.BuildPrivateUpdateBaseUrl(0));
+    }
+
     [Theory]
     [InlineData("sc6.elonline.top:11010", "18080", "sc6.elonline.top:11010", 11010, 18080)]
     [InlineData("tcp://192.168.1.252:11010", "18080", "192.168.1.252:11010", 11010, 18080)]

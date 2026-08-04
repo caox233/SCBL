@@ -1303,7 +1303,6 @@ relay_network_whitelist = {Q(networkName)}
         return "";
     }
 
-    public Task<bool> WaitForAcceleratorReadyAsync(TimeSpan timeout) => Task.FromResult(true);
     public string ReadAssignedIp() => NetworkHealthCheckService.IsValidScblClientIp(_lastAssignedIp) ? _lastAssignedIp : ReadAssignedIpFromAdapter();
     public string ReadTunnelLogTail(int maxLines = 60) => LogService.ReadTail(maxLines);
 
@@ -1334,20 +1333,6 @@ relay_network_whitelist = {Q(networkName)}
             _udpBroadcastRelayDegraded = false;
             _udpBroadcastRelayConfirmed = false;
             _udpBroadcastRelayMessage = "";
-        }
-    }
-
-    public void DetachForFastReuse(string reason)
-    {
-        try
-        {
-            if (_process is { HasExited: false })
-                LogService.Info($"Preserving EasyTier runtime for fast reuse, reason={reason}, pid={_process.Id}");
-        }
-        finally
-        {
-            _process?.Dispose();
-            _process = null;
         }
     }
 

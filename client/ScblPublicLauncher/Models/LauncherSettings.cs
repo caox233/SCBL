@@ -20,8 +20,6 @@ public sealed class LauncherSettings
     // Persisted so DHCP and peer identity remain stable across restarts.
     public string EasyTierInstanceId { get; set; } = "";
     public string EasyTierNetworkName { get; set; } = "scbl-public";
-    public bool EasyTierLatencyFirst { get; set; } = false;
-    public bool EasyTierEnableP2P { get; set; } = true;
     // Hidden maintenance setting. Must match SCBL_WSS_PORT on the public server.
     public int EasyTierWssPort { get; set; } = 10443;
 
@@ -41,8 +39,7 @@ public sealed class LauncherSettings
     public string LastTunnelConnectedAt { get; set; } = "";
     public long? LastLatencyMs { get; set; }
 
-    // "No longer prompt" is recorded by announcement id.
-    public string DismissedActiveAnnouncementId { get; set; } = "";
+    // "No longer prompt" is recorded for the startup dialog announcement.
     public string DismissedStartupAnnouncementId { get; set; } = "";
 
 }

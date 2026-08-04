@@ -55,8 +55,8 @@ public partial class MainWindow
             var result = await ShowConfirmDialogAsync(
                 title: L("是否导出诊断信息", "Export Diagnostics?"),
                 message: L(
-                    "是否导出当前客户端诊断信息？\n\n诊断包会保存到桌面，密码和网络密钥会自动脱敏。",
-                    "Export the current client diagnostics?\n\nThe bundle will be saved to the desktop. Passwords and network secrets are automatically redacted."),
+                    $"是否导出当前客户端诊断信息？\n\n诊断包会保存到：\n{LogService.DiagnosticsDirectory}\n\n密码和网络密钥会自动脱敏。",
+                    $"Export the current client diagnostics?\n\nThe bundle will be saved to:\n{LogService.DiagnosticsDirectory}\n\nPasswords and network secrets are automatically redacted."),
                 yesText: L("导出诊断", "Export"),
                 noText: L("取消", "Cancel"));
             if (result == MessageBoxResult.Yes)

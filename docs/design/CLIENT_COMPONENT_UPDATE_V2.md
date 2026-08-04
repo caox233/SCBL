@@ -87,7 +87,7 @@ fetch manifest
 The cache layout is versioned and immutable from the Launcher perspective:
 
 ```text
-%LOCALAPPDATA%/SCBL_Public/components/
+temp/<computer-name>/components/
   hooks/<version>/uplay_r1_loader.dll
   route-guard/<version>/route-guard.zip
   easytier/<version>/easytier-windows-x86_64.zip

@@ -932,7 +932,7 @@ public partial class MainWindow : Window
 
             SetBusy(true, L("写入配置...", "Writing config..."));
             _hookConfigService.WriteAuthFile(_gameDir, username, password, accountId, bindIp);
-            ValidateWrittenAuthFileOrThrow(_gameDir, username, accountId, bindIp);
+            ValidateWrittenScblTomlOrThrow(_gameDir, username, accountId, bindIp);
 
             SetBusy(true, L("启动游戏...", "Starting game..."));
             await StartGameAndMonitorAsync(selectedExecutable);
@@ -2259,7 +2259,7 @@ public partial class MainWindow : Window
                 : EmbeddedResourceService.EmbeddedFileExists("launcher_bgm.wav") ? "launcher_bgm.wav" : "";
             if (string.IsNullOrWhiteSpace(embeddedName))
                 return null;
-            string tempDir = Path.Combine(Path.GetTempPath(), "SplinterCellCNLauncher");
+            string tempDir = Path.Combine(LogService.RuntimeDirectory, "media");
             Directory.CreateDirectory(tempDir);
             string tempPath = Path.Combine(tempDir, embeddedName);
             EmbeddedResourceService.ExtractEmbeddedFileStrict(embeddedName, tempPath);
@@ -2451,7 +2451,7 @@ public partial class MainWindow : Window
             m.Contains("Blacklist", StringComparison.OrdinalIgnoreCase) && m.Contains("not", StringComparison.OrdinalIgnoreCase))
             return FriendlyErrorKind.GamePath;
         if (m.Contains("uplay_r1_loader", StringComparison.OrdinalIgnoreCase) ||
-            m.Contains("5th_auth.dat", StringComparison.OrdinalIgnoreCase) ||
+            m.Contains("scbl.toml", StringComparison.OrdinalIgnoreCase) ||
             m.Contains("写入", StringComparison.OrdinalIgnoreCase))
             return FriendlyErrorKind.HookFiles;
         if (m.Contains("密码", StringComparison.OrdinalIgnoreCase) ||
@@ -2722,20 +2722,19 @@ public partial class MainWindow : Window
             && !text.Contains("SplinterCellCNLauncher", StringComparison.OrdinalIgnoreCase);
     }
 
-    private static void ValidateWrittenAuthFileOrThrow(string gameDir, string username, string accountId, string bindIp)
+    private static void ValidateWrittenScblTomlOrThrow(string gameDir, string username, string accountId, string bindIp)
     {
-        string path = Path.Combine(gameDir, "5th_auth.dat");
+        string path = Path.Combine(gameDir, "scbl.toml");
         if (!File.Exists(path))
-            throw new Exception($"5th_auth.dat 写入失败：文件不存在。\n{path}");
+            throw new Exception($"scbl.toml 写入失败：文件不存在。\n{path}");
 
-        var values = ReadAuthDatValues(path);
+        var values = ReadScblTomlValues(path);
         var errors = new List<string>();
-        CheckValue("Username", username);
-        CheckValue("AccountId", accountId);
+        CheckValue("User.Username", username);
+        CheckValue("User.AccountId", accountId);
         CheckValue("ConfigServer", AuthService.PublicConfigServerHost);
         CheckValue("ApiServer", AuthService.PublicGrpcAddress.TrimEnd('/') + "/");
-        CheckValue("BindIP", bindIp);
-        CheckValue("NetworkMode", "PublicTunnel");
+        CheckValue("Networking.IpAddress", bindIp);
 
         void CheckValue(string key, string expected)
         {
@@ -2744,19 +2743,32 @@ public partial class MainWindow : Window
         }
 
         if (errors.Count > 0)
-            throw new Exception("5th_auth.dat 写入后校验失败，已取消启动。\n\n" + string.Join("\n", errors));
-        LogService.Info($"5th_auth.dat read-back validation succeeded: {path}");
+            throw new Exception("scbl.toml 写入后校验失败，已取消启动。\n\n" + string.Join("\n", errors));
+        LogService.Info($"scbl.toml read-back validation succeeded: {path}");
     }
 
-    private static Dictionary<string, string> ReadAuthDatValues(string path)
+    private static Dictionary<string, string> ReadScblTomlValues(string path)
     {
         var values = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        string section = "";
         foreach (string rawLine in File.ReadAllLines(path, Encoding.UTF8))
         {
             string line = rawLine.Trim();
             if (line.Length == 0 || line.StartsWith("#", StringComparison.Ordinal)) continue;
+            var sectionMatch = Regex.Match(line, "^\\[([A-Za-z0-9_]+)\\]$");
+            if (sectionMatch.Success)
+            {
+                section = sectionMatch.Groups[1].Value;
+                continue;
+            }
             var match = Regex.Match(line, "^([A-Za-z0-9_]+)\\s*=\\s*\"(.*)\"\\s*$");
-            if (match.Success) values[match.Groups[1].Value] = TomlUnescape(match.Groups[2].Value);
+            if (match.Success)
+            {
+                string key = string.IsNullOrWhiteSpace(section)
+                    ? match.Groups[1].Value
+                    : section + "." + match.Groups[1].Value;
+                values[key] = TomlUnescape(match.Groups[2].Value);
+            }
         }
         return values;
     }

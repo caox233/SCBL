@@ -6,12 +6,14 @@ internal static class RestartCoordinator
     private const int LaunchAttempts = 20;
     private const int LaunchRetryDelayMs = 500;
     private const int LaunchSurvivalCheckMs = 3000;
+    private static string? _targetDirectoryForLog;
 
     public static int RunHelper(string? target, string? restart, string? waitPidText)
     {
         try
         {
             string targetDirectory = NormalizeTargetDirectory(target);
+            _targetDirectoryForLog = targetDirectory;
             string launcher = ResolveLauncherPath(targetDirectory, restart);
             if (int.TryParse(waitPidText, out int waitPid) && waitPid > 0)
                 WaitForParentExit(waitPid);
@@ -31,6 +33,7 @@ internal static class RestartCoordinator
         try
         {
             string targetDirectory = NormalizeTargetDirectory(target);
+            _targetDirectoryForLog = targetDirectory;
             string launcher = ResolveLauncherPath(targetDirectory, restart);
             string updater = Environment.ProcessPath
                 ?? Process.GetCurrentProcess().MainModule?.FileName
@@ -78,6 +81,7 @@ internal static class RestartCoordinator
         try
         {
             string targetDirectory = NormalizeTargetDirectory(target);
+            _targetDirectoryForLog = targetDirectory;
             string launcher = ResolveLauncherPath(targetDirectory, restart);
             return LaunchWithRetry(launcher, targetDirectory);
         }
@@ -174,7 +178,12 @@ internal static class RestartCoordinator
     {
         try
         {
-            string logDirectory = Path.Combine(AppContext.BaseDirectory, "logs");
+            string target = _targetDirectoryForLog ?? NormalizeTargetDirectory(null);
+            string machine = string.Concat(Environment.MachineName.Trim().Select(ch =>
+                Path.GetInvalidFileNameChars().Contains(ch) ? '_' : ch));
+            if (string.IsNullOrWhiteSpace(machine))
+                machine = "UNKNOWN-PC";
+            string logDirectory = Path.Combine(target, "temp", machine, "logs");
             Directory.CreateDirectory(logDirectory);
             File.AppendAllText(
                 Path.Combine(logDirectory, "updater.log"),

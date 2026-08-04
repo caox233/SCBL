@@ -243,9 +243,9 @@ fn party_presence(initialized: bool, social_party_active: bool, game_invite_acti
 }
 
 fn trace_path() -> Option<PathBuf> {
-    std::env::var_os("LOCALAPPDATA")
+    std::env::var_os("SCBL_CLIENT_DATA_DIR")
         .map(PathBuf::from)
-        .map(|path| path.join("SCBL_Public").join("logs").join("hooks-party-trace.log"))
+        .map(|path| path.join("logs").join("game").join("hooks-party-trace.log"))
 }
 
 fn trace_party(message: &str) {

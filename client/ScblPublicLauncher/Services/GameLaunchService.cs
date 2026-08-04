@@ -23,6 +23,14 @@ public sealed class GameLaunchService
         };
         var commandLine = new StringBuilder(Quote(exePath));
 
+        // CreateProcessW inherits the launcher's environment block. Hooks uses this
+        // portable, machine-scoped root for all in-game diagnostic logs while its
+        // functional scbl.toml remains beside the game DLL.
+        Environment.SetEnvironmentVariable(
+            "SCBL_CLIENT_DATA_DIR",
+            LogService.PersistentDataDirectory,
+            EnvironmentVariableTarget.Process);
+
         LogService.Info($"Creating suspended game process: executable={exePath}, workingDirectory={gameDir}");
         bool created = CreateProcessW(
             lpApplicationName: exePath,

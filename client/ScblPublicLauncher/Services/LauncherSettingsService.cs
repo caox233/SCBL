@@ -10,8 +10,8 @@ namespace SplinterCellCNLauncher.Services;
 
 public sealed class LauncherSettingsService
 {
-    public string SettingsPath { get; } = Path.Combine(LogService.PersistentDataDirectory, "launcher_settings.json");
-    private string LegacySettingsPath => Path.Combine(LogService.LogDirectory, "launcher_settings.json");
+    public string SettingsPath { get; } = Path.Combine(LogService.ConfigDirectory, "launcher_settings.json");
+    private string LegacySettingsPath => Path.Combine(AppContext.BaseDirectory, "logs", "launcher_settings.json");
     private string BackupPath => SettingsPath + ".bak";
 
     public LauncherSettings Load()
@@ -52,7 +52,8 @@ public sealed class LauncherSettingsService
 
     public void Save(LauncherSettings settings)
     {
-        Directory.CreateDirectory(LogService.AppDataDir);
+        LogService.InitializeStorage();
+        Directory.CreateDirectory(LogService.ConfigDirectory);
         string effectiveSecret = PublicTunnelConfig.NormalizeTunnelSecret(settings.TunnelSecret);
         var copy = WithDefaults(new LauncherSettings
         {
@@ -148,9 +149,9 @@ public sealed class LauncherSettingsService
             if (string.IsNullOrWhiteSpace(source))
                 return;
 
-            Directory.CreateDirectory(LogService.PersistentDataDirectory);
+            Directory.CreateDirectory(LogService.ConfigDirectory);
             File.Copy(source, SettingsPath, overwrite: false);
-            LogService.Info($"Migrated launcher settings to stable per-user path: source={source}, target={SettingsPath}");
+            LogService.Info($"Migrated launcher settings to portable per-machine path: source={source}, target={SettingsPath}");
         }
         catch (Exception ex)
         {
@@ -161,6 +162,10 @@ public sealed class LauncherSettingsService
     private IEnumerable<string> EnumerateLegacySettingsCandidates()
     {
         yield return LegacySettingsPath;
+        yield return Path.Combine(
+            Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+            "SCBL_Public",
+            "launcher_settings.json");
 
         string baseDir = Path.GetFullPath(AppContext.BaseDirectory)
             .TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);

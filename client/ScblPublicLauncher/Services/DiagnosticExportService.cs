@@ -39,15 +39,11 @@ public sealed class DiagnosticExportService
         CancellationToken cancellationToken = default)
     {
         string stamp = DateTime.Now.ToString("yyyyMMdd_HHmmss");
-        string workRoot = Path.Combine(Path.GetTempPath(), $"SCBL_Diagnostics_{stamp}_{Guid.NewGuid():N}");
-        string desktop = Environment.GetFolderPath(Environment.SpecialFolder.DesktopDirectory);
-        if (string.IsNullOrWhiteSpace(desktop) || !Directory.Exists(desktop))
-        {
-            desktop = Path.Combine(LogService.PersistentDataDirectory, "diagnostics");
-            Directory.CreateDirectory(desktop);
-        }
+        string workRoot = Path.Combine(LogService.DiagnosticsDirectory, "work", $"SCBL_Diagnostics_{stamp}_{Guid.NewGuid():N}");
+        string exportDirectory = LogService.DiagnosticsDirectory;
+        Directory.CreateDirectory(exportDirectory);
 
-        string zipPath = MakeUniquePath(Path.Combine(desktop, $"SCBL_Diagnostics_{stamp}.zip"));
+        string zipPath = MakeUniquePath(Path.Combine(exportDirectory, $"SCBL_Diagnostics_{stamp}.zip"));
         Directory.CreateDirectory(workRoot);
         try
         {
@@ -157,13 +153,16 @@ public sealed class DiagnosticExportService
             string suffix = index == 0 ? "" : $".{index}";
             candidates.Add((LogService.LogPath + suffix, Path.Combine("logs", "scbl-public.log" + suffix)));
         }
+        candidates.Add((Path.Combine(LogService.LogDirectory, "updater.log"), Path.Combine("logs", "updater.log")));
+        candidates.Add((Path.Combine(LogService.LogDirectory, "game", "bl-tracing.log"), Path.Combine("logs", "game", "bl-tracing.log")));
+        candidates.Add((Path.Combine(LogService.LogDirectory, "game", "hooks-party-trace.log"), Path.Combine("logs", "game", "hooks-party-trace.log")));
 
         candidates.Add((Path.Combine(launcherBaseDirectory, "runtime", "assigned-ip.txt"), Path.Combine("runtime", "assigned-ip.txt")));
         candidates.Add((Path.Combine(LogService.PersistentDataDirectory, "runtime", "route-guard-session.json"), Path.Combine("runtime", "route-guard-session.json")));
         candidates.Add((Path.Combine(LogService.PersistentDataDirectory, "runtime", "route-guard-health.json"), Path.Combine("runtime", "route-guard-health.json")));
         candidates.Add((Path.Combine(LogService.PersistentDataDirectory, "runtime", "game-network-quality.json"), Path.Combine("runtime", "game-network-quality.json")));
         candidates.Add((BroadcastProbeService.StatusFilePath, Path.Combine("runtime", "broadcast-probe-status.json")));
-        candidates.Add((Path.Combine(LogService.PersistentDataDirectory, "launcher_settings.json"), Path.Combine("persistent", "launcher_settings.json")));
+        candidates.Add((Path.Combine(LogService.ConfigDirectory, "launcher_settings.json"), Path.Combine("persistent", "config", "launcher_settings.json")));
         candidates.Add((Path.Combine(LogService.PersistentDataDirectory, "network", "runtime-profile.json"), Path.Combine("persistent", "network", "runtime-profile.json")));
         candidates.Add((Path.Combine(LogService.PersistentDataDirectory, "network", "scbl-easytier-client.toml"), Path.Combine("persistent", "network", "scbl-easytier-client.toml")));
 

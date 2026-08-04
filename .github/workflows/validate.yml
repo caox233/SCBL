@@ -103,7 +103,7 @@ jobs:
               for marker, source in blocks:
                   compile(source, f'{path}:{marker}', 'exec')
           PY
-          python3 -m py_compile server/scbl_control_plane.py server/scbl_update_server.py server/test_control_plane.py server/test_update_server.py server/test_ddns_go_native.py server/test_release_manifest_routing.py server/test_network_topology.py server/test_client_update_restart.py server/test_client_network_resilience.py server/test_server_tool_runtime.py server/test_server_diagnostics.py server/test_client_security_regressions.py
+          python3 -m py_compile server/scbl_control_plane.py server/scbl_update_server.py server/test_control_plane.py server/test_update_server.py server/test_ddns_go_native.py server/test_release_manifest_routing.py server/test_network_topology.py server/test_client_update_restart.py server/test_client_network_resilience.py server/test_server_tool_runtime.py server/test_server_diagnostics.py server/test_client_security_regressions.py client/tests/test_portable_storage.py
           python3 server/test_control_plane.py
           python3 server/test_update_server.py
           python3 server/test_ddns_go_native.py
@@ -114,6 +114,7 @@ jobs:
           python3 server/test_server_tool_runtime.py
           python3 server/test_server_diagnostics.py
           python3 server/test_client_security_regressions.py
+          python3 client/tests/test_portable_storage.py
 
       - name: Set up Go
         if: steps.changes.outputs.router == 'true'

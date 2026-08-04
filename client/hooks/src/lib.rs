@@ -289,7 +289,11 @@ type ReconfigurableLogger = tracing_subscriber::reload::Handle<
 >;
 
 fn init_log(target_dir: &Path) -> ReconfigurableLogger {
-    let path = target_dir.join("bl-tracing.log");
+    let configured_log_dir = std::env::var_os("SCBL_CLIENT_DATA_DIR").map(PathBuf::from).map(|path| path.join("logs").join("game"));
+    let log_dir = configured_log_dir
+        .filter(|path| std::fs::create_dir_all(path).is_ok())
+        .unwrap_or_else(|| target_dir.to_path_buf());
+    let path = log_dir.join("bl-tracing.log");
     let _ = std::fs::remove_file(&path);
     let subscriber_builder = tracing_subscriber::FmtSubscriber::builder()
         .with_writer(FileWriter(path))

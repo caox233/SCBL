@@ -17,19 +17,43 @@ public sealed class HookConfigService
         string apiServer = AuthService.PublicGrpcAddress + "/";
 
         string content =
-$@"Username = ""{TomlEscape(username)}""
+$@"ConfigServer = ""{TomlEscape(configServer)}""
+ApiServer = ""{TomlEscape(apiServer)}""
+AutoJoinInvite = false
+EnableOverlay = true
+
+[User]
+Username = ""{TomlEscape(username)}""
 Password = ""{TomlEscape(password)}""
 AccountId = ""{TomlEscape(accountId)}""
-ConfigServer = ""{TomlEscape(configServer)}""
-ApiServer = ""{TomlEscape(apiServer)}""
-BindIP = ""{TomlEscape(bindIp)}""
-NetworkMode = ""PublicTunnel""
+
+[Networking]
+IpAddress = ""{TomlEscape(bindIp)}""
+
+[Logging]
+Level = ""INFO""
 ";
 
-        string path = Path.Combine(gameDir, "5th_auth.dat");
+        string path = Path.Combine(gameDir, "scbl.toml");
         File.WriteAllText(path, content.Trim(), new UTF8Encoding(encoderShouldEmitUTF8Identifier: false));
 
-        LogService.Info($"已写入公网 HOOKS 私有配置：{path}");
+        string retiredPath = Path.Combine(gameDir, "5th_auth.dat");
+        if (File.Exists(retiredPath))
+        {
+            try
+            {
+                File.Delete(retiredPath);
+                LogService.Info($"已删除停用的旧 Hooks 配置：{retiredPath}");
+            }
+            catch (Exception ex)
+            {
+                // The retired file is never read. A stale antivirus/file-system lock
+                // must not prevent the new scbl.toml from launching the game.
+                LogService.Warning($"无法删除已停用的旧 Hooks 配置（不会读取）：{retiredPath}, {ex.Message}");
+            }
+        }
+
+        LogService.Info($"已写入 SCBL Hooks TOML 配置：{path}");
     }
 
     private static string TomlEscape(string value)

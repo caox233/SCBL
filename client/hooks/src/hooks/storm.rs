@@ -434,7 +434,7 @@ pub unsafe fn init_hooks(config: &Config, addr: &Addresses) {
         let recvfrom_addr = GetProcAddress(lib, s!("recvfrom"));
 
         if config.networking.ip_address.is_some() {
-            info!("PublicVirtualNet enabling mandatory Winsock binding hooks for configured BindIP");
+            info!("PublicVirtualNet enabling mandatory Winsock binding hooks for configured Networking.IpAddress");
             super::hook!(BindSocketHook, bind_addr, bind_socket);
             super::hook!(ConnectHook, connect_addr, connect_socket);
             super::hook!(WsaConnectHook, wsa_connect_addr, wsa_connect_socket);

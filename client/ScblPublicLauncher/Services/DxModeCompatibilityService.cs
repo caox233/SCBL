@@ -185,7 +185,7 @@ public sealed class DxModeCompatibilityService
                 $"DX mode file snapshot: stage={stage}, mode={mode}, selectedExe={selectedExe}, " +
                 $"loader={DescribeFile(Path.Combine(gameDir, "uplay_r1_loader.dll"))}, " +
                 $"originalLoader={DescribeFile(Path.Combine(gameDir, "uplay_r1_loader.orig.dll"))}, " +
-                $"auth={DescribeFile(Path.Combine(gameDir, "5th_auth.dat"))}, " +
+                $"auth={DescribeFile(Path.Combine(gameDir, "scbl.toml"))}, " +
                 $"dxgi={DescribeFile(Path.Combine(gameDir, Dxgi))}, " +
                 $"disabledDxgi={DescribeFile(Path.Combine(gameDir, DisabledDxgi))}");
         }

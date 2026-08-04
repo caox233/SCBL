@@ -9,6 +9,7 @@
 - 修复私人房间邀请、队伍恢复和房主退出相关状态同步问题，并冻结已通过双机验证的生产 Hooks 行为。
 - 修复 Control Plane SQLite 连接泄漏，强化 Dedicated Server 身份校验与异常数据容错。
 - WORKPC 端到端验证通过：Ubisoft 重启 PID 收养、Route Guard 严格模式、真实游戏启动、Hooks 会话清理和启动器网络关闭均正常。
+- Windows 客户端生成的数据统一整理到 `temp/计算机名/`，并将 Hooks 配置正式切换为标准 `scbl.toml`。
 
 ## Linux Server Tool v1.0.11
 

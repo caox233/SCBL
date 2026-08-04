@@ -60,7 +60,7 @@ if (Test-Path -LiteralPath $Zip) { Remove-Item -LiteralPath $Zip -Force }
 Add-Type -AssemblyName System.IO.Compression
 Add-Type -AssemblyName System.IO.Compression.FileSystem
 $Compression = if ($Fast) { [System.IO.Compression.CompressionLevel]::Fastest } else { [System.IO.Compression.CompressionLevel]::Optimal }
-$ExcludedRoots = @('logs', 'updates', 'backup')
+$ExcludedRoots = @('temp', 'logs', 'updates', 'backup')
 $ExcludedFiles = @('launcher_settings.json', 'update_manifest.json', 'client_update_manifest.json', 'client_package_manifest.json', 'tools/WinDivert64.sys')
 $TrimChars = [char[]]@([System.IO.Path]::DirectorySeparatorChar, [System.IO.Path]::AltDirectorySeparatorChar)
 $PublishPrefix = $Publish.TrimEnd($TrimChars) + [System.IO.Path]::DirectorySeparatorChar
@@ -118,6 +118,9 @@ $VerifyArchive = [System.IO.Compression.ZipFile]::OpenRead($Zip)
 try {
     $Names = @($VerifyArchive.Entries | ForEach-Object { $_.FullName })
     if ($Names -contains 'tools/WinDivert64.sys') { throw "Release ZIP must not contain the lock-prone WinDivert64.sys path." }
+    if ($Names | Where-Object { $_ -match '^(temp|logs|updates|backup)/' }) {
+        throw "Release ZIP must not contain generated client state directories."
+    }
     foreach ($RequiredEntry in @(
         'tools/WinDivert64.payload.sys',
         'tools/uplay_r1_loader.dll',

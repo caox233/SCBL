@@ -156,8 +156,10 @@ public static class StagedComponentBootstrapService
                 throw new InvalidDataException($"组件 {component} 缺少文件：{sourceName}");
 
             string targetPath = Path.Combine(GetBaseDirectory(), targetRelativePath.Replace('/', Path.DirectorySeparatorChar));
+            string workDirectory = Path.Combine(LogService.UpdatesDirectory, "component-work");
+            Directory.CreateDirectory(workDirectory);
             string temporarySource = Path.Combine(
-                Path.GetTempPath(),
+                workDirectory,
                 $"scbl-{component}-{Guid.NewGuid():N}-{Path.GetFileName(sourceName)}");
             try
             {

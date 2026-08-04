@@ -27,14 +27,24 @@ public static class LogService
     private static readonly Regex CommandSecretRegex = new(
         @"(?i)(--(?:network-)?secret(?:=|\s+))([^\s""]+|""[^""]*"")",
         RegexOptions.Compiled | RegexOptions.CultureInvariant);
+    private static readonly object StorageSync = new();
+    private static bool _storageInitialized;
 
-    public static string LogDirectory { get; } = Path.Combine(AppContext.BaseDirectory, "logs");
+    public static string ClientRootDirectory { get; } = Path.GetFullPath(AppContext.BaseDirectory);
 
-    // Stable per-user data. Unlike the package-local logs directory, this path does not
-    // change when the user extracts a new SCBL client version into another folder.
-    public static string PersistentDataDirectory { get; } = Path.Combine(
-        Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-        "SCBL_Public");
+    public static string MachineName { get; } = SanitizePathSegment(Environment.MachineName, "UNKNOWN-PC");
+
+    // All launcher-owned state is portable and isolated per Windows computer. This
+    // prevents POWERPC and WORKPC from overwriting each other when both launch the
+    // same client package from a NAS share.
+    public static string PersistentDataDirectory { get; } = Path.Combine(ClientRootDirectory, "temp", MachineName);
+    public static string ConfigDirectory { get; } = Path.Combine(PersistentDataDirectory, "config");
+    public static string LogDirectory { get; } = Path.Combine(PersistentDataDirectory, "logs");
+    public static string RuntimeDirectory { get; } = Path.Combine(PersistentDataDirectory, "runtime");
+    public static string NetworkDirectory { get; } = Path.Combine(PersistentDataDirectory, "network");
+    public static string ComponentsDirectory { get; } = Path.Combine(PersistentDataDirectory, "components");
+    public static string UpdatesDirectory { get; } = Path.Combine(PersistentDataDirectory, "updates");
+    public static string DiagnosticsDirectory { get; } = Path.Combine(PersistentDataDirectory, "diagnostics");
 
     // Compatibility alias for runtime state that must survive package replacement.
     public static string AppDataDir => PersistentDataDirectory;
@@ -42,6 +52,33 @@ public static class LogService
     public static string LogPath { get; } = Path.Combine(LogDirectory, "scbl-public.log");
 
     public static string LegacyLauncherLogPath { get; } = Path.Combine(LogDirectory, "launcher.log");
+
+    public static void InitializeStorage()
+    {
+        lock (StorageSync)
+        {
+            if (_storageInitialized)
+                return;
+
+            foreach (string directory in new[]
+            {
+                PersistentDataDirectory,
+                ConfigDirectory,
+                LogDirectory,
+                RuntimeDirectory,
+                NetworkDirectory,
+                ComponentsDirectory,
+                UpdatesDirectory,
+                DiagnosticsDirectory
+            })
+            {
+                Directory.CreateDirectory(directory);
+            }
+
+            MigrateLegacyStorageBestEffort();
+            _storageInitialized = true;
+        }
+    }
 
     public static void Info(string message) => Write("INFO", "Launcher", message);
 
@@ -137,6 +174,7 @@ public static class LogService
     {
         try
         {
+            InitializeStorage();
             Directory.CreateDirectory(LogDirectory);
             string safeComponent = string.IsNullOrWhiteSpace(component) ? "Launcher" : component.Trim();
             string safeMessage = SanitizeSensitiveText(message).Replace("\r", "").TrimEnd('\n');
@@ -154,6 +192,70 @@ public static class LogService
         {
             // Logging must never interrupt the launcher.
         }
+    }
+
+    private static void MigrateLegacyStorageBestEffort()
+    {
+        try
+        {
+            string marker = Path.Combine(PersistentDataDirectory, ".storage-v2");
+            if (File.Exists(marker))
+                return;
+
+            string legacyPerUser = Path.Combine(
+                Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+                "SCBL_Public");
+            CopyFileIfMissing(
+                Path.Combine(legacyPerUser, "launcher_settings.json"),
+                Path.Combine(ConfigDirectory, "launcher_settings.json"));
+            foreach (string name in new[] { "network", "runtime", "components" })
+                CopyDirectoryIfMissing(Path.Combine(legacyPerUser, name), Path.Combine(PersistentDataDirectory, name));
+
+            string legacyLogs = Path.Combine(ClientRootDirectory, "logs");
+            if (Directory.Exists(legacyLogs))
+            {
+                foreach (string source in Directory.EnumerateFiles(legacyLogs, "*", SearchOption.TopDirectoryOnly))
+                    CopyFileIfMissing(source, Path.Combine(LogDirectory, Path.GetFileName(source)));
+            }
+
+            File.WriteAllText(
+                marker,
+                $"machine={MachineName}{Environment.NewLine}migratedAt={DateTimeOffset.Now:O}{Environment.NewLine}",
+                Encoding.UTF8);
+        }
+        catch
+        {
+            // Existing installations remain usable even when an optional migration
+            // source is unreadable. New state is still written to the portable tree.
+        }
+    }
+
+    private static void CopyDirectoryIfMissing(string source, string destination)
+    {
+        if (!Directory.Exists(source))
+            return;
+        foreach (string file in Directory.EnumerateFiles(source, "*", SearchOption.AllDirectories))
+        {
+            string relative = Path.GetRelativePath(source, file);
+            CopyFileIfMissing(file, Path.Combine(destination, relative));
+        }
+    }
+
+    private static void CopyFileIfMissing(string source, string destination)
+    {
+        if (!File.Exists(source) || File.Exists(destination))
+            return;
+        string? parent = Path.GetDirectoryName(destination);
+        if (!string.IsNullOrWhiteSpace(parent))
+            Directory.CreateDirectory(parent);
+        File.Copy(source, destination, overwrite: false);
+    }
+
+    private static string SanitizePathSegment(string value, string fallback)
+    {
+        string clean = string.Concat((value ?? string.Empty).Trim().Select(ch =>
+            Path.GetInvalidFileNameChars().Contains(ch) ? '_' : ch));
+        return string.IsNullOrWhiteSpace(clean) ? fallback : clean;
     }
 
     private static void RotateIfNeeded(int incomingBytes)

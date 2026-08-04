@@ -62,6 +62,8 @@ updater       SCBL.Updater.exe
 
 本地反复调试 Hooks 时，可把 DLL 放到启动器旁的 `local-components/hooks/uplay_r1_loader.dll`，再用 `--test` 启动。启动器每次启动游戏前都会读取并覆盖这个当前文件，无需重编启动器或手工更新固定哈希；复制前后的实际 SHA256 仍会写入日志和部署标记。`stable` 通道永远忽略该本地覆盖目录。
 
+客户端生成的设置、日志、网络状态、组件缓存、更新工作文件和诊断包统一保存在 `temp/计算机名/`。Hooks 使用游戏 `SYSTEM` 目录中的标准 `scbl.toml`；旧 `5th_auth.dat` 不再读取或保留。
+
 `stable` 外置组件替换在组件清单签名验证完成前保持关闭；正式客户端继续使用完整包自带、经过 SHA256 校验的 bootstrap 组件。
 
 ## 构建方式

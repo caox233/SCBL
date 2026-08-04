@@ -51,7 +51,22 @@ Hooks 不嵌入 Launcher EXE。正式包在 `tools/uplay_r1_loader.dll` 携带�
 将它保存为：
 
 ```text
-%LOCALAPPDATA%\SCBL_Public\launcher_settings.json
+客户端目录\temp\计算机名\config\launcher_settings.json
 ```
 
 首次成功读取后，Launcher 会把隧道密钥迁移到当前 Windows 用户的 DPAPI 保护字段。不要提交真实密钥、生成后的配置、日志或诊断包。
+
+Launcher 生成的配置、日志、组件状态、网络运行状态、更新缓存和诊断包统一位于 `temp/计算机名/`。同一份 NAS 客户端可由多台电脑使用，各机器的数据不会互相覆盖；整个 `temp` 目录在完整包更新时都会被保留。
+
+```text
+temp/<computer-name>/
+  config/       launcher_settings.json
+  logs/         Launcher、Updater 与 logs/game 下的 Hooks 日志
+  network/      EasyTier 生成配置和运行资料
+  runtime/      Route Guard、广播探测与游戏网络状态
+  components/   版本化组件缓存和 component_state.json
+  updates/      下载、解压工作区、回滚快照和更新回执
+  diagnostics/  脱敏诊断包
+```
+
+游戏 `SYSTEM` 目录只保留游戏必须直接读取的 `scbl.toml`、Hooks DLL、原版 DLL 备份和游戏存档。`scbl.toml` 使用标准分区 TOML 格式，不读取旧 `5th_auth.dat`；Launcher 写入新配置时会删除旧文件。

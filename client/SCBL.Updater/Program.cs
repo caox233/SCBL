@@ -6,6 +6,8 @@ using System.Text.Json;
 
 internal static class Program
 {
+    private static string? _clientRootForLog;
+
     private static int Main(string[] args)
     {
         string? target = null;
@@ -25,6 +27,7 @@ internal static class Program
             if (string.IsNullOrWhiteSpace(target))
             {
                 target = InferTargetDirectory();
+                _clientRootForLog = target;
                 Log("Missing --target; inferred target=" + target);
             }
 
@@ -35,6 +38,7 @@ internal static class Program
             }
 
             target = Path.GetFullPath(target);
+            _clientRootForLog = target;
             Log($"Update started. package={package}, target={target}");
 
             if (!Directory.Exists(target))
@@ -247,7 +251,7 @@ internal static class Program
 
     private static void ApplyFullPackage(string package, string target)
     {
-        string temp = Path.Combine(Path.GetTempPath(), "SCBL_Client_Update_" + Guid.NewGuid().ToString("N"));
+        string temp = Path.Combine(GetUpdatesDirectory(target), "work", "SCBL_Client_Update_" + Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(temp);
         string backup = "";
 
@@ -283,7 +287,7 @@ internal static class Program
             return;
         try
         {
-            string dir = Path.Combine(target, "updates");
+            string dir = GetUpdatesDirectory(target);
             Directory.CreateDirectory(dir);
             string path = Path.Combine(dir, "last_applied_update.json");
             File.WriteAllText(path, JsonSerializer.Serialize(new
@@ -351,9 +355,10 @@ internal static class Program
     {
         try
         {
-            string baseDir = AppContext.BaseDirectory;
-            Directory.CreateDirectory(Path.Combine(baseDir, "logs"));
-            File.AppendAllText(Path.Combine(baseDir, "logs", "updater.log"), $"[{DateTime.Now:yyyy-MM-dd HH:mm:ss}] {message}{Environment.NewLine}");
+            string root = _clientRootForLog ?? InferTargetDirectory();
+            string logDirectory = Path.Combine(GetClientDataDirectory(root), "logs");
+            Directory.CreateDirectory(logDirectory);
+            File.AppendAllText(Path.Combine(logDirectory, "updater.log"), $"[{DateTime.Now:yyyy-MM-dd HH:mm:ss}] {message}{Environment.NewLine}");
         }
         catch
         {
@@ -397,7 +402,7 @@ internal static class Program
     }
 
     private static bool IsSkippedDirectory(string relative)
-        => MatchesPattern(relative, new[] { "logs/", "updates/", "backup/" });
+        => MatchesPattern(relative, new[] { "temp/", "logs/", "updates/", "backup/" });
 
     private static string DetermineContentRoot(string extractRoot)
     {
@@ -482,7 +487,7 @@ internal static class Program
     {
         try
         {
-            string backup = Path.Combine(target, "backup");
+            string backup = Path.Combine(GetUpdatesDirectory(target), "backup");
             if (Directory.Exists(backup))
             {
                 Directory.Delete(backup, recursive: true);
@@ -497,7 +502,7 @@ internal static class Program
 
     private static string BackupCurrent(string target)
     {
-        string backup = Path.Combine(target, "backup", "client_update_" + DateTime.Now.ToString("yyyyMMdd_HHmmss"));
+        string backup = Path.Combine(GetUpdatesDirectory(target), "backup", "client_update_" + DateTime.Now.ToString("yyyyMMdd_HHmmss"));
         Directory.CreateDirectory(backup);
 
         foreach (string name in new[] { "SplinterCellCNLauncher.exe", "tools" })
@@ -540,6 +545,18 @@ internal static class Program
         {
             Log("Update rollback failed: " + ex);
         }
+    }
+
+    private static string GetUpdatesDirectory(string target)
+        => Path.Combine(GetClientDataDirectory(target), "updates");
+
+    private static string GetClientDataDirectory(string target)
+    {
+        string machine = string.Concat(Environment.MachineName.Trim().Select(ch =>
+            Path.GetInvalidFileNameChars().Contains(ch) ? '_' : ch));
+        if (string.IsNullOrWhiteSpace(machine))
+            machine = "UNKNOWN-PC";
+        return Path.Combine(Path.GetFullPath(target), "temp", machine);
     }
 
     private static void CopyFileWithRetry(string source, string destination, string relative)

@@ -289,46 +289,9 @@ impl Logging {
     }
 }
 
-#[derive(Debug, Deserialize)]
-struct CnAuthConfig {
-    #[serde(rename = "Username")]
-    username: String,
-    #[serde(rename = "Password")]
-    password: String,
-    #[serde(rename = "AccountId")]
-    account_id: Option<String>,
-    #[serde(rename = "ConfigServer")]
-    config_server: String,
-    #[serde(rename = "ApiServer")]
-    api_server: Url,
-    #[serde(rename = "BindIP", alias = "BindIp")]
-    bind_ip: Option<std::net::Ipv4Addr>,
-    #[serde(rename = "EnableOverlay")]
-    enable_overlay: Option<bool>,
-    #[serde(rename = "AutoJoinInvite")]
-    auto_join_invite: Option<bool>,
-}
-
-impl CnAuthConfig {
-    fn into_config(self) -> Config {
-        let mut cfg = default();
-        cfg.user.username = self.username;
-        cfg.user.password = self.password;
-        cfg.user.account_id = self.account_id.filter(|s| !s.trim().is_empty()).unwrap_or_else(|| cfg.user.username.clone());
-        cfg.config_server = if self.config_server.trim().is_empty() { None } else { Some(self.config_server) };
-        cfg.api_server = self.api_server;
-        if let Some(ip) = self.bind_ip {
-            cfg.networking.ip_address = Some(ip);
-        }
-        cfg.enable_overlay = self.enable_overlay.unwrap_or(true);
-        cfg.auto_join_invite = self.auto_join_invite.unwrap_or(false);
-        cfg.enable_hooks.insert(Hook::GetAdaptersInfo);
-        cfg.enable_hooks.insert(Hook::Gethostbyname);
-        cfg
-    }
-}
-
-fn enable_scbl_abi31_join_diagnostics(cfg: &mut Config) {
+fn apply_scbl_required_hooks(cfg: &mut Config) {
+    cfg.enable_hooks.insert(Hook::GetAdaptersInfo);
+    cfg.enable_hooks.insert(Hook::Gethostbyname);
     for hook in [
         Hook::Goal,
         Hook::SetStep,
@@ -348,25 +311,11 @@ fn enable_scbl_abi31_join_diagnostics(cfg: &mut Config) {
     info!("SCBL_ABI31_JOIN_DIAGNOSTICS enabled=true");
 }
 
-fn parse_cn_or_standard_config(content: &str) -> anyhow::Result<Config> {
-    match toml::from_str::<CnAuthConfig>(content) {
-        Ok(cn_cfg) => {
-            info!("Loaded CN private auth config format");
-            let mut cfg = cn_cfg.into_config();
-            enable_scbl_abi31_join_diagnostics(&mut cfg);
-            Ok(cfg)
-        }
-        Err(cn_err) => match toml::from_str::<Config>(content) {
-            Ok(mut cfg) => {
-                info!("Loaded standard hooks config format from 5th_auth.dat");
-                enable_scbl_abi31_join_diagnostics(&mut cfg);
-                Ok(cfg)
-            }
-            Err(std_err) => Err(anyhow::anyhow!(
-                "Failed to parse 5th_auth.dat as CN format: {cn_err}; also failed as standard format: {std_err}"
-            )),
-        },
-    }
+fn parse_scbl_config(content: &str) -> anyhow::Result<Config> {
+    let mut cfg = toml::from_str::<Config>(content).map_err(|err| anyhow::anyhow!("Failed to parse scbl.toml: {err}"))?;
+    apply_scbl_required_hooks(&mut cfg);
+    info!("Loaded SCBL hooks config from scbl.toml");
+    Ok(cfg)
 }
 const DEFAULT_CONFIG: &str = r#"
 # Where to find the config server
@@ -573,15 +522,12 @@ fn _get_or_load(path: &Path) -> anyhow::Result<&'static Config> {
         Ok(content) => content,
         #[cfg(target_os = "windows")]
         Err(ref err) if err.kind() == std::io::ErrorKind::NotFound => {
-            msgbox::show_msgbox(
-                "5th_auth.dat not found.\n\nPlease start the game with SplinterCellCNLauncher.",
-                "CN Launcher config missing",
-            );
+            msgbox::show_msgbox("scbl.toml not found.\n\nPlease start the game with SplinterCellCNLauncher.", "SCBL config missing");
             std::process::exit(1);
         }
         Err(err) => return Err(err.into()),
     };
-    let mut cfg: Config = parse_cn_or_standard_config(&content)?;
+    let mut cfg: Config = parse_scbl_config(&content)?;
     if cfg.user.cd_keys.is_empty() {
         info!("Passing startup to original dll");
         cfg.forward_calls.push("UPLAY_Startup".into());
@@ -610,7 +556,7 @@ fn _get_or_load(path: &Path) -> anyhow::Result<&'static Config> {
 }
 
 pub fn get_config_path(path: impl AsRef<Path>) -> PathBuf {
-    path.as_ref().join("5th_auth.dat")
+    path.as_ref().join("scbl.toml")
 }
 
 pub fn default() -> Config {
@@ -625,5 +571,48 @@ mod tests {
     pub fn test_default_config() {
         let cfg: Config = toml::from_str(DEFAULT_CONFIG).unwrap();
         println!("{}", toml::to_string_pretty(&cfg).unwrap());
+    }
+
+    #[test]
+    fn scbl_toml_uses_only_the_standard_sectioned_schema() {
+        let content = r#"
+ConfigServer = "192.168.1.252"
+ApiServer = "http://192.168.1.252:50051/"
+AutoJoinInvite = false
+EnableOverlay = true
+
+[User]
+Username = "POWERPC"
+Password = "secret"
+AccountId = "powerpc-account"
+
+[Networking]
+IpAddress = "10.144.144.2"
+
+[Logging]
+Level = "INFO"
+"#;
+        let cfg = parse_scbl_config(content).unwrap();
+        assert_eq!(cfg.user.username, "POWERPC");
+        assert_eq!(cfg.user.account_id, "powerpc-account");
+        assert_eq!(cfg.networking.ip_address.unwrap().to_string(), "10.144.144.2");
+        assert!(cfg.enable_hooks.contains(&Hook::GetAdaptersInfo));
+        assert!(cfg.enable_hooks.contains(&Hook::Gethostbyname));
+        assert!(cfg.enable_hooks.contains(&Hook::RMCMessages));
+    }
+
+    #[test]
+    fn retired_flat_auth_format_is_rejected() {
+        let retired = r#"
+Username = "POWERPC"
+Password = "secret"
+AccountId = "powerpc-account"
+ConfigServer = "192.168.1.252"
+ApiServer = "http://192.168.1.252:50051/"
+BindIP = "10.144.144.2"
+NetworkMode = "PublicTunnel"
+"#;
+        assert!(parse_scbl_config(retired).is_err());
+        assert!(get_config_path("C:/game").ends_with("scbl.toml"));
     }
 }

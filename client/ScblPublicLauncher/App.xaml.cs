@@ -57,6 +57,8 @@ public partial class App : Application
         }
 #endif
 
+        LogService.InitializeStorage();
+
         bool createdNew;
         _singleInstanceMutex = new Mutex(
             initiallyOwned: true,
@@ -102,16 +104,7 @@ public partial class App : Application
     {
         try
         {
-            string exePath = Environment.ProcessPath ?? Process.GetCurrentProcess().MainModule?.FileName ?? "";
-            string baseDir = string.IsNullOrWhiteSpace(exePath)
-                ? AppContext.BaseDirectory
-                : System.IO.Path.GetDirectoryName(exePath) ?? AppContext.BaseDirectory;
-            string settingsPath = System.IO.Path.Combine(
-                Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-                "SCBL_Public",
-                "launcher_settings.json");
-            if (!System.IO.File.Exists(settingsPath))
-                settingsPath = System.IO.Path.Combine(baseDir, "logs", "launcher_settings.json");
+            string settingsPath = System.IO.Path.Combine(LogService.ConfigDirectory, "launcher_settings.json");
             if (!System.IO.File.Exists(settingsPath))
                 return false;
 

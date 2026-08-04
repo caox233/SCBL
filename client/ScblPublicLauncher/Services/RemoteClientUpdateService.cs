@@ -198,7 +198,7 @@ public sealed class RemoteClientUpdateService
         RemoteUpdateInfo info,
         CancellationToken cancellationToken = default)
     {
-        string tempRoot = Path.Combine(Path.GetTempPath(), "SCBL_Client_Update");
+        string tempRoot = Path.Combine(LogService.UpdatesDirectory, "downloads");
         Directory.CreateDirectory(tempRoot);
         string finalPath = Path.Combine(tempRoot, $"SCBL-Client-v{info.Version}-{Guid.NewGuid():N}.zip");
         string partialPath = finalPath + ".download";

@@ -1,3 +1,4 @@
+use std::collections::BTreeMap;
 use std::ffi::c_char;
 use std::ffi::c_void;
 #[cfg(feature = "diagnostic-evidence")]
@@ -307,12 +308,39 @@ fn trace_get_next_event_poll(_returned_event: bool) {}
 #[derive(Clone, Debug)]
 pub enum Event {
     UserAccountSharing,
+    FriendsFriendListUpdated,
     FriendsGameInviteAccepted(u32, String, String),
     FriendsPrivateBlobInviteAccepted(PartyGameInvite, PrivateInviteAbMode),
     PartyGameInviteAccepted(PartyGameInvite),
 }
 
 pub static EVENTS: OnceLock<Mutex<mpsc::Receiver<Event>>> = OnceLock::new();
+static EVENT_SENDER: OnceLock<mpsc::Sender<Event>> = OnceLock::new();
+
+pub(crate) fn event_sender() -> mpsc::Sender<Event> {
+    EVENT_SENDER
+        .get_or_init(|| {
+            let (sender, receiver) = mpsc::channel();
+            EVENTS.set(Mutex::new(receiver)).unwrap_or_else(|_| panic!("Uplay event receiver was initialized twice"));
+            sender
+        })
+        .clone()
+}
+
+type FriendPresenceSnapshot = BTreeMap<String, (String, bool)>;
+
+fn update_friend_presence_snapshot(snapshot: &mut Option<FriendPresenceSnapshot>, friends: Vec<crate::api::Friend>) -> bool {
+    let next = friends
+        .into_iter()
+        .map(|friend| (friend.id, (friend.username, friend.is_online)))
+        .collect::<FriendPresenceSnapshot>();
+    // The game's first GetFriendList call can race this background poll. Emit
+    // one initial refresh so a player who came online during startup is not
+    // missed, then emit only when the snapshot actually changes.
+    let changed = snapshot.as_ref().is_none_or(|current| current != &next);
+    *snapshot = Some(next);
+    changed
+}
 
 const PRIVATE_INVITE_REPLAY_DELAY: Duration = Duration::from_secs(5);
 
@@ -627,6 +655,11 @@ unsafe extern "cdecl" fn UPLAY_GetNextEvent(event: *mut UplayEvent) -> bool {
         match evt {
             Event::UserAccountSharing => {
                 (*event).event_type = UplayEventType::UserAccountSharing;
+                (*event).unknown = 0;
+            }
+            Event::FriendsFriendListUpdated => {
+                (*event).event_type = UplayEventType::FriendsFriendListUpdated;
+                (*event).unknown = 0;
             }
             Event::FriendsGameInviteAccepted(invitation_id, user, username) => {
                 party::observe_friend_game_invite_accepted(invitation_id, &user, &username);
@@ -705,6 +738,7 @@ unsafe extern "cdecl" fn UPLAY_Startup(uplay_id: usize, game_version: usize, lan
         if config.enable_overlay {
             info!("Initializing overlay");
             let (tx, rx) = crossbeam_channel::unbounded();
+            let game_event_tx = event_sender();
             // needs to be done in a separate thread, otherwise it'll not work
             std::thread::Builder::new()
                 .name(String::from("overlay-thread"))
@@ -729,6 +763,8 @@ unsafe extern "cdecl" fn UPLAY_Startup(uplay_id: usize, game_version: usize, lan
                 .spawn(move || {
                     crate::api::runtime().unwrap().block_on(async {
                         let mut failures = 0;
+                        let mut friend_presence = None;
+                        let mut friend_poll_countdown = 0u8;
                         loop {
                             tokio::time::sleep(Duration::from_secs(1)).await;
                             let event: Option<std::result::Result<_, _>> = crate::api::event().await.map(|resp| resp.invite).transpose();
@@ -744,6 +780,23 @@ unsafe extern "cdecl" fn UPLAY_Startup(uplay_id: usize, game_version: usize, lan
                                     // signal successful relogin
                                     tx.send(Ok(None)).unwrap();
                                 }
+                            }
+
+                            if friend_poll_countdown == 0 {
+                                friend_poll_countdown = 1;
+                                match crate::api::list_friends_async().await {
+                                    Ok(friends) => {
+                                        if update_friend_presence_snapshot(&mut friend_presence, friends) {
+                                            info!("FriendPresenceChanged event=FriendsFriendListUpdated");
+                                            if game_event_tx.send(Event::FriendsFriendListUpdated).is_err() {
+                                                warn!("FriendPresenceChanged event queue is unavailable");
+                                            }
+                                        }
+                                    }
+                                    Err(error) => warn!("FriendPresenceRefreshFailed error={error}"),
+                                }
+                            } else {
+                                friend_poll_countdown -= 1;
                             }
                         }
                     });
@@ -761,4 +814,31 @@ unsafe extern "cdecl" fn UPLAY_Startup(uplay_id: usize, game_version: usize, lan
 #[forwardable_export(log = false)]
 unsafe extern "cdecl" fn UPLAY_Update() -> bool {
     true
+}
+
+#[cfg(test)]
+mod friend_presence_tests {
+    use super::*;
+
+    fn friend(id: &str, online: bool) -> crate::api::Friend {
+        crate::api::Friend {
+            id: id.into(),
+            username: id.into(),
+            is_online: online,
+        }
+    }
+
+    #[test]
+    fn initial_friend_snapshot_emits_a_synchronization_update() {
+        let mut snapshot = None;
+        assert!(update_friend_presence_snapshot(&mut snapshot, vec![friend("test2", false)]));
+    }
+
+    #[test]
+    fn later_online_change_emits_one_update() {
+        let mut snapshot = None;
+        assert!(update_friend_presence_snapshot(&mut snapshot, vec![friend("test2", false)]));
+        assert!(update_friend_presence_snapshot(&mut snapshot, vec![friend("test2", true)]));
+        assert!(!update_friend_presence_snapshot(&mut snapshot, vec![friend("test2", true)]));
+    }
 }

@@ -17,7 +17,6 @@ use windows::Win32::UI::WindowsAndMessaging::DefWindowProcA;
 
 use crate::uplay_r1_loader::Event;
 use crate::uplay_r1_loader::PrivateInviteAbMode;
-use crate::uplay_r1_loader::EVENTS;
 
 static NOTIFICATION_TIMEOUT: Duration = Duration::from_secs(30);
 static INITIAL_POPUP_DURATION: Duration = Duration::from_secs(10);
@@ -396,6 +395,7 @@ impl MyRenderLoop {
                     Event::FriendsPrivateBlobInviteAccepted(_, mode) => mode.label(),
                     Event::PartyGameInviteAccepted(_) => "PartyGameInviteAccepted",
                     Event::FriendsGameInviteAccepted(_, _, _) => "FriendsGameInviteAccepted",
+                    Event::FriendsFriendListUpdated => "FriendsFriendListUpdated",
                     Event::UserAccountSharing => "UserAccountSharing",
                 };
                 if kind == 1 {
@@ -810,8 +810,7 @@ impl ImguiRenderLoop for MyRenderLoop {
 }
 
 fn init_hudhook<T: hudhook::Hooks + 'static>(invites: crossbeam_channel::Receiver<Result<Option<InviteEvent>, crate::api::Error>>) -> anyhow::Result<()> {
-    let (tx, rx) = mpsc::channel();
-    EVENTS.get_or_init(|| Mutex::new(rx));
+    let tx = crate::uplay_r1_loader::event_sender();
     hudhook::Hudhook::builder()
         .with::<T>(MyRenderLoop {
             tx,

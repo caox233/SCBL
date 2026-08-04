@@ -792,7 +792,7 @@ public partial class MainWindow : Window
             GetLauncherBaseDirectory(),
             bindIp,
             TimeSpan.FromSeconds(1.3));
-        if (!stable)
+        if (!stable && !_tunnelService.IsRunning && !_tunnelService.HasRunningTunnelClientProcess())
             throw new InvalidOperationException(L(
                 "EasyTier动态虚拟IP尚未稳定，已阻止启动游戏。请稍后重试。",
                 "The EasyTier dynamic virtual IP is not stable yet. Game launch was blocked; please retry shortly."));
@@ -802,6 +802,13 @@ public partial class MainWindow : Window
             throw new InvalidOperationException(L(
                 "没有找到当前EasyTier虚拟IP对应的网卡路由。",
                 "No adapter route was found for the current EasyTier virtual IP."));
+
+        if (!stable)
+        {
+            // The CLI portal can briefly be busy while first-run account and peer discovery
+            // requests run in parallel. The live process and OS adapter checks remain strict.
+            LogService.Warning($"EasyTier assigned-IP stability sampling was inconclusive; continuing because the tunnel process and OS adapter are healthy. ip={bindIp}, ifIndex={interfaceIndex}");
+        }
 
         EasyTierBroadcastRelayStatus broadcast = _tunnelService.GetUdpBroadcastRelayStatus();
         if (!broadcast.Enabled)
@@ -820,7 +827,7 @@ public partial class MainWindow : Window
         else
             LogService.Info("EasyTier UDP broadcast relay is configured and no startup failure was observed.");
 
-        LogService.Info($"Dynamic virtual LAN fast preflight passed. ip={bindIp}, ifIndex={interfaceIndex}, addressing=dhcp, broadcastEnabled={broadcast.Enabled}, broadcastConfirmed={broadcast.Confirmed}, broadcastDegraded={broadcast.Degraded}");
+        LogService.Info($"Dynamic virtual LAN fast preflight passed. ip={bindIp}, ifIndex={interfaceIndex}, addressing=dhcp, stabilityConfirmed={stable}, broadcastEnabled={broadcast.Enabled}, broadcastConfirmed={broadcast.Confirmed}, broadcastDegraded={broadcast.Degraded}");
         _ = RefreshServerPathMetadataAsync(force: true);
     }
 

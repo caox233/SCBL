@@ -15,9 +15,10 @@ python3 server/manager/build.py --output dist/scblctl.pyz
 python3 dist/scblctl.pyz --help
 ```
 
-当前第一阶段已经提供：新配置生成和校验、配置影响范围、服务状态、只读诊断、
-单组件重启、统一菜单、脚本内 IPv6 DDNS，以及本地运行时包 SHA256 校验、原子发布
-与安装失败回滚。
+当前管理器提供：新配置生成和校验、配置影响范围、服务状态、只读诊断、单组件重启、
+脚本内 DDNS、服务端安装/修复/更新、客户端完整 ZIP 与不可变组件发布、三类客户端
+公告、SQLite 在线一致性备份和旧备份清理。发布文件先校验再原子替换，服务端部署失败
+会回滚；会重启运行时的操作在检测到在线玩家时默认禁止。
 
 全新 Linux 主机可运行 `server/bootstrap/install.sh`。安装器只询问公网入口、更新
 通道和是否启用 DDNS；它不读取任何旧版配置。运行时包必须带
@@ -35,14 +36,39 @@ powershell -ExecutionPolicy Bypass -File server/packaging/build-runtime.ps1
 EasyTier Linux 二进制、控制平面和更新服务一起封装。Linux 服务端只接收最终
 `SCBL-Server-Runtime-vX.Y.Z-linux-x86_64.tar.gz`，不安装 Cargo/Rust，也不接收源码。
 
-## 统一更新源
+## 服务端部署与客户端发布
 
 默认更新仓库明确固定为 `caox233/SCBL`，复制或 Fork 源码不会自动改变更新源。
 高级用户主动修改 `updates.repository` 后才会使用其他仓库。
 
-更新菜单不再区分“客户端升级”和“服务端升级”。一次在线检查读取同一个已签名
-清单，同时规划 `client.*` 与 `server.*` 组件；一个本地 `.scblpatch` 也可以同时
-携带两类组件。执行前必须完整显示计划，执行后共同写入更新历史并支持回滚。
+管理入口仍是同一个 `SCBL`，但生命周期明确分开：服务端部署包只包含管理器与 Linux
+运行时；客户端发布单独管理正式完整包、组件和公告。两者不共享版本号、事务或回滚，
+客户端公告调整不会触发任何游戏服务重启。
+
+服务端菜单显示“首次安装 / 修复 / 更新”：安装和修复使用完整安装包，更新使用补丁包，
+这些是后台校验规则，不在交互菜单中暴露实现术语。三项均支持 GitHub、Xshell `rz` 和
+服务器现有路径。正式文件名为 `SCBL-Server-Full.scblfull` 与
+`SCBL-Server-Patch.scblpatch`。完整安装包必须包含 `server.manager` 和
+`server.runtime`，补丁包可只包含其中一个。
+
+客户端完整包从 GitHub 下载时会先读取 `VERSION_CLIENT` 和 Release 的 SHA256 文件，
+再校验 ZIP 内逐文件清单。服务端只公布一个当前正式客户端版本，不提供最低版本设置；
+普通客户端必须与它完全一致。测试服务器可单独开启 `testing.allow_newer_clients`，并且
+只有用 `--test` 启动的较高版本客户端才会获得例外，生产服务器默认关闭。
+
+组件按“测试发布 -> 同一 SHA256 提升到正式通道”管理，版本目录不可变；Hooks 可在
+开始游戏前生效，Route Guard、EasyTier 和 Updater 在下次启动时应用。滚动公告、启动
+公告和更新公告均由客户端发布菜单原子写入；更新公告只会嵌入与其版本相同的客户端清单。
+
+## 修复与备份
+
+`SCBL repair` 会先复核当前运行时的 `server-package.json` 和所有文件摘要，然后重新
+生成托管配置、systemd 服务和 UFW 规则并执行健康检查，不会重新编译服务端。
+
+`SCBL backup create` 使用 SQLite Backup API 在线复制玩家数据库，并备份 `/etc/scbl`、
+Dedicated ticket、平衡文件、客户端更新清单和 DDNS 配置。默认不重复打包体积较大的
+客户端发布 ZIP；需要完整离线副本时使用 `--include-client-packages`。备份和 SHA256
+文件均为 `0600`，保存在 `/var/backups/scbl`。
 
 ## IPv6 DDNS
 

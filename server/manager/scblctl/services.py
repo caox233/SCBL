@@ -18,7 +18,6 @@ SERVICES = (
     ServiceDefinition("control", "scbl-control-plane.service"),
     ServiceDefinition("update", "scbl-update.service"),
     ServiceDefinition("ddns", "ddns-go.service", required=False),
-    ServiceDefinition("package-watch", "scbl-package-watch.timer", required=False),
 )
 
 SERVICE_BY_COMPONENT = {service.component: service for service in SERVICES}

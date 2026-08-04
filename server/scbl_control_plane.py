@@ -33,6 +33,9 @@ SCBL_ROOT = Path(os.environ.get("SCBL_ROOT", "/opt/scbl-public"))
 DB_PATH = Path(os.environ.get("SCBL_DB_PATH", str(SCBL_ROOT / "server" / "5th-echelon.db")))
 SERVER_TOOL_VERSION = os.environ.get("SCBL_SERVER_TOOL_VERSION", "0.0.0").strip()
 MAINTENANCE = os.environ.get("SCBL_MAINTENANCE", "n").strip().lower() in {"1", "y", "yes", "true", "on"}
+ALLOW_NEWER_TEST_CLIENTS = os.environ.get(
+    "SCBL_ALLOW_NEWER_TEST_CLIENTS", "n"
+).strip().lower() in {"1", "y", "yes", "true", "on"}
 HEARTBEAT_TTL_SECONDS = max(10, int(os.environ.get("SCBL_HEARTBEAT_TTL", "20")))
 MAX_BODY_BYTES = 32 * 1024
 MAX_CLOCK_SKEW_SECONDS = 90
@@ -102,6 +105,18 @@ def version_tuple(value: str) -> tuple[int, int, int]:
         return (0, 0, 0)
 
 
+def client_version_accepted(client_version: str, client_channel: str, required_version: str) -> bool:
+    required = version_tuple(required_version)
+    current = version_tuple(client_version)
+    if required == (0, 0, 0) or current == (0, 0, 0):
+        return False
+    if current == required:
+        return True
+    return (
+        ALLOW_NEWER_TEST_CLIENTS
+        and clean_text(client_channel, 16).lower() == "test"
+        and current > required
+    )
 @dataclass
 class ClientState:
     username: str
@@ -808,9 +823,10 @@ class Handler(BaseHTTPRequestHandler):
         if parsed.path == "/v1/bootstrap":
             username = clean_text((query.get("username") or [""])[0], 64)
             client_version = clean_text((query.get("clientVersion") or [""])[0], 32)
+            client_channel = clean_text((query.get("clientChannel") or ["stable"])[0], 16)
             peers = decorated_clients(STATE.active_clients())
             required_version = required_client_version()
-            accepted = bool(required_version) and version_tuple(client_version) == version_tuple(required_version)
+            accepted = client_version_accepted(client_version, client_channel, required_version)
             self.send_json(
                 HTTPStatus.OK,
                 {

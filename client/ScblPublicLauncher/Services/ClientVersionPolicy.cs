@@ -4,13 +4,13 @@ namespace SplinterCellCNLauncher.Services;
 
 internal static class ClientVersionPolicy
 {
-    internal static bool IsUpgradeRequired(string currentVersion, string targetVersion)
+    internal static bool IsUpdateRequired(string currentVersion, string targetVersion)
     {
         if (!TryParse(targetVersion, out Version target))
             throw new FormatException("目标客户端版本号无效：" + targetVersion);
         if (!TryParse(currentVersion, out Version current))
             return true;
-        return target > current;
+        return target != current;
     }
 
     internal static int Compare(string left, string right)

@@ -65,6 +65,51 @@ class Provisioner:
             package_dir = extract_runtime_archive(archive_path, Path(temporary))
             return self.install(config, package_dir)
 
+    def repair(self, config: ServerConfig) -> Path:
+        """Rebuild managed files from the active, already verified release."""
+
+        self._require_linux_root()
+        errors = config.validate()
+        if errors:
+            raise ProvisionError("配置无效：\n- " + "\n- ".join(errors))
+        current = Path(DEPLOYMENT_PATHS.current)
+        if not current.is_symlink():
+            raise ProvisionError(f"当前运行时链接不存在或无效：{current}")
+        target = current.resolve(strict=True)
+        self.verify(target)
+        self._create_accounts()
+        self._create_directories(config)
+        self._install_runtime_files(config, target)
+        self._write_systemd_units(config)
+        self._configure_firewall(config)
+        self._start_and_verify(config)
+        return target
+
+    def apply_testing_setting(self, config: ServerConfig) -> None:
+        """Apply the isolated test-client flag without restarting game services."""
+
+        self._require_linux_root()
+        errors = config.validate()
+        if errors:
+            raise ProvisionError("配置无效：\n- " + "\n- ".join(errors))
+        current = Path(DEPLOYMENT_PATHS.current)
+        if not current.is_symlink():
+            raise ProvisionError("当前服务端尚未安装")
+        self.verify(current.resolve(strict=True))
+        _atomic_write_text(
+            Path("/etc/scbl/runtime.env"),
+            render_runtime_env(config, version=__version__),
+            0o600,
+        )
+        self._run_checked(("systemctl", "restart", "scbl-control-plane.service"), timeout=45)
+        status = self.systemd.status(
+            next(item for item in SERVICES if item.component == "control")
+        )
+        if status.active != "active":
+            raise ProvisionError(
+                f"控制面重启失败：{status.active}/{status.sub}"
+            )
+
     def _require_linux_root(self) -> None:
         if os.name != "posix" or not Path("/proc").exists():
             raise ProvisionError("服务端安装只能在 Linux 上运行")

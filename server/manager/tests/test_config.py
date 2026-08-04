@@ -76,6 +76,7 @@ class ConfigTests(unittest.TestCase):
         config = ServerConfig.new(public_host="192.0.2.10")
         self.assertEqual("caox233/SCBL", config.updates.repository)
         self.assertEqual("stable", config.updates.channel)
+        self.assertFalse(config.testing.allow_newer_clients)
 
 
 if __name__ == "__main__":

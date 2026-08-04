@@ -27,6 +27,9 @@ def render_runtime_env(config: ServerConfig, *, version: str) -> str:
         "SCBL_SECRET": config.network.secret,
         "SCBL_DB_PATH": f"{paths.data}/dedicated/5th-echelon.db",
         "SCBL_SERVER_TOOL_VERSION": version,
+        "SCBL_ALLOW_NEWER_TEST_CLIENTS": (
+            "y" if config.testing.allow_newer_clients else "n"
+        ),
         "SCBL_HEARTBEAT_TTL": config.services.heartbeat_ttl,
         "SCBL_VIRTUAL_NET": config.network.virtual_network,
         "SCBL_MTU": config.network.mtu,

@@ -43,7 +43,7 @@ public sealed class ControlPlaneService : IDisposable
         string tunnelSecret,
         CancellationToken cancellationToken = default)
     {
-        string path = $"/v1/bootstrap?username={Uri.EscapeDataString(username ?? string.Empty)}&clientVersion={Uri.EscapeDataString(clientVersion ?? string.Empty)}";
+        string path = $"/v1/bootstrap?username={Uri.EscapeDataString(username ?? string.Empty)}&clientVersion={Uri.EscapeDataString(clientVersion ?? string.Empty)}&clientChannel={Uri.EscapeDataString(App.ComponentUpdateChannelName)}";
         return SendAsync<ControlPlaneBootstrapContext>(HttpMethod.Get, path, null, localBindIp, tunnelSecret, "bootstrap", TimeSpan.FromSeconds(2), cancellationToken);
     }
 

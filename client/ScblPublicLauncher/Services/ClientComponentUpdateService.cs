@@ -14,10 +14,9 @@ namespace SplinterCellCNLauncher.Services;
 
 /// <summary>
 /// Resolves immutable client components from the selected stable/test manifest.
-/// Test-channel components are downloaded into a versioned verified cache. Hooks can be
+/// Channel components are downloaded into a versioned verified cache. Hooks can be
 /// activated immediately before game start; next-launch components are staged for the
-/// startup bootstrap layer. Stable remains read-only until signed-manifest verification
-/// is implemented.
+/// startup bootstrap layer. Every downloaded artifact is pinned by size and SHA256.
 /// </summary>
 public sealed class ClientComponentUpdateService
 {
@@ -51,12 +50,6 @@ public sealed class ClientComponentUpdateService
     public async Task<VerifiedClientComponent?> ResolveHooksForSelectedChannelAsync(
         CancellationToken cancellationToken = default)
     {
-        if (App.ComponentUpdateChannel == ClientUpdateChannel.Stable)
-        {
-            LogService.Info("Stable component activation is disabled until signed manifests are available; using packaged Hooks.");
-            return null;
-        }
-
         IReadOnlyDictionary<string, VerifiedClientComponent> components =
             await ReconcileSelectedChannelAsync(cancellationToken).ConfigureAwait(false);
         if (components.TryGetValue(HooksComponentName, out VerifiedClientComponent? hooks))
@@ -79,17 +72,6 @@ public sealed class ClientComponentUpdateService
         {
             byte[] manifestBytes = await Http.GetByteArrayAsync(manifestUri, cancellationToken).ConfigureAwait(false);
             ClientComponentManifest manifest = ParseAndValidateManifest(manifestBytes, manifestUri, channel);
-
-            if (!testChannel)
-            {
-                foreach ((string name, ClientComponentDefinition definition) in manifest.Components)
-                {
-                    ValidateDefinition(name, definition, manifestUri);
-                    LogService.Info(
-                        $"Stable component manifest observed read-only: component={name}, version={definition.Version}, sha256={definition.Sha256.ToLowerInvariant()}, source={manifestUri}");
-                }
-                return new Dictionary<string, VerifiedClientComponent>(StringComparer.OrdinalIgnoreCase);
-            }
 
             var verified = new Dictionary<string, VerifiedClientComponent>(StringComparer.OrdinalIgnoreCase);
             IReadOnlyDictionary<string, (string Version, string Sha256)> installed = ReadInstalledComponentVersions(channel);
@@ -247,16 +229,38 @@ public sealed class ClientComponentUpdateService
         string candidateVersion,
         string candidateSha256)
     {
-        Version current = ParseVersion(currentVersion);
-        Version candidate = ParseVersion(candidateVersion);
-        if (candidate < current)
+        int comparison = CompareComponentVersions(currentVersion, candidateVersion);
+        if (comparison > 0)
             throw new InvalidDataException($"组件 {name} 拒绝降级：current={currentVersion}, candidate={candidateVersion}。");
-        if (candidate == current
+        if (comparison == 0
+            && currentVersion.Equals(candidateVersion, StringComparison.OrdinalIgnoreCase)
             && !currentSha256.Equals(candidateSha256, StringComparison.OrdinalIgnoreCase))
         {
             throw new InvalidDataException(
                 $"组件 {name} 的同一版本出现不同 SHA256；不可变组件不能被同版本覆盖。version={candidateVersion}。");
         }
+    }
+
+    private static int CompareComponentVersions(string current, string candidate)
+    {
+        int[] left = Regex.Matches(current ?? "", "[0-9]+")
+            .Select(match => int.Parse(match.Value, System.Globalization.CultureInfo.InvariantCulture))
+            .ToArray();
+        int[] right = Regex.Matches(candidate ?? "", "[0-9]+")
+            .Select(match => int.Parse(match.Value, System.Globalization.CultureInfo.InvariantCulture))
+            .ToArray();
+        if (left.Length == 0 || right.Length == 0)
+            throw new InvalidDataException($"组件版本号必须包含数字：current={current}, candidate={candidate}。");
+        int length = Math.Max(left.Length, right.Length);
+        for (int index = 0; index < length; index++)
+        {
+            int lhs = index < left.Length ? left[index] : 0;
+            int rhs = index < right.Length ? right[index] : 0;
+            int comparison = lhs.CompareTo(rhs);
+            if (comparison != 0)
+                return comparison;
+        }
+        return 0;
     }
 
     private static IReadOnlyDictionary<string, (string Version, string Sha256)> ReadInstalledComponentVersions(string channel)

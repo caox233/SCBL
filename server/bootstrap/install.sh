@@ -12,7 +12,8 @@ trap cleanup EXIT
 PUBLIC_HOST="${SCBL_PUBLIC_HOST:-}"
 CHANNEL="${SCBL_UPDATE_CHANNEL:-stable}"
 DDNS_ENABLED="${SCBL_DDNS_ENABLED:-y}"
-RUNTIME_PACKAGE="${SCBL_RUNTIME_PACKAGE:-}"
+DEPLOYMENT_PACKAGE="${SCBL_DEPLOYMENT_PACKAGE:-}"
+INSTALL_ONLINE="${SCBL_INSTALL_ONLINE:-n}"
 
 usage() {
   cat <<'EOF'
@@ -20,7 +21,8 @@ usage() {
   --public-host IP或域名   公网入口
   --channel stable|test   更新通道，默认 stable
   --no-ddns               不启用 DDNS-GO
-  --runtime-package 文件  配置完成后安装本地运行时包
+  --package 文件          使用已有安装包完成首次安装
+  --online                从配置的 GitHub 源完成首次安装
 EOF
 }
 
@@ -29,7 +31,8 @@ while [[ $# -gt 0 ]]; do
     --public-host) PUBLIC_HOST="${2:?--public-host 缺少值}"; shift 2 ;;
     --channel) CHANNEL="${2:?--channel 缺少值}"; shift 2 ;;
     --no-ddns) DDNS_ENABLED=n; shift ;;
-    --runtime-package) RUNTIME_PACKAGE="${2:?--runtime-package 缺少值}"; shift 2 ;;
+    --package) DEPLOYMENT_PACKAGE="${2:?--package 缺少值}"; shift 2 ;;
+    --online) INSTALL_ONLINE=y; shift ;;
     -h|--help) usage; exit 0 ;;
     *) echo "未知参数：$1" >&2; usage >&2; exit 2 ;;
   esac
@@ -134,8 +137,10 @@ if [[ ! -f "$CONFIG_TARGET" ]]; then
 fi
 
 echo "SCBL 2.0 管理器 v$VERSION 已安装。"
-if [[ -n "$RUNTIME_PACKAGE" ]]; then
-  /usr/local/bin/SCBL install --runtime-package "$RUNTIME_PACKAGE"
+if [[ -n "$DEPLOYMENT_PACKAGE" ]]; then
+  /usr/local/bin/SCBL deploy install --package "$DEPLOYMENT_PACKAGE"
+elif [[ "$INSTALL_ONLINE" == "y" ]]; then
+  /usr/local/bin/SCBL deploy install --online
 else
-  echo "下一步：SCBL install --runtime-package <运行时包.tar.gz>"
+  echo "下一步：运行 SCBL，在“服务端部署”中选择“首次安装”。"
 fi

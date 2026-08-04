@@ -34,12 +34,18 @@ def build_parser() -> argparse.ArgumentParser:
     init.add_argument("--force", action="store_true")
     init.set_defaults(handler=cmd_init)
 
-    install = subcommands.add_parser("install", help="从已校验的本地运行时包全新安装")
-    install_source = install.add_mutually_exclusive_group(required=True)
-    install_source.add_argument("--runtime-dir", type=Path)
-    install_source.add_argument("--runtime-package", type=Path)
-    install.add_argument("--dry-run", action="store_true")
-    install.set_defaults(handler=cmd_install)
+    deploy = subcommands.add_parser("deploy", help="安装、修复或更新服务端")
+    deploy.add_argument("operation", choices=("install", "repair", "update"))
+    deploy_source = deploy.add_mutually_exclusive_group(required=True)
+    deploy_source.add_argument("--package", type=Path)
+    deploy_source.add_argument("--online", action="store_true")
+    deploy.add_argument("--dry-run", action="store_true")
+    deploy.add_argument(
+        "--force-online",
+        action="store_true",
+        help="即使检测到在线玩家或无法读取在线状态也执行",
+    )
+    deploy.set_defaults(handler=cmd_deploy)
 
     status = subcommands.add_parser("status", help="查看所有组件状态")
     status.add_argument("--json", action="store_true")
@@ -94,6 +100,24 @@ def build_parser() -> argparse.ArgumentParser:
     ddns_status.add_argument("--log", action="store_true")
     ddns_status.set_defaults(handler=cmd_ddns_status)
 
+    publish_client = subcommands.add_parser("publish-client", help="校验并发布客户端完整 ZIP")
+    publish_client.add_argument("package", type=Path)
+    publish_client.add_argument("--note", action="append", default=[])
+    publish_client.add_argument("--force", action="store_true")
+    publish_client.add_argument("--dry-run", action="store_true")
+    publish_client.set_defaults(handler=cmd_publish_client)
+
+    backup = subcommands.add_parser("backup", help="创建和管理服务端备份")
+    backup_commands = backup.add_subparsers(dest="backup_command", required=True)
+    backup_create = backup_commands.add_parser("create", help="创建一致性备份")
+    backup_create.add_argument("--include-client-packages", action="store_true")
+    backup_create.set_defaults(handler=cmd_backup_create)
+    backup_list = backup_commands.add_parser("list", help="列出备份")
+    backup_list.set_defaults(handler=cmd_backup_list)
+    backup_prune = backup_commands.add_parser("prune", help="删除旧备份")
+    backup_prune.add_argument("--keep", type=int, default=5)
+    backup_prune.set_defaults(handler=cmd_backup_prune)
+
     menu = subcommands.add_parser("menu", help="打开交互式管理菜单")
     menu.set_defaults(handler=cmd_menu)
     return parser
@@ -114,35 +138,36 @@ def cmd_init(args: argparse.Namespace) -> int:
     return 0
 
 
-def cmd_install(args: argparse.Namespace) -> int:
+def cmd_deploy(args: argparse.Namespace) -> int:
     import tempfile
 
-    from .release import RuntimeManifest, extract_runtime_archive
+    from .deployment import DeploymentManager, download_online_package
 
-    config = load_config(_paths(args).config)
-    if args.dry_run and args.runtime_dir is not None:
-        manifest = RuntimeManifest.load(args.runtime_dir)
-        manifest.verify(args.runtime_dir)
-        print(f"运行时包校验通过：v{manifest.version}，{len(manifest.files)} 个文件")
-        print("仅预检，未写入系统。")
-        return 0
-    if args.dry_run:
-        with tempfile.TemporaryDirectory(prefix="scbl-runtime-check-") as temporary:
-            package_dir = extract_runtime_archive(args.runtime_package, Path(temporary))
-            manifest = RuntimeManifest.load(package_dir)
-            manifest.verify(package_dir)
-            print(f"运行时包校验通过：v{manifest.version}，{len(manifest.files)} 个文件")
-            print("仅预检，未写入系统。")
+    paths = _paths(args)
+    config = load_config(paths.config)
+    kind = "patch" if args.operation == "update" else "full"
+    with tempfile.TemporaryDirectory(prefix="scbl-deploy-") as temporary:
+        package = args.package
+        if args.online:
+            suffix = ".scblpatch" if kind == "patch" else ".scblfull"
+            package = download_online_package(
+                config, kind=kind, destination=Path(temporary) / f"online{suffix}"
+            )
+        manager = DeploymentManager(config, paths)
+        verified = manager.verify(package, expected_kind=kind)
+        print(
+            f"部署包校验通过：{verified.package_type} v{verified.version}；"
+            + ", ".join(item.component + "@" + item.version for item in verified.artifacts)
+        )
+        if args.dry_run:
+            print("仅预检，未修改服务器。")
             return 0
-
-    from .provision import Provisioner
-
-    provisioner = Provisioner()
-    if args.runtime_dir is not None:
-        target = provisioner.install(config, args.runtime_dir)
-    else:
-        target = provisioner.install_archive(config, args.runtime_package)
-    print(f"SCBL 服务端安装完成：{target}")
+        result = manager.apply(
+            package, operation=args.operation, allow_online=args.force_online
+        )
+        print("部署完成，已应用：" + ", ".join(result.applied))
+        if result.backup:
+            print(f"操作前备份：{result.backup}")
     return 0
 
 
@@ -306,6 +331,58 @@ def cmd_ddns_status(args: argparse.Namespace) -> int:
     return 0 if status.synchronized and status.active == "active" else 1
 
 
+def cmd_publish_client(args: argparse.Namespace) -> int:
+    from .client_publish import ClientPublisher
+
+    publisher = ClientPublisher()
+    package = publisher.verify(args.package)
+    print(
+        f"客户端包校验通过：v{package.version}，"
+        f"{package.size / 1024 / 1024:.1f} MiB，SHA256={package.sha256}"
+    )
+    if args.dry_run:
+        print("仅预检，未发布。")
+        return 0
+    published = publisher.publish(
+        args.package, release_notes=args.note or None, force=args.force
+    )
+    print(f"客户端 v{published.version} 已发布：{published.archive}")
+    return 0
+
+
+def cmd_backup_create(args: argparse.Namespace) -> int:
+    from .backup import BackupManager
+
+    info = BackupManager(_paths(args)).create(
+        include_client_packages=args.include_client_packages
+    )
+    print(f"备份完成：{info.path}（{info.size / 1024 / 1024:.1f} MiB）")
+    return 0
+
+
+def cmd_backup_list(args: argparse.Namespace) -> int:
+    from .backup import BackupManager
+
+    items = BackupManager(_paths(args)).list()
+    if not items:
+        print("暂无备份。")
+        return 0
+    for item in items:
+        print(
+            f"{item.modified_at.strftime('%Y-%m-%d %H:%M:%SZ')}  "
+            f"{item.size / 1024 / 1024:8.1f} MiB  {item.path}"
+        )
+    return 0
+
+
+def cmd_backup_prune(args: argparse.Namespace) -> int:
+    from .backup import BackupManager
+
+    removed = BackupManager(_paths(args)).prune(keep=args.keep)
+    print(f"已删除 {len(removed)} 份旧备份，保留最新 {args.keep} 份。")
+    return 0
+
+
 def cmd_menu(args: argparse.Namespace) -> int:
     from .menu import run_menu
 
@@ -326,3 +403,6 @@ def main(argv: list[str] | None = None) -> int:
     except (ConfigError, RuntimeError, ValueError) as exc:
         print(f"错误：{exc}", file=sys.stderr)
         return 1
+    except (EOFError, KeyboardInterrupt):
+        print("\n操作已取消。", file=sys.stderr)
+        return 130

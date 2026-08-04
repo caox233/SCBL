@@ -77,6 +77,13 @@ def main() -> None:
         updates.mkdir(parents=True)
         (updates / "client_update_manifest.json").write_text('{"version":"1.0.0"}', encoding="utf-8")
         assert control_plane.required_client_version() == "1.0.0"
+        control_plane.ALLOW_NEWER_TEST_CLIENTS = False
+        assert control_plane.client_version_accepted("1.0.0", "stable", "1.0.0") is True
+        assert control_plane.client_version_accepted("1.0.1", "test", "1.0.0") is False
+        control_plane.ALLOW_NEWER_TEST_CLIENTS = True
+        assert control_plane.client_version_accepted("1.0.1", "test", "1.0.0") is True
+        assert control_plane.client_version_accepted("1.0.1", "stable", "1.0.0") is False
+        control_plane.ALLOW_NEWER_TEST_CLIENTS = False
 
         control_plane.DB_PATH = db_path
         with control_plane._SESSION_LOCK:

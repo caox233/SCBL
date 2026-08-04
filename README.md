@@ -64,7 +64,7 @@ updater       SCBL.Updater.exe
 
 客户端生成的设置、日志、网络状态、组件缓存、更新工作文件和诊断包统一保存在 `temp/计算机名/`。Hooks 使用游戏 `SYSTEM` 目录中的标准 `scbl.toml`；旧 `5th_auth.dat` 不再读取或保留。
 
-`stable` 外置组件替换在组件清单签名验证完成前保持关闭；正式客户端继续使用完整包自带、经过 SHA256 校验的 bootstrap 组件。
+`stable` 与 `test` 组件都使用不可变版本目录、同源下载、大小和 SHA256 校验。测试组件先发布到 `test`，验证后以同一文件和同一 SHA256 提升到 `stable`；正式通道下载失败时继续使用完整包自带的 bootstrap 组件。
 
 ## 构建方式
 

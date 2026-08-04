@@ -1,3 +1,4 @@
+using SplinterCellCNLauncher.Models;
 using System;
 using System.Diagnostics;
 using System.IO;
@@ -144,13 +145,15 @@ public sealed class RemoteClientUpdateService
                         $"Client version check recovered after retry: attempt={attempt}/{CheckAttemptCount}, elapsedMs={stopwatch.ElapsedMilliseconds}, endpoint={manifestUrl}");
                 }
 
-                if (!ClientVersionPolicy.IsUpgradeRequired(current, targetVersion))
+                if (!ClientVersionPolicy.IsUpdateRequired(current, targetVersion))
                 {
-                    if (ClientVersionPolicy.Compare(current, targetVersion) > 0)
-                    {
-                        LogService.Warning(
-                            $"Server client version is older than the installed client; downgrade refused. local={current}, server={targetVersion}");
-                    }
+                    return RemoteUpdateCheckResult.Completed(baseUrl, null);
+                }
+                if (App.ComponentUpdateChannel == ClientUpdateChannel.Test
+                    && ClientVersionPolicy.Compare(current, targetVersion) > 0)
+                {
+                    LogService.Warning(
+                        $"Newer local test client retained: local={current}, formal={targetVersion}, channel=test");
                     return RemoteUpdateCheckResult.Completed(baseUrl, null);
                 }
 

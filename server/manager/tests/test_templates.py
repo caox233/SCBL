@@ -34,6 +34,7 @@ class TemplateTests(unittest.TestCase):
         rendered = render_runtime_env(self.config, version="2.0.0")
         self.assertIn('SCBL_SECRET="', rendered)
         self.assertIn('SCBL_DB_PATH="/var/lib/scbl/dedicated/5th-echelon.db"', rendered)
+        self.assertIn('SCBL_ALLOW_NEWER_TEST_CLIENTS="n"', rendered)
         self.assertNotIn("export ", rendered)
 
     def test_units_use_separate_users_and_hardening(self) -> None:

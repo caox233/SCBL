@@ -66,6 +66,11 @@ class UpdatesSection:
 
 
 @dataclass(slots=True)
+class TestingSection:
+    allow_newer_clients: bool = False
+
+
+@dataclass(slots=True)
 class DdnsSection:
     enabled: bool = True
     listen: str = "127.0.0.1:9876"
@@ -80,6 +85,7 @@ SECTION_TYPES = {
     "services": ServicesSection,
     "easytier": EasyTierSection,
     "updates": UpdatesSection,
+    "testing": TestingSection,
     "ddns": DdnsSection,
 }
 
@@ -92,6 +98,7 @@ class ServerConfig:
     services: ServicesSection
     easytier: EasyTierSection
     updates: UpdatesSection
+    testing: TestingSection
     ddns: DdnsSection
 
     SECRET_FIELDS: ClassVar[set[str]] = {"network.secret"}
@@ -105,6 +112,7 @@ class ServerConfig:
             services=ServicesSection(),
             easytier=EasyTierSection(),
             updates=UpdatesSection(),
+            testing=TestingSection(),
             ddns=DdnsSection(),
         )
 
@@ -333,6 +341,7 @@ IMPACT_MAP: dict[str, frozenset[str]] = {
     "server.public_host": frozenset({"client-metadata", "ddns"}),
     "updates.repository": frozenset({"updater"}),
     "updates.channel": frozenset({"updater"}),
+    "testing.allow_newer_clients": frozenset({"control"}),
     "network.public_port": frozenset({"tunnel", "firewall", "client-metadata"}),
     "network.wss_port": frozenset({"tunnel", "firewall", "client-metadata"}),
     "network.secret": frozenset({"tunnel", "client-metadata"}),

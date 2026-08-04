@@ -43,6 +43,12 @@
 
   <ItemGroup>
     <Resource Include="logo.ico" />
+    <Resource Include="Assets\scbl-launcher-background.png" />
+    <Content Include="Assets\launcher_background.mp4"
+             CopyToOutputDirectory="PreserveNewest"
+             CopyToPublishDirectory="PreserveNewest"
+             TargetPath="launcher_background.mp4"
+             ExcludeFromSingleFile="true" />
   </ItemGroup>
 
   <!-- Save templates remain embedded because they are tiny and versioned with Launcher behavior.

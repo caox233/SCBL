@@ -57,6 +57,10 @@ pub struct Addresses {
     pub func_thread_starter: Option<Address>,
     pub func_goal_change_state: Option<Address>,
     pub func_net_core: Option<Address>,
+    /// Returns whether the current lobby kind is a playable multiplayer lobby.
+    /// SCBL also uses this verified entry point to enforce the lobby player cap.
+    #[serde(default)]
+    pub func_lobby_settings_players: Option<Address>,
     pub func_net_result_core: Option<Address>,
     pub func_net_result_session: Option<Address>,
     pub func_net_result_lobby: Option<Address>,
@@ -235,6 +239,8 @@ fn dx9_addresses() -> HashMap<[u8; 32], Addresses> {
         func_thread_starter: Some(0x07be840),
         func_goal_change_state: Some(0x0af3e20),
         func_net_core: Some(0x0b1cc10),
+        // Retail DX9 SHA256 158efc5d...49bb5a05.
+        func_lobby_settings_players: Some(0x00A44DC0),
         func_net_result_core: Some(0x00ab9a80),
         func_net_result_session: Some(0x0ab98b0),
         func_net_result_lobby: Some(0x0a9d7f0),
@@ -498,6 +504,9 @@ fn dx11_addresses() -> HashMap<[u8; 32], Addresses> {
         func_thread_starter: Some(0x5132C0),
         func_goal_change_state: Some(0x858ED0),
         func_net_core: Some(0x8820C0),
+        // Retail DX11 SHA256 c6b9f330...659eb4bc. The equivalent DX9
+        // routine is at 0x00A44DC0; the object layout is identical.
+        func_lobby_settings_players: Some(0x007A73D0),
         func_net_result_core: Some(0x81E020),
         func_net_result_session: Some(0x81DE50),
         func_net_result_lobby: Some(0x801260),
@@ -911,6 +920,7 @@ pub fn search_patterns(filepath: &Path) -> Result<Addresses, Error> {
         func_thread_starter: None,
         func_goal_change_state: None,
         func_net_core: None,
+        func_lobby_settings_players: None,
         func_net_result_core: None,
         func_net_result_session: None,
         func_net_result_lobby: None,

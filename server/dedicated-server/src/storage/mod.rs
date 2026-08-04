@@ -1847,57 +1847,57 @@ mod tests {
     }
 
     #[test]
-    fn join_session_records_eight_participants_without_capacity_gate() {
-        let storage = create_test_storage("join-eight-participants");
-        insert_users(&storage, 8);
-        for user_id in 1..=8 {
+    fn join_session_records_twelve_participants_without_capacity_gate() {
+        let storage = create_test_storage("join-twelve-participants");
+        insert_users(&storage, 12);
+        for user_id in 1..=12 {
             storage
                 .register_urls(user_id, vec![format!("prudp:/address=10.66.0.{user_id};port=13000;sid=14;type=2")])
                 .unwrap();
         }
 
         let session_id = storage.create_game_session(1, 42, "101 => 1".to_string()).unwrap();
-        for user_id in 2..=8 {
+        for user_id in 2..=12 {
             assert!(storage.join_game_session_unbounded(user_id, 42, session_id).unwrap());
         }
         // A repeated JoinSession and a later AddParticipants callback must not
         // inflate the participant count.
-        assert!(storage.join_game_session_unbounded(8, 42, session_id).unwrap());
-        storage.add_participants(1, 42, session_id, Vec::new(), vec![8]).unwrap();
+        assert!(storage.join_game_session_unbounded(12, 42, session_id).unwrap());
+        storage.add_participants(1, 42, session_id, Vec::new(), vec![12]).unwrap();
 
         let (_, _, participant_ids) = storage.game_session_diagnostics(42, session_id).unwrap().unwrap();
-        assert_eq!(participant_ids, (1..=8).collect::<Vec<_>>());
-        let sessions_with_eighth = storage.search_sessions_with_participants(42, &[8]).unwrap();
-        assert_eq!(sessions_with_eighth.len(), 1);
-        assert_eq!(sessions_with_eighth[0].participants.len(), 8);
+        assert_eq!(participant_ids, (1..=12).collect::<Vec<_>>());
+        let sessions_with_twelfth = storage.search_sessions_with_participants(42, &[12]).unwrap();
+        assert_eq!(sessions_with_twelfth.len(), 1);
+        assert_eq!(sessions_with_twelfth[0].participants.len(), 12);
 
-        assert!(!storage.join_game_session_unbounded(8, 42, session_id + 10_000).unwrap());
+        assert!(!storage.join_game_session_unbounded(12, 42, session_id + 10_000).unwrap());
     }
 
     #[test]
-    fn supports_eight_participants_without_capacity_gate() {
-        let storage = create_test_storage("eight-participants");
-        insert_users(&storage, 8);
-        for user_id in 1..=8 {
+    fn supports_twelve_participants_without_capacity_gate() {
+        let storage = create_test_storage("twelve-participants");
+        insert_users(&storage, 12);
+        for user_id in 1..=12 {
             storage
                 .register_urls(user_id, vec![format!("prudp:/address=10.66.0.{user_id};port=13000;sid=14;type=2")])
                 .unwrap();
         }
 
         let session_id = storage.create_game_session(1, 42, "101 => 1".to_string()).unwrap();
-        for user_id in 2..=8 {
+        for user_id in 2..=12 {
             storage.add_participants(1, 42, session_id, Vec::new(), vec![user_id]).unwrap();
         }
 
         let (_, _, participant_ids) = storage.game_session_diagnostics(42, session_id).unwrap().unwrap();
-        assert_eq!(participant_ids, (1..=8).collect::<Vec<_>>());
+        assert_eq!(participant_ids, (1..=12).collect::<Vec<_>>());
         assert!(storage.game_session_is_active(42, session_id).unwrap());
 
         let all_sessions = storage.search_sessions_with_participants(42, &[]).unwrap();
         assert_eq!(all_sessions.len(), 1);
-        assert_eq!(all_sessions[0].participants.len(), 8);
-        let sessions_with_eighth = storage.search_sessions_with_participants(42, &[8]).unwrap();
-        assert_eq!(sessions_with_eighth.len(), 1);
+        assert_eq!(all_sessions[0].participants.len(), 12);
+        let sessions_with_twelfth = storage.search_sessions_with_participants(42, &[12]).unwrap();
+        assert_eq!(sessions_with_twelfth.len(), 1);
     }
 
     #[test]

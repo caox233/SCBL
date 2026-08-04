@@ -309,11 +309,75 @@ unsafe fn event_probe_read_u32(base: *const c_void, offset: usize) -> Option<u32
     }
 }
 
+unsafe fn event_probe_read_u8(base: *const c_void, offset: usize) -> Option<u8> {
+    if base.is_null() {
+        None
+    } else {
+        Some(std::ptr::read_unaligned(base.cast::<u8>().add(offset)))
+    }
+}
+
 unsafe fn event_probe_read_ptr(base: *const c_void, offset: usize) -> *const c_void {
     if base.is_null() {
         std::ptr::null()
     } else {
         std::ptr::read_unaligned(base.cast::<u8>().add(offset).cast::<*const c_void>())
+    }
+}
+
+fn migration_event_category(name: &str) -> Option<&'static str> {
+    if name.contains("SetMigrationMode") {
+        Some("migration-mode")
+    } else if name.contains("MasterRole") || name.contains("GoneMaster") || name.contains("MasterDeleted") {
+        Some("object-authority")
+    } else if name.contains("MementoActivation") || name.contains("RecreateReplica") {
+        Some("object-recovery")
+    } else if name.contains("CreateReplica") || name.contains("ReplicaCreated") || name.contains("ReplicaReady") || name.contains("DeleteReplica") {
+        Some("replica-lifecycle")
+    } else if name.contains("HostMigration") || name.contains("SessionHost") || name.contains("HostElected") || name.contains("HostTransfer") {
+        Some("session-migration")
+    } else if name.contains("PeerGone") || name.contains("PeerUnreachable") || name.contains("NetworkInactivityRaised") || name.contains("SessionDissolve") {
+        Some("peer-loss")
+    } else {
+        None
+    }
+}
+
+fn migration_event_probe(marker: &str, owner: *const c_void, event: *const c_void, event_name: &str) {
+    let Some(category) = migration_event_category(event_name) else {
+        return;
+    };
+
+    unsafe {
+        if category == "migration-mode" {
+            // Static analysis of both retail layouts shows SetMigrationMode is
+            // 0x40 bytes. 0x1c..0x38 is the object descriptor; the two trailing
+            // bytes are the migration-mode payload and its companion flag.
+            let descriptor = [
+                event_probe_read_u32(event, 0x1c),
+                event_probe_read_u32(event, 0x20),
+                event_probe_read_u32(event, 0x24),
+                event_probe_read_u32(event, 0x28),
+                event_probe_read_u32(event, 0x2c),
+                event_probe_read_u32(event, 0x30),
+                event_probe_read_u32(event, 0x34),
+                event_probe_read_u32(event, 0x38),
+            ];
+            info!(
+                "SCBL_MIGRATION marker={marker:?} category={category} owner={owner:?} event={event:?} event_name={event_name:?} descriptor={descriptor:?} mode_raw={:?} companion_flag={:?}",
+                event_probe_read_u8(event, 0x3c),
+                event_probe_read_u8(event, 0x3d),
+            );
+        } else {
+            info!(
+                "SCBL_MIGRATION marker={marker:?} category={category} owner={owner:?} event={event:?} event_name={event_name:?} word_4={:?} code={:?} session_id={:?} word_10={:?} word_14={:?}",
+                event_probe_read_u32(event, 0x04),
+                event_probe_read_u32(event, 0x08),
+                event_probe_read_u32(event, 0x0c),
+                event_probe_read_u32(event, 0x10),
+                event_probe_read_u32(event, 0x14),
+            );
+        }
     }
 }
 
@@ -335,6 +399,7 @@ fn storm_event_probe(marker: &str, owner: *const c_void, event: *const c_void) {
             event_probe_read_u32(event, 0x10),
             event_probe_read_u32(event, 0x14),
         );
+        migration_event_probe(marker, owner, event, &event_name);
     }
 }
 
@@ -486,6 +551,15 @@ mod tests {
         let evt_name = get_storm_event_name(instance.as_ptr().cast());
         assert!(evt_name.is_some());
         assert!(evt_name.unwrap().to_str().unwrap() == "hello world");
+    }
+
+    #[test]
+    fn migration_events_are_classified_for_focused_logs() {
+        assert_eq!(migration_event_category("storm::echo::object::inEvent::SetMigrationMode"), Some("migration-mode"));
+        assert_eq!(migration_event_category("storm::echo::object::outEvent::MasterRoleMigrated"), Some("object-authority"));
+        assert_eq!(migration_event_category("storm::echo::session::outEvent::HostMigrationStart"), Some("session-migration"));
+        assert_eq!(migration_event_category("storm::echo::session::outEvent::PeerGone"), Some("peer-loss"));
+        assert_eq!(migration_event_category("storm::echo::voicechat::outEvent::ChatterReady"), None);
     }
 
     #[test]

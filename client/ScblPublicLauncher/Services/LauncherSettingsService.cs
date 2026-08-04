@@ -8,24 +8,30 @@ namespace SplinterCellCNLauncher.Services;
 
 public sealed class LauncherSettingsService
 {
-    public string SettingsPath { get; } = Path.Combine(LogService.ConfigDirectory, "launcher_settings.json");
+    public string SettingsPath { get; }
     private string BackupPath => SettingsPath + ".bak";
+
+    public LauncherSettingsService(string? settingsPath = null)
+    {
+        SettingsPath = string.IsNullOrWhiteSpace(settingsPath)
+            ? Path.Combine(LogService.ConfigDirectory, "launcher_settings.json")
+            : Path.GetFullPath(settingsPath);
+    }
 
     public LauncherSettings Load()
     {
+        LauncherSettings? settings = TryLoadFile(SettingsPath, "primary");
+        if (settings == null && File.Exists(BackupPath))
+        {
+            LogService.Warning("Primary launcher settings are unavailable; attempting backup recovery.");
+            settings = TryLoadFile(BackupPath, "backup");
+            if (settings != null)
+                LogService.Info("Launcher settings recovered from backup: " + BackupPath);
+        }
+
+        settings ??= new LauncherSettings();
         try
         {
-            LauncherSettings settings;
-            if (!File.Exists(SettingsPath))
-            {
-                settings = new LauncherSettings();
-            }
-            else
-            {
-                string json = File.ReadAllText(SettingsPath, Encoding.UTF8);
-                settings = JsonSerializer.Deserialize<LauncherSettings>(json) ?? new LauncherSettings();
-            }
-
             settings = WithDefaults(settings);
             settings.Password = CredentialProtectionService.Unprotect(settings.PasswordProtected);
 
@@ -41,6 +47,23 @@ public sealed class LauncherSettingsService
         {
             LogService.Error(ex);
             return WithDefaults(new LauncherSettings());
+        }
+    }
+
+    private static LauncherSettings? TryLoadFile(string path, string source)
+    {
+        if (!File.Exists(path))
+            return null;
+
+        try
+        {
+            string json = File.ReadAllText(path, Encoding.UTF8);
+            return JsonSerializer.Deserialize<LauncherSettings>(json);
+        }
+        catch (Exception ex)
+        {
+            LogService.Warning($"Launcher settings {source} file is unreadable: path={path}, error={ex.Message}");
+            return null;
         }
     }
 
@@ -103,7 +126,6 @@ public sealed class LauncherSettingsService
         {
             if (File.Exists(path))
             {
-                File.Copy(path, BackupPath, overwrite: true);
                 File.Replace(tmp, path, BackupPath, ignoreMetadataErrors: true);
             }
             else
@@ -140,9 +162,7 @@ public sealed class LauncherSettingsService
             settings.EasyTierNetworkName = PublicTunnelConfig.EasyTierNetworkName;
         if (!Guid.TryParse(settings.EasyTierInstanceId, out _))
             settings.EasyTierInstanceId = Guid.NewGuid().ToString("D");
-        // v1.0.2 reuses TCP 11010 for the fixed server WSS fallback. Migrate the
-        // former default 10443 automatically while preserving deliberate custom ports.
-        if (settings.EasyTierWssPort is <= 0 or > 65535 || settings.EasyTierWssPort == 10443)
+        if (settings.EasyTierWssPort is <= 0 or > 65535)
             settings.EasyTierWssPort = PublicTunnelConfig.DefaultWssPort;
         if (settings.PublicUpdatePort is <= 0 or > 65535)
             settings.PublicUpdatePort = PublicTunnelConfig.DefaultPublicUpdatePort;

@@ -20,6 +20,9 @@ server_settings = (launcher / "MainWindow.Settings.cs").read_text(encoding="utf-
 saves_ui = (launcher / "MainWindow.Saves.cs").read_text(encoding="utf-8")
 announcements = (launcher / "Services/AnnouncementService.cs").read_text(encoding="utf-8")
 component_updates = (launcher / "Services/ClientComponentUpdateService.cs").read_text(encoding="utf-8")
+firewall = (launcher / "Services/FirewallService.cs").read_text(encoding="utf-8")
+orchestrator = (launcher / "Services/NetworkOrchestrator.cs").read_text(encoding="utf-8")
+build_all = (root / "client/build_all_windows.ps1").read_text(encoding="utf-8")
 
 assert 'Path.Combine(ClientRootDirectory, "temp", MachineName)' in log_service
 assert 'Path.Combine(PersistentDataDirectory, "config")' in log_service
@@ -56,6 +59,16 @@ assert "BuildPrivateUpdateBaseUrl(_getUpdatePort())" in announcements
 assert "BuildPrivateUpdateBaseUrl(_getUpdatePort())" in component_updates
 assert 'http://10.66.0.1:18080/' not in announcements
 assert 'http://10.66.0.1:18080/' not in component_updates
+assert ".GetAwaiter().GetResult()" not in component_updates
+assert "Stable component activation is disabled" in component_updates
+
+assert "AddPortRule(" not in firewall
+assert 'private const string ScblVirtualSubnet = "10.66.0.0/24"' in firewall
+assert "DeleteLegacyPortRulesBestEffort" in firewall
+assert "_ = Task.Run(() => _firewallService.EnsureFirewallRulesBestEffort" not in orchestrator
+assert "normalized.Equals(_assignedIp" in orchestrator
+assert "$SettingsExample =" not in build_all
+assert ".scbl-prepared-" in build_all
 
 assert 'Path.Combine(gameDir, "scbl.toml")' in hook_writer
 assert "[User]" in hook_writer

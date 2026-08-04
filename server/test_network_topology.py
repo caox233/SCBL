@@ -13,9 +13,13 @@ server = Path("server/install_public_server.sh").read_text(encoding="utf-8")
 control = Path("server/scbl_control_plane.py").read_text(encoding="utf-8")
 update = Path("server/scbl_update_server.py").read_text(encoding="utf-8")
 
-assert "EasyTierLatencyFirst { get; set; } = false" in settings
-assert "settings.EasyTierLatencyFirst = false;" in settings_service
-assert "settings.EasyTierWssPort == 10443" in settings_service
+assert "EasyTierLatencyFirst" not in settings
+assert "EasyTierEnableP2P" not in settings
+assert "EasyTierWssPort { get; set; } = 11010" in settings
+assert "settings.EasyTierWssPort == 10443" not in settings_service
+assert '"EasyTierLatencyFirst"' not in server
+assert '"EasyTierEnableP2P"' not in server
+assert '"UseCustomPublicEndpoint"' not in server
 assert "private const int RuntimeProfileRevision = 9;" in tunnel
 assert "bind_device = true" in tunnel
 assert 'uris.Add("udp://" + tunnelEndpoint);' in tunnel

@@ -60,8 +60,8 @@ public static class CredentialProtectionService
         }
         catch (Exception ex)
         {
-            LogService.Error("Password encryption failed: " + ex.Message);
-            return string.Empty;
+            LogService.Error("Credential encryption failed: " + ex.Message);
+            throw new InvalidOperationException("Windows DPAPI could not protect the launcher secret.", ex);
         }
         finally
         {

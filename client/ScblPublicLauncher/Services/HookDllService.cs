@@ -40,7 +40,9 @@ public sealed class HookDllService
         }
     }
 
-    public void DeployHookDllSafely(string gameDir)
+    public async Task DeployHookDllSafelyAsync(
+        string gameDir,
+        CancellationToken cancellationToken = default)
     {
         ValidateEmbeddedFiles();
 
@@ -65,7 +67,7 @@ public sealed class HookDllService
 
         BootstrapHook? localTestHook = ResolveLocalTestHook();
         VerifiedClientComponent? external = localTestHook == null
-            ? _componentUpdateService.ResolveHooksForSelectedChannel()
+            ? await _componentUpdateService.ResolveHooksForSelectedChannelAsync(cancellationToken).ConfigureAwait(false)
             : null;
         BootstrapHook bootstrap = localTestHook == null && external == null
             ? ResolveBootstrapHook()

@@ -48,9 +48,17 @@ public sealed class ClientComponentUpdateService
             ["updater"] = new("SCBL.Updater.exe", "next-launch")
         };
 
-    public VerifiedClientComponent? ResolveHooksForSelectedChannel()
+    public async Task<VerifiedClientComponent?> ResolveHooksForSelectedChannelAsync(
+        CancellationToken cancellationToken = default)
     {
-        IReadOnlyDictionary<string, VerifiedClientComponent> components = ReconcileSelectedChannel();
+        if (App.ComponentUpdateChannel == ClientUpdateChannel.Stable)
+        {
+            LogService.Info("Stable component activation is disabled until signed manifests are available; using packaged Hooks.");
+            return null;
+        }
+
+        IReadOnlyDictionary<string, VerifiedClientComponent> components =
+            await ReconcileSelectedChannelAsync(cancellationToken).ConfigureAwait(false);
         if (components.TryGetValue(HooksComponentName, out VerifiedClientComponent? hooks))
             return hooks;
 
@@ -60,7 +68,8 @@ public sealed class ClientComponentUpdateService
         return null;
     }
 
-    public IReadOnlyDictionary<string, VerifiedClientComponent> ReconcileSelectedChannel()
+    public async Task<IReadOnlyDictionary<string, VerifiedClientComponent>> ReconcileSelectedChannelAsync(
+        CancellationToken cancellationToken = default)
     {
         string channel = App.ComponentUpdateChannelName;
         Uri manifestUri = BuildManifestUri(channel);
@@ -68,7 +77,7 @@ public sealed class ClientComponentUpdateService
 
         try
         {
-            byte[] manifestBytes = Http.GetByteArrayAsync(manifestUri).GetAwaiter().GetResult();
+            byte[] manifestBytes = await Http.GetByteArrayAsync(manifestUri, cancellationToken).ConfigureAwait(false);
             ClientComponentManifest manifest = ParseAndValidateManifest(manifestBytes, manifestUri, channel);
 
             if (!testChannel)
@@ -90,7 +99,12 @@ public sealed class ClientComponentUpdateService
                 EnsureLauncherCompatibility(definition.MinLauncherVersion);
                 if (installed.TryGetValue(name, out (string Version, string Sha256) current))
                     ValidateComponentProgression(name, current.Version, current.Sha256, definition.Version, definition.Sha256);
-                VerifiedClientComponent component = EnsureCachedComponent(name, definition, channel, manifestUri);
+                VerifiedClientComponent component = await EnsureCachedComponentAsync(
+                    name,
+                    definition,
+                    channel,
+                    manifestUri,
+                    cancellationToken).ConfigureAwait(false);
                 verified[name] = component;
             }
 
@@ -98,6 +112,10 @@ public sealed class ClientComponentUpdateService
             LogService.Info(
                 $"Component reconciliation completed: channel={channel}, count={verified.Count}, components={string.Join(',', verified.Keys.OrderBy(x => x, StringComparer.OrdinalIgnoreCase))}");
             return verified;
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
         }
         catch (Exception ex)
         {
@@ -276,11 +294,12 @@ public sealed class ClientComponentUpdateService
         return result;
     }
 
-    private static VerifiedClientComponent EnsureCachedComponent(
+    private static async Task<VerifiedClientComponent> EnsureCachedComponentAsync(
         string name,
         ClientComponentDefinition definition,
         string channel,
-        Uri manifestUri)
+        Uri manifestUri,
+        CancellationToken cancellationToken)
     {
         ComponentSpec spec = SupportedComponents[name];
         Uri source = ResolveAndValidateSourceUri(manifestUri, definition.Url);
@@ -308,7 +327,7 @@ public sealed class ClientComponentUpdateService
         string temporaryPath = targetPath + ".download";
         string backupPath = targetPath + ".bak";
         TryDelete(temporaryPath);
-        byte[] payload = Http.GetByteArrayAsync(source).GetAwaiter().GetResult();
+        byte[] payload = await Http.GetByteArrayAsync(source, cancellationToken).ConfigureAwait(false);
         if (definition.Size > 0 && payload.LongLength != definition.Size)
             throw new InvalidDataException($"组件 {name} 文件大小不一致：expected={definition.Size}, actual={payload.LongLength}。");
 

@@ -7,39 +7,46 @@ namespace SplinterCellCNLauncher.Services;
 
 public sealed class FirewallService
 {
+    private const string ScblVirtualSubnet = "10.66.0.0/24";
+
+    private static readonly string[] LegacyPortRules =
+    [
+        "SCBL Public TCP 50051 gRPC",
+        "SCBL Public TCP 80 Config",
+        "SCBL Public TCP 8000 Content",
+        "SCBL Public UDP 21126 Auth",
+        "SCBL Public UDP 21127 Secure",
+        "SCBL EasyTier TCP 11010",
+        "SCBL EasyTier UDP 11010",
+        "SCBL Public TCP 19110 Peer Probe",
+        "SCBL Public UDP 19111 Broadcast Probe"
+    ];
+
     public void EnsureFirewallRulesBestEffort(string launcherBaseDir, string? gameDir)
     {
         try
         {
             LogService.Info("Ensuring Windows Firewall rules for SCBL public launcher.");
 
+            DeleteLegacyPortRulesBestEffort();
+
             string? launcherExe = Environment.ProcessPath ?? Process.GetCurrentProcess().MainModule?.FileName;
-            AddProgramRuleIfExists("SCBL Public Launcher", launcherExe, recreate: false);
+            AddProgramRuleIfExists("SCBL Public Launcher", launcherExe, recreate: true, inboundRemoteIp: ScblVirtualSubnet);
 
             string easyTierExe = Path.Combine(launcherBaseDir, "tools", "easytier-core.exe");
             // Recreate because the official EasyTier binary may be replaced during updates.
             AddProgramRuleIfExists("SCBL EasyTier Core", easyTierExe, recreate: true);
 
             string routerExe = Path.Combine(launcherBaseDir, "tools", "scbl-process-router.exe");
-            AddProgramRuleIfExists("SCBL Public Process Router", routerExe, recreate: false);
+            AddProgramRuleIfExists("SCBL Public Process Router", routerExe, recreate: true, inboundRemoteIp: ScblVirtualSubnet);
 
             if (!string.IsNullOrWhiteSpace(gameDir))
             {
                 // 游戏规则最关键，老版本可能因 D:/xxx 与反斜杠混用导致 netsh 规则创建失败。
                 // 这里每次都删除并重建，确保游戏进程入站 UDP/TCP 不被 Windows 防火墙挡住。
-                AddProgramRuleIfExists("SCBL Public Game DX11", Path.Combine(gameDir, "Blacklist_DX11_game.exe"), recreate: true);
-                AddProgramRuleIfExists("SCBL Public Game DX9", Path.Combine(gameDir, "Blacklist_game.exe"), recreate: true);
+                AddProgramRuleIfExists("SCBL Public Game DX11", Path.Combine(gameDir, "Blacklist_DX11_game.exe"), recreate: true, inboundRemoteIp: ScblVirtualSubnet);
+                AddProgramRuleIfExists("SCBL Public Game DX9", Path.Combine(gameDir, "Blacklist_game.exe"), recreate: true, inboundRemoteIp: ScblVirtualSubnet);
             }
-
-            AddPortRule("SCBL Public TCP 50051 gRPC", "TCP", "50051");
-            AddPortRule("SCBL Public TCP 80 Config", "TCP", "80");
-            AddPortRule("SCBL Public TCP 8000 Content", "TCP", "8000");
-            AddPortRule("SCBL Public UDP 21126 Auth", "UDP", "21126");
-            AddPortRule("SCBL Public UDP 21127 Secure", "UDP", "21127");
-            AddPortRule("SCBL EasyTier TCP 11010", "TCP", "11010");
-            AddPortRule("SCBL EasyTier UDP 11010", "UDP", "11010");
-            AddPortRule("SCBL Public TCP 19110 Peer Probe", "TCP", "19110");
-            AddPortRule("SCBL Public UDP 19111 Broadcast Probe", "UDP", "19111");
         }
         catch (Exception ex)
         {
@@ -53,7 +60,11 @@ public sealed class FirewallService
         return full.Replace('/', '\\');
     }
 
-    private static void AddProgramRuleIfExists(string displayName, string? programPath, bool recreate)
+    private static void AddProgramRuleIfExists(
+        string displayName,
+        string? programPath,
+        bool recreate,
+        string? inboundRemoteIp = null)
     {
         if (string.IsNullOrWhiteSpace(programPath))
         {
@@ -81,20 +92,25 @@ public sealed class FirewallService
         if (recreate)
         {
             DeleteRuleBestEffort(displayName);
+            DeleteRuleBestEffort(displayName + " Out");
         }
+
+        var inboundArgs = new List<string>
+        {
+            "advfirewall", "firewall", "add", "rule",
+            $"name={displayName}",
+            "dir=in",
+            "action=allow",
+            $"program={normalizedPath}",
+            "enable=yes",
+            "profile=any"
+        };
+        if (!string.IsNullOrWhiteSpace(inboundRemoteIp))
+            inboundArgs.Add($"remoteip={inboundRemoteIp}");
 
         AddRuleIfMissing(
             ruleName: displayName,
-            args: new[]
-            {
-                "advfirewall", "firewall", "add", "rule",
-                $"name={displayName}",
-                "dir=in",
-                "action=allow",
-                $"program={normalizedPath}",
-                "enable=yes",
-                "profile=any"
-            });
+            args: inboundArgs);
 
         // 部分系统出站策略不是默认允许，顺手补一条出站规则。若已允许不会影响。
         AddRuleIfMissing(
@@ -111,21 +127,10 @@ public sealed class FirewallService
             });
     }
 
-    private static void AddPortRule(string displayName, string protocol, string localPort)
+    private static void DeleteLegacyPortRulesBestEffort()
     {
-        AddRuleIfMissing(
-            ruleName: displayName,
-            args: new[]
-            {
-                "advfirewall", "firewall", "add", "rule",
-                $"name={displayName}",
-                "dir=in",
-                "action=allow",
-                $"protocol={protocol}",
-                $"localport={localPort}",
-                "enable=yes",
-                "profile=any"
-            });
+        foreach (string ruleName in LegacyPortRules)
+            DeleteRuleBestEffort(ruleName);
     }
 
     private static void AddRuleIfMissing(string ruleName, IReadOnlyList<string> args)

@@ -753,7 +753,7 @@ public partial class MainWindow : Window
             _ = RunBackgroundVirtualLanDiagnosticsAsync(bindIp);
 
             SetBusy(true, L("部署组件...", "Deploying components..."));
-            _hookDllService.DeployHookDllSafely(_gameDir);
+            await _hookDllService.DeployHookDllSafelyAsync(_gameDir);
             _saveGameService.DeployBaseSavesIfMissing();
 
             SetBusy(true, L("写入配置...", "Writing config..."));

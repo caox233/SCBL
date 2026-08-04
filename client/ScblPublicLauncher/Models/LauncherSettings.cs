@@ -21,7 +21,7 @@ public sealed class LauncherSettings
     public string EasyTierInstanceId { get; set; } = "";
     public string EasyTierNetworkName { get; set; } = "scbl-public";
     // Hidden maintenance setting. Must match SCBL_WSS_PORT on the public server.
-    public int EasyTierWssPort { get; set; } = 10443;
+    public int EasyTierWssPort { get; set; } = 11010;
 
     public bool ForceGameVirtualAdapter { get; set; } = true;
 

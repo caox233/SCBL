@@ -1873,11 +1873,8 @@ write_client_settings_sample() {
   "PublicEndpoint": "${SCBL_PUBLIC_HOST}:${SCBL_PORT}",
   "PublicUpdatePort": ${SCBL_UPDATE_PORT},
   "TunnelSecret": "${SCBL_SECRET}",
-  "UseCustomPublicEndpoint": true,
   "EasyTierNetworkName": "${EASYTIER_NETWORK_NAME}",
   "EasyTierWssPort": ${SCBL_WSS_PORT},
-  "EasyTierLatencyFirst": false,
-  "EasyTierEnableP2P": true,
   "ForceGameVirtualAdapter": true
 }
 JSONEOF

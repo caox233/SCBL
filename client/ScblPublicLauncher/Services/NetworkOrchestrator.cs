@@ -410,18 +410,26 @@ public sealed class NetworkOrchestrator : IDisposable
 
     private async Task PrepareEnvironmentOnceAsync(CancellationToken token)
     {
-        if (!_startupPreparationDone)
-        {
-            _startupPreparationDone = true;
-            var baseDir = _getLauncherBaseDir();
-            var gameDir = _getGameDir();
-
-            _ = Task.Run(() => _firewallService.EnsureFirewallRulesBestEffort(baseDir, gameDir));
-            await Task.Run(() => _adapterService.CleanupBeforeStartBestEffort(), token).ConfigureAwait(false);
+        if (_startupPreparationDone)
             return;
-        }
 
-        await Task.CompletedTask.ConfigureAwait(false);
+        var baseDir = _getLauncherBaseDir();
+        var gameDir = _getGameDir();
+        try
+        {
+            await Task.Run(
+                () => _firewallService.EnsureFirewallRulesBestEffort(baseDir, gameDir),
+                token).ConfigureAwait(false);
+            await Task.Run(
+                () => _adapterService.CleanupBeforeStartBestEffort(),
+                token).ConfigureAwait(false);
+            _startupPreparationDone = true;
+        }
+        catch
+        {
+            _startupPreparationDone = false;
+            throw;
+        }
     }
 
     private async Task<NetworkReadyResult> CheckWithShortRetryAsync(string ip, CancellationToken token)
@@ -473,7 +481,12 @@ public sealed class NetworkOrchestrator : IDisposable
     {
         if (string.IsNullOrWhiteSpace(ip))
             return;
-        _assignedIp = ip.Trim();
+
+        string normalized = ip.Trim();
+        if (normalized.Equals(_assignedIp, StringComparison.OrdinalIgnoreCase))
+            return;
+
+        _assignedIp = normalized;
         _setAssignedIp(_assignedIp, latencyMs);
         _saveSettings();
     }

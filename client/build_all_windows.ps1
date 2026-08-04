@@ -60,7 +60,9 @@ function Copy-AvailableOutputs {
 
     $EasyTierBin = Join-Path $Root "easytier\bin"
     if (Test-Path -LiteralPath $EasyTierBin) {
-        Get-ChildItem $EasyTierBin -File | ForEach-Object { Copy-Item -Force $_.FullName (Join-Path $Tools $_.Name) }
+        Get-ChildItem $EasyTierBin -File |
+            Where-Object { !$_.Name.StartsWith('.scbl-prepared-', [System.StringComparison]::OrdinalIgnoreCase) } |
+            ForEach-Object { Copy-Item -Force $_.FullName (Join-Path $Tools $_.Name) }
     }
     $EasyTierLicense = Join-Path (Split-Path $Root -Parent) "THIRD_PARTY_LICENSES\EasyTier-LGPL-3.0.txt"
     if (Test-Path -LiteralPath $EasyTierLicense) { Copy-Item -Force $EasyTierLicense (Join-Path $Tools "EasyTier-LGPL-3.0.txt") }
@@ -88,8 +90,9 @@ function Copy-AvailableOutputs {
     Remove-Item -Force (Join-Path $Publish "SCBL.Updater.exe") -ErrorAction SilentlyContinue
     Remove-Item -Force (Join-Path $Tools "SCBL.Updater.payload.exe") -ErrorAction SilentlyContinue
 
-    $SettingsExample = Join-Path $Root "launcher_settings.example.json"
-    if (Test-Path -LiteralPath $SettingsExample) { Copy-Item -Force $SettingsExample (Join-Path $Publish "launcher_settings.example.json") }
+    Remove-Item -Force (Join-Path $Publish "launcher_settings.example.json") -ErrorAction SilentlyContinue
+    Get-ChildItem -LiteralPath $Tools -Filter ".scbl-prepared-*" -File -ErrorAction SilentlyContinue |
+        Remove-Item -Force -ErrorAction SilentlyContinue
 }
 
 $VersionFile = Join-Path $Root "..\VERSION_CLIENT"

@@ -210,31 +210,12 @@ class DdnsManager:
         self.require_root()
         if not 10 <= self.section.interval_seconds <= 86400:
             raise DdnsError("DDNS 检查间隔必须在 10-86400 秒之间")
-        unit = f"""[Unit]
-Description=DDNS-Go for SCBL Server
-Documentation=https://github.com/jeessy2/ddns-go
-Wants=network-online.target
-After=network-online.target
-
-[Service]
-Type=simple
-WorkingDirectory={INSTALL_ROOT}
-ExecStart={BINARY_PATH} -noweb -f {self.section.interval_seconds} -c {self.config_path}
-Restart=on-failure
-RestartSec=10s
-UMask=0077
-NoNewPrivileges=true
-PrivateTmp=true
-ProtectHome=true
-ProtectSystem=strict
-ReadWritePaths={INSTALL_ROOT}
-
-[Install]
-WantedBy=multi-user.target
-"""
+        unit = _render_service_unit(
+            interval_seconds=self.section.interval_seconds,
+            config_path=self.config_path,
+        )
         _atomic_write(UNIT_PATH, unit.encode("utf-8"), 0o644)
         _systemctl("daemon-reload")
-
     def enable(self) -> None:
         self.require_root()
         if not BINARY_PATH.is_file() or not self.config_path.is_file():
@@ -285,6 +266,34 @@ WantedBy=multi-user.target
             check=False,
         )
         return (result.stdout or result.stderr).strip()
+
+
+def _render_service_unit(*, interval_seconds: int, config_path: Path) -> str:
+    return f"""[Unit]
+Description=DDNS-Go for SCBL Server
+Documentation=https://github.com/jeessy2/ddns-go
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory={INSTALL_ROOT}
+# network-online.target can be reached before IPv6 SLAAC/DHCPv6 finishes.
+# Bound the wait so a broken WAN cannot block the boot indefinitely.
+ExecStartPre=/usr/bin/timeout 45 /bin/sh -c 'until /usr/sbin/ip -6 -o addr show scope global | /usr/bin/grep -Eq " inet6 [23]"; do /usr/bin/sleep 1; done'
+ExecStart={BINARY_PATH} -noweb -f {interval_seconds} -c {config_path}
+Restart=on-failure
+RestartSec=10s
+UMask=0077
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectHome=true
+ProtectSystem=strict
+ReadWritePaths={INSTALL_ROOT}
+
+[Install]
+WantedBy=multi-user.target
+"""
 
 
 def _render_alidns_yaml(

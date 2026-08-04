@@ -2,7 +2,14 @@ from __future__ import annotations
 
 import unittest
 
-from scblctl.ddns import _parse_ipv6_lines, _render_alidns_yaml, _valid_domain
+from pathlib import Path
+
+from scblctl.ddns import (
+    _parse_ipv6_lines,
+    _render_alidns_yaml,
+    _render_service_unit,
+    _valid_domain,
+)
 
 
 class DdnsTests(unittest.TestCase):
@@ -43,6 +50,15 @@ class DdnsTests(unittest.TestCase):
             {"2408:8220:144:18a0::1"},
             _parse_ipv6_lines("2408:8220:144:18a0::1\nnot-an-address\n192.0.2.1\n"),
         )
+
+    def test_service_waits_for_public_ipv6_with_a_deadline(self) -> None:
+        rendered = _render_service_unit(
+            interval_seconds=300,
+            config_path=Path("/opt/ddns-go/.ddns_go_config.yaml"),
+        )
+        self.assertIn("ExecStartPre=/usr/bin/timeout 45", rendered)
+        self.assertIn('grep -Eq " inet6 [23]"', rendered)
+        self.assertIn("ddns-go -noweb -f 300", rendered)
 
 
 if __name__ == "__main__":

@@ -1,44 +1,38 @@
 #!/usr/bin/env python3
 from pathlib import Path
 
-manager = Path("server/install_public_server.sh").read_text(encoding="utf-8")
-bootstrap = Path("scripts/install-server.sh").read_text(encoding="utf-8")
-client_release = Path(".github/workflows/client-release.yml").read_text(encoding="utf-8")
-server_release = Path(".github/workflows/server-tool-release.yml").read_text(encoding="utf-8")
+bootstrap = Path("server/bootstrap/install.sh").read_text(encoding="utf-8")
+wrapper = Path("scripts/install-server.sh").read_text(encoding="utf-8")
+builder = Path("server/manager/build.py").read_text(encoding="utf-8")
+release = Path("server/manager/scblctl/release.py").read_text(encoding="utf-8")
+provision = Path("server/manager/scblctl/provision.py").read_text(encoding="utf-8")
+config = Path("server/manager/scblctl/config.py").read_text(encoding="utf-8")
 
-for text in (manager, bootstrap, client_release, server_release):
-    assert "client-stable-latest" not in text
-    assert "server-tool-stable-latest" not in text
-assert "VERSION_CLIENT" in manager
-assert "client-v${version}" in manager
-assert "VERSION_SERVER_TOOL" in manager
-assert "server-tool-v${version}" in manager
 assert "VERSION_SERVER_TOOL" in bootstrap
-assert "server-tool-v${version}" in bootstrap
-assert "client-release-manifest.json" not in client_release
-assert "server-tool-release-manifest.json" not in server_release
-assert "[CLIENT] Windows Client v${version}" in client_release
-assert "[SERVER] Server Tool v${version}" in server_release
+assert "server-tool-v$VERSION/scblctl.pyz" in bootstrap
+assert "sha256sum --check --strict" in bootstrap
+assert "server/bootstrap/install.sh" in wrapper
+assert "install_public_server.sh" not in wrapper
+assert 'interpreter="/usr/bin/env python3"' in builder
+assert 'packageType": "scbl-server-runtime"' in release
+assert "manifest.verify(package_dir)" in provision
+assert "activate_release" in provision
+assert "_rollback" in provision
+assert "/etc/scbl/server.toml" in config or "server.toml" in bootstrap
 
-# These files are required Server Tool runtime dependencies and must be present
-# in the release source list, bootstrap installer and archive verification loop.
-required_runtime_files = (
+for required in (
+    "dedicated_server",
+    "scbl_control_plane.py",
     "scbl_update_server.py",
-    "scbl_component_manager.py",
-    "scbl_publish_hooks_bundle.py",
-    "scbl_invite_test_manager.py",
-    "install_component_manager.sh",
-)
-for name in required_runtime_files:
-    assert f"server/{name}" in server_release
-    assert name in bootstrap
+    "easytier-core",
+    "easytier-cli",
+    "data/mp_balancing.ini",
+):
+    assert f'"{required}"' in release
 
-assert 'tar -tzf "dist/$package" > "$archive_list"' in server_release
-assert 'grep -Fxq "$root/$required" "$archive_list"' in server_release
-assert 'update_server_file="$package_root/scbl_update_server.py"' in bootstrap
-assert 'component_manager_file="$package_root/scbl_component_manager.py"' in bootstrap
-assert 'invite_test_file="$package_root/scbl_invite_test_manager.py"' in bootstrap
-assert 'update_new="${package_root}/scbl_update_server.py"' in manager
-assert 'install -m 0644 "$update_new" "$MANAGER_DIR/scbl_update_server.py"' in manager
+combined = "\n".join((bootstrap, wrapper, builder, release, provision, config))
+assert "scbl.env" not in combined
+assert "/opt/scbl-public" not in combined
+assert "migrate_legacy" not in combined
 
-print("direct formal release routing and package dependency checks passed")
+print("SCBL 2.0 clean-install, verified runtime and rollback routing checks passed")

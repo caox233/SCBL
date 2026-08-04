@@ -23,6 +23,7 @@ client/easytier/cache/
 # Release output
 /dist/
 client/dist/
+server/manager/dist/
 *.zip
 *.tar.gz
 *.sha256

@@ -344,7 +344,7 @@ def build_parser() -> argparse.ArgumentParser:
     publish.add_argument("--file", type=Path, required=True)
     publish.add_argument("--sha256", required=True)
     publish.add_argument("--source-commit", required=True)
-    publish.add_argument("--min-launcher-version", default="1.0.13")
+    publish.add_argument("--min-launcher-version", default="2.0.0")
 
     promote = sub.add_parser("promote", help="将测试通道同一产物提升到正式通道")
     promote.add_argument("--component", choices=sorted(SUPPORTED_COMPONENTS), required=True)

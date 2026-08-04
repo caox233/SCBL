@@ -115,7 +115,7 @@ def package_candidate(
                     "file": hooks_file.name,
                     "sha256": hooks_hash,
                     "size": hooks_file.stat().st_size,
-                    "minLauncherVersion": "1.0.13",
+                    "minLauncherVersion": "2.0.0",
                 },
             ),
             (

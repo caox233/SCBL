@@ -107,7 +107,7 @@ def publish_bundle(update_root: Path, bundle: Path) -> dict[str, object]:
             raise ValueError("component.json file 字段无效。")
         if component.get("size") != dll.stat().st_size:
             raise ValueError("component.json size 与 DLL 实际大小不一致。")
-        min_launcher = str(component.get("minLauncherVersion", "1.0.13")).strip()
+        min_launcher = str(component.get("minLauncherVersion", "2.0.0")).strip()
 
         store = ComponentStore(update_root)
         entry = store.publish_test(

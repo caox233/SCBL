@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 TAG="${1:-scbl-public-stable-latest}"
-BASE="https://github.com/caox233/5th-echelon/releases/download/$TAG"
+BASE="https://github.com/caox233/SCBL/releases/download/$TAG"
 TMP="$(mktemp -d)"
 trap 'rm -rf "$TMP"' EXIT
 curl -fL --retry 3 "$BASE/dedicated_server-linux-x86_64" -o "$TMP/dedicated_server-linux-x86_64"

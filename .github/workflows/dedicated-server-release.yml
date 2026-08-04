@@ -1,0 +1,71 @@
+name: Publish SCBL dedicated server
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - Cargo.toml
+      - Cargo.lock
+      - rust-toolchain.toml
+      - server/dedicated-server/**
+      - server/quazal/**
+      - shared/api/**
+      - .github/workflows/dedicated-server-release.yml
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: scbl-dedicated-server-release
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: nightly-2025-10-15
+          components: rustfmt
+      - uses: arduino/setup-protoc@v3
+      - name: Install native build dependencies
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends pkg-config libsodium-dev
+      - name: Test and build dedicated server
+        run: |
+          set -euo pipefail
+          cargo fmt --all --check
+          cargo test --locked -p dedicated_server
+          cargo build --locked --release -p dedicated_server
+          mkdir -p dist
+          install -m 0755 target/release/dedicated_server dist/dedicated_server-linux-x86_64
+          (cd dist && sha256sum dedicated_server-linux-x86_64 > dedicated_server-linux-x86_64.sha256)
+          file dist/dedicated_server-linux-x86_64 | grep -F 'ELF 64-bit'
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dedicated-server-linux-x86_64
+          path: dist/*
+          if-no-files-found: error
+          retention-days: 7
+
+  publish:
+    needs: build
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: dedicated-server-linux-x86_64
+          path: dist
+      - name: Update rolling dedicated server release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          tag=scbl-public-stable-latest
+          if gh release view "$tag" >/dev/null 2>&1; then
+            gh release upload "$tag" dist/* --clobber
+            gh release edit "$tag" --title "SCBL Dedicated Server v2.0" --notes "Built from the SCBL monorepo main branch."
+          else
+            gh release create "$tag" dist/* --title "SCBL Dedicated Server v2.0" --notes "Built from the SCBL monorepo main branch." --target main --latest=false
+          fi

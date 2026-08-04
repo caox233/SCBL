@@ -1,5 +1,15 @@
 # 更新记录
 
+# SCBL v2.0.0
+
+- 将 Windows 客户端、Updater、Route Guard、Hooks、Dedicated Server、Quazal、共享 API crate 和 Linux Server Tool 统一到 2.0.0 产品基线。
+- 仓库按 `client / server / shared` 重组；Hooks 与 Dedicated Server 已合并回 SCBL 主项目，并由统一的本地构建脚本生成。
+- Windows 客户端升级到 .NET 10，移除旧网络链与 Updater 差分更新冗余，保留稳定的完整包更新路径。
+- 启动器不再强制固定测试 Hooks 哈希；测试通道可重复替换 DLL，正式通道仍保留完整性验证。
+- 修复私人房间邀请、队伍恢复和房主退出相关状态同步问题，并冻结已通过双机验证的生产 Hooks 行为。
+- 修复 Control Plane SQLite 连接泄漏，强化 Dedicated Server 身份校验与异常数据容错。
+- WORKPC 端到端验证通过：Ubisoft 重启 PID 收养、Route Guard 严格模式、真实游戏启动、Hooks 会话清理和启动器网络关闭均正常。
+
 ## Linux Server Tool v1.0.11
 
 - 修复菜单16从 GitHub 下载测试候选后，在 `/tmp` 与 `/opt` 位于不同文件系统时因 `os.replace` 返回 `Invalid cross-device link` 而无法写入缓存的问题。

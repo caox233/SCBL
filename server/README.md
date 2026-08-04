@@ -6,7 +6,7 @@
 curl -fsSL https://github.com/caox233/SCBL/releases/latest/download/install-server.sh | sudo bash
 ```
 
-引导脚本会下载并校验完整服务端部署包，然后启动现有 `install_public_server.sh` 菜单。游戏服务端仍从 `caox233/5th-echelon` 的专版 Release 下载；若本机 `dedicated_server` 与当前专版 SHA256 一致，则直接复用，不下载、不停服、不替换。
+引导脚本会下载并校验完整服务端部署包，然后启动现有 `install_public_server.sh` 菜单。游戏服务端从 `caox233/SCBL` 的滚动 Release 下载；若本机 `dedicated_server` 与当前专版 SHA256 一致，则直接复用，不下载、不停服、不替换。
 
 ## 主要端口
 

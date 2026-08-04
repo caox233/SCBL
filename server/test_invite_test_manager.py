@@ -147,17 +147,17 @@ class InviteTestManagerTests(unittest.TestCase):
             "tag_name": "test-2099.01.01.1",
             "name": "SCBL test candidate",
             "published_at": "2099-01-01T00:00:00Z",
-            "html_url": "https://github.com/caox233/5th-echelon/releases/tag/test-2099.01.01.1",
+            "html_url": "https://github.com/caox233/SCBL/releases/tag/test-2099.01.01.1",
             "assets": [
                 {
                     "name": bundle_name,
                     "size": 1234,
-                    "browser_download_url": f"https://github.com/caox233/5th-echelon/releases/download/test/{bundle_name}",
+                    "browser_download_url": f"https://github.com/caox233/SCBL/releases/download/test/{bundle_name}",
                 },
                 {
                     "name": bundle_name + ".sha256",
                     "size": 100,
-                    "browser_download_url": f"https://github.com/caox233/5th-echelon/releases/download/test/{bundle_name}.sha256",
+                    "browser_download_url": f"https://github.com/caox233/SCBL/releases/download/test/{bundle_name}.sha256",
                 },
             ],
         }

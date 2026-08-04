@@ -24,11 +24,11 @@ DEFAULT_EASYTIER_RPC_PORT="15966"
 DEFAULT_SCBL_CONTROL_PORT="19080"
 DEFAULT_SCBL_HEARTBEAT_TTL="20"
 DEFAULT_DEDICATED_RELEASE_TAG="scbl-public-stable-latest"
-DEFAULT_5TH_REPOSITORY="caox233/5th-echelon"
+DEFAULT_5TH_REPOSITORY="caox233/SCBL"
 DEFAULT_5TH_BRANCH=""
 DEFAULT_5TH_SOURCE_MODE="release"
-DEFAULT_DEDICATED_URL="https://github.com/caox233/5th-echelon/releases/download/${DEFAULT_DEDICATED_RELEASE_TAG}/dedicated_server-linux-x86_64"
-DEFAULT_DEDICATED_SHA256_URL="https://github.com/caox233/5th-echelon/releases/download/${DEFAULT_DEDICATED_RELEASE_TAG}/dedicated_server-linux-x86_64.sha256"
+DEFAULT_DEDICATED_URL="https://github.com/caox233/SCBL/releases/download/${DEFAULT_DEDICATED_RELEASE_TAG}/dedicated_server-linux-x86_64"
+DEFAULT_DEDICATED_SHA256_URL="https://github.com/caox233/SCBL/releases/download/${DEFAULT_DEDICATED_RELEASE_TAG}/dedicated_server-linux-x86_64.sha256"
 DEFAULT_UPSTREAM_DEDICATED_URL="https://github.com/unixoide/5th-echelon/releases/latest/download/dedicated_server-linux-x86_64"
 DEFAULT_DDNS_GO_INSTALL="y"
 DEFAULT_DDNS_GO_LISTEN=""
@@ -912,7 +912,13 @@ set_defaults() {
   EASYTIER_INSTANCE_NAME="${EASYTIER_INSTANCE_NAME:-$DEFAULT_EASYTIER_INSTANCE_NAME}"
   EASYTIER_INSTANCE_ID="${EASYTIER_INSTANCE_ID:-$DEFAULT_EASYTIER_INSTANCE_ID}"
   EASYTIER_RPC_PORT="${EASYTIER_RPC_PORT:-$DEFAULT_EASYTIER_RPC_PORT}"
-SCBL_5TH_REPOSITORY="${SCBL_5TH_REPOSITORY:-$DEFAULT_5TH_REPOSITORY}"
+  SCBL_5TH_REPOSITORY="${SCBL_5TH_REPOSITORY:-$DEFAULT_5TH_REPOSITORY}"
+  # v2.0 moves the maintained dedicated-server release into the SCBL monorepo.
+  # Existing installations keep this compatibility variable in scbl.env, so
+  # transparently migrate the retired repository value on the next management run.
+  if [[ "$SCBL_5TH_REPOSITORY" == "caox233/5th-echelon" ]]; then
+    SCBL_5TH_REPOSITORY="$DEFAULT_5TH_REPOSITORY"
+  fi
     SCBL_5TH_RELEASE_TAG="${SCBL_5TH_RELEASE_TAG:-$DEFAULT_DEDICATED_RELEASE_TAG}"
     SCBL_5TH_BRANCH="${SCBL_5TH_BRANCH:-$DEFAULT_5TH_BRANCH}"
     SCBL_5TH_SOURCE_MODE="${SCBL_5TH_SOURCE_MODE:-$DEFAULT_5TH_SOURCE_MODE}"
@@ -3171,8 +3177,8 @@ install_or_reinstall() {
   prompt_value EASYTIER_NETWORK_NAME "EasyTier 网络名称" "$EASYTIER_NETWORK_NAME"
   prompt_value SCBL_MTU "EasyTier MTU" "$SCBL_MTU"
   prompt_value EASYTIER_VERSION "EasyTier 官方版本标签" "$EASYTIER_VERSION"
-    prompt_value SCBL_5TH_REPOSITORY "5th Echelon 二进制仓库（owner/repo）" "$SCBL_5TH_REPOSITORY"
-    prompt_value SCBL_5TH_BRANCH "5th 构建分支，留空则下载 Release" "$SCBL_5TH_BRANCH"
+    prompt_value SCBL_5TH_REPOSITORY "SCBL Dedicated Server 二进制仓库（owner/repo）" "$SCBL_5TH_REPOSITORY"
+    prompt_value SCBL_5TH_BRANCH "SCBL Dedicated Server 构建分支，留空则下载 Release" "$SCBL_5TH_BRANCH"
     if [[ -n "$SCBL_5TH_BRANCH" ]]; then
     SCBL_5TH_SOURCE_MODE="branch"
     if is_interactive; then
@@ -3182,7 +3188,7 @@ install_or_reinstall() {
     [[ -n "${SCBL_5TH_GITHUB_TOKEN:-}" ]] || echo "警告：分支 Artifact 下载需要 PAT，GitHub 账号密码不能用于脚本下载。"
     else
     SCBL_5TH_SOURCE_MODE="release"
-    prompt_value SCBL_5TH_RELEASE_TAG "5th Release 标签" "$SCBL_5TH_RELEASE_TAG"
+    prompt_value SCBL_5TH_RELEASE_TAG "SCBL Dedicated Server Release 标签" "$SCBL_5TH_RELEASE_TAG"
     fi
     DEDICATED_URL="https://github.com/${SCBL_5TH_REPOSITORY}/releases/download/${SCBL_5TH_RELEASE_TAG}/dedicated_server-linux-x86_64"
     DEDICATED_SHA256_URL="https://github.com/${SCBL_5TH_REPOSITORY}/releases/download/${SCBL_5TH_RELEASE_TAG}/dedicated_server-linux-x86_64.sha256"
@@ -3190,7 +3196,7 @@ install_or_reinstall() {
 
   stage "安装或复用 EasyTier ${EASYTIER_VERSION}"
   install_tunnel_binary
-  stage "检查 5th Echelon dedicated_server"
+  stage "检查 SCBL dedicated_server"
   install_dedicated_server
   stage "保存 SCBL 配置"
   backup_env
@@ -3701,7 +3707,7 @@ test_management_menu() {
     cat <<TESTMANAGEMENTMENU
 
 测试管理：
-  GitHub 测试仓库：${SCBL_TEST_REPOSITORY:-caox233/5th-echelon}
+  GitHub 测试仓库：${SCBL_TEST_REPOSITORY:-caox233/SCBL}
   1. 查看 GitHub 可用测试候选
   2. 选择候选并自动下载、校验、部署
   3. 下载并部署最新测试候选

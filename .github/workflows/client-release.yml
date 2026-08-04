@@ -64,7 +64,13 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-dotnet@v4
-        with: { dotnet-version: 8.0.x }
+        with: { dotnet-version: 10.0.x }
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: nightly-2025-10-15
+          targets: i686-pc-windows-msvc
+          components: rustfmt
+      - uses: arduino/setup-protoc@v3
       - uses: actions/setup-go@v5
         with:
           go-version: 1.23.2

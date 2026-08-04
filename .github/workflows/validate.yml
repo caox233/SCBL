@@ -59,16 +59,19 @@ jobs:
           assert data['clientVersion'] == client_version
           assert data['serverToolVersion'] == server_version
           assert data['controlApiVersion'] == 1
-          assert data['dedicatedServer']['repository'] == 'caox233/5th-echelon'
+          assert data['dedicatedServer']['repository'] == 'caox233/SCBL'
           assert data['dedicatedServer']['releaseTag'] == 'scbl-public-stable-latest'
           PY
           ! grep -RIl $'\r' server .github docs scripts --include='*.sh' --include='*.py' --include='*.yml' --include='*.yaml'
 
-      - name: Validate external Hooks ownership and bootstrap packaging
+      - name: Validate monorepo Hooks ownership and bootstrap packaging
         shell: bash
         run: |
           set -euo pipefail
           test ! -e client/hooks-source
+          test -f client/hooks/Cargo.toml
+          test -f server/dedicated-server/Cargo.toml
+          test -f shared/api/Cargo.toml
           test ! -f client/ScblPublicLauncher/EmbeddedFiles/uplay_r1_loader.dll
           manifest=client/ScblPublicLauncher/EmbeddedFiles/SCBL_EMBEDDED_SHA256.txt
           test -f "$manifest"

@@ -8,11 +8,6 @@ on:
         required: false
         default: true
         type: boolean
-      hooks_release_tag:
-        description: 5th-echelon Hooks release tag
-        required: false
-        default: scbl-public-stable-latest
-        type: string
 
 concurrency:
   group: assemble-client-package-${{ github.ref }}
@@ -28,7 +23,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-dotnet@v4
         with:
-          dotnet-version: 8.0.x
+          dotnet-version: 10.0.x
       - uses: actions/cache@v4
         with:
           path: ~/.nuget/packages
@@ -51,7 +46,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-dotnet@v4
         with:
-          dotnet-version: 8.0.x
+          dotnet-version: 10.0.x
       - uses: actions/cache@v4
         with:
           path: ~/.nuget/packages
@@ -121,8 +116,28 @@ jobs:
           if-no-files-found: error
           retention-days: 7
 
+  hooks:
+    runs-on: windows-2022
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: nightly-2025-10-15
+          targets: i686-pc-windows-msvc
+          components: rustfmt
+      - uses: arduino/setup-protoc@v3
+      - name: Build Hooks from the SCBL monorepo
+        shell: pwsh
+        run: ./scripts/build-rust-components.ps1 -Release -HooksOnly
+      - uses: actions/upload-artifact@v4
+        with:
+          name: client-hooks-win-x86
+          path: target/i686-pc-windows-msvc/release/hooks.dll
+          if-no-files-found: error
+          retention-days: 7
+
   package:
-    needs: [launcher, updater, route-guard, easytier]
+    needs: [launcher, updater, route-guard, easytier, hooks]
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
@@ -142,12 +157,15 @@ jobs:
         with:
           name: client-easytier-win-x86
           path: client/ScblPublicLauncher/publish-single
-      - name: Add verified bootstrap Hooks
+      - uses: actions/download-artifact@v4
+        with:
+          name: client-hooks-win-x86
+          path: component-output/hooks
+      - name: Add locally built bootstrap Hooks
         shell: pwsh
         run: |
           ./client/prepare_bootstrap_hooks.ps1 `
-            -FifthRepository caox233/5th-echelon `
-            -FifthReleaseTag "${{ inputs.hooks_release_tag }}" `
+            -SourceDll component-output/hooks/hooks.dll `
             -PublishRoot client/ScblPublicLauncher/publish-single
       - name: Verify assembled component layout
         shell: pwsh

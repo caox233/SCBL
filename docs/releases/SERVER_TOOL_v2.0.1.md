@@ -1,6 +1,7 @@
 # SCBL Server 2.0.1
 
 正式二进制由 GitHub Actions 构建并发布，生产服务器不编译源码。
+客户端单组件支持 GitHub 在线下载，并继续由服务端校验和发布。
 
 This maintenance release fixes a systemd restart race during server install,
 repair, update, and rollback operations. The manager now stops services that

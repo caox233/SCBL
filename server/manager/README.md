@@ -33,3 +33,12 @@ powershell -ExecutionPolicy Bypass -File server/packaging/build-runtime.ps1
 脚本使用 Windows 内的 WSL2 编译 Linux x86_64 Dedicated Server，并把官方
 EasyTier Linux 二进制、控制平面和更新服务一起封装。Linux 服务端只接收最终
 `SCBL-Server-Runtime-vX.Y.Z-linux-x86_64.tar.gz`，不安装 Cargo/Rust，也不接收源码。
+
+## 统一更新源
+
+默认更新仓库明确固定为 `caox233/SCBL`，复制或 Fork 源码不会自动改变更新源。
+高级用户主动修改 `updates.repository` 后才会使用其他仓库。
+
+更新菜单不再区分“客户端升级”和“服务端升级”。一次在线检查读取同一个已签名
+清单，同时规划 `client.*` 与 `server.*` 组件；一个本地 `.scblpatch` 也可以同时
+携带两类组件。执行前必须完整显示计划，执行后共同写入更新历史并支持回滚。

@@ -83,7 +83,7 @@ def _paths(args: argparse.Namespace) -> RuntimePaths:
 def cmd_init(args: argparse.Namespace) -> int:
     paths = _paths(args)
     config = ServerConfig.new(public_host=args.public_host)
-    config.server.update_channel = args.channel
+    config.updates.channel = args.channel
     config.ddns.enabled = not args.no_ddns
     save_config(config, paths.config, overwrite=args.force)
     print(f"已生成 SCBL 2.0 配置：{paths.config}")

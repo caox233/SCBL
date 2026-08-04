@@ -26,7 +26,6 @@ class ConfigNotFoundError(ConfigError):
 @dataclass(slots=True)
 class ServerSection:
     public_host: str = ""
-    update_channel: str = "stable"
 
 
 @dataclass(slots=True)
@@ -61,11 +60,9 @@ class EasyTierSection:
 
 
 @dataclass(slots=True)
-class ReleaseSection:
+class UpdatesSection:
     repository: str = "caox233/SCBL"
-    dedicated_tag: str = "scbl-public-stable-latest"
-    dedicated_source: str = "release"
-    branch: str = ""
+    channel: str = "stable"
 
 
 @dataclass(slots=True)
@@ -82,7 +79,7 @@ SECTION_TYPES = {
     "network": NetworkSection,
     "services": ServicesSection,
     "easytier": EasyTierSection,
-    "release": ReleaseSection,
+    "updates": UpdatesSection,
     "ddns": DdnsSection,
 }
 
@@ -94,7 +91,7 @@ class ServerConfig:
     network: NetworkSection
     services: ServicesSection
     easytier: EasyTierSection
-    release: ReleaseSection
+    updates: UpdatesSection
     ddns: DdnsSection
 
     SECRET_FIELDS: ClassVar[set[str]] = {"network.secret"}
@@ -107,7 +104,7 @@ class ServerConfig:
             network=NetworkSection(secret=secrets.token_urlsafe(32)),
             services=ServicesSection(),
             easytier=EasyTierSection(),
-            release=ReleaseSection(),
+            updates=UpdatesSection(),
             ddns=DdnsSection(),
         )
 
@@ -181,8 +178,8 @@ class ServerConfig:
                     errors.append(f"{section_name}.{field.name} 不能包含换行或 NUL 字符")
         if not _valid_public_host(self.server.public_host):
             errors.append("server.public_host 不是有效的 IP 地址或域名")
-        if self.server.update_channel not in {"stable", "test"}:
-            errors.append("server.update_channel 只能是 stable 或 test")
+        if self.updates.channel not in {"stable", "test"}:
+            errors.append("updates.channel 只能是 stable 或 test")
 
         for key in (
             "network.public_port",
@@ -228,12 +225,8 @@ class ServerConfig:
         except ValueError as exc:
             errors.append(f"虚拟网络配置无效：{exc}")
 
-        if not re.fullmatch(r"[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+", self.release.repository):
-            errors.append("release.repository 必须是 owner/repository 格式")
-        if self.release.dedicated_source not in {"release", "branch"}:
-            errors.append("release.dedicated_source 只能是 release 或 branch")
-        if self.release.dedicated_source == "branch" and not self.release.branch:
-            errors.append("使用 branch 源时必须设置 release.branch")
+        if not re.fullmatch(r"[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+", self.updates.repository):
+            errors.append("updates.repository 必须是 owner/repository 格式")
 
         return errors
 
@@ -338,7 +331,8 @@ def _toml_value(value: Any) -> str:
 
 IMPACT_MAP: dict[str, frozenset[str]] = {
     "server.public_host": frozenset({"client-metadata", "ddns"}),
-    "server.update_channel": frozenset({"updater"}),
+    "updates.repository": frozenset({"updater"}),
+    "updates.channel": frozenset({"updater"}),
     "network.public_port": frozenset({"tunnel", "firewall", "client-metadata"}),
     "network.wss_port": frozenset({"tunnel", "firewall", "client-metadata"}),
     "network.secret": frozenset({"tunnel", "client-metadata"}),
@@ -358,10 +352,6 @@ IMPACT_MAP: dict[str, frozenset[str]] = {
     "easytier.instance_name": frozenset({"tunnel"}),
     "easytier.instance_id": frozenset({"tunnel"}),
     "easytier.rpc_port": frozenset({"tunnel"}),
-    "release.repository": frozenset({"updater"}),
-    "release.dedicated_tag": frozenset({"updater"}),
-    "release.dedicated_source": frozenset({"updater"}),
-    "release.branch": frozenset({"updater"}),
     "ddns.enabled": frozenset({"ddns"}),
     "ddns.listen": frozenset({"ddns", "firewall"}),
     "ddns.interval_seconds": frozenset({"ddns"}),

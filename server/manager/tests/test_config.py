@@ -70,6 +70,12 @@ class ConfigTests(unittest.TestCase):
             impact_for({"services.update_port"}),
         )
         self.assertEqual(["control"], impact_for({"services.heartbeat_ttl"}))
+        self.assertEqual(["updater"], impact_for({"updates.repository"}))
+
+    def test_update_source_is_explicitly_official_by_default(self) -> None:
+        config = ServerConfig.new(public_host="192.0.2.10")
+        self.assertEqual("caox233/SCBL", config.updates.repository)
+        self.assertEqual("stable", config.updates.channel)
 
 
 if __name__ == "__main__":

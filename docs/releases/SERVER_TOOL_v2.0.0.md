@@ -18,4 +18,4 @@
 
 - Windows Client：v2.0.0
 - Server Tool：v2.0.0
-- Hooks / Route Guard / Updater：v2.0.1；Dedicated Server / shared API：v2.0.0
+- Hooks / Updater：v2.0.1；Route Guard：v2.0.2；Dedicated Server / shared API：v2.0.0

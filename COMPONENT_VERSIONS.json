@@ -2,7 +2,7 @@
   "schemaVersion": 1,
   "clientVersion": "2.0.0",
   "serverToolVersion": "2.0.0",
-  "routeGuardVersion": "2.0.1",
+  "routeGuardVersion": "2.0.2",
   "hooksVersion": "2.0.1",
   "easyTierVersion": "2.6.4",
   "updaterVersion": "2.0.1",

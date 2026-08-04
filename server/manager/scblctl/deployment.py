@@ -13,12 +13,12 @@ from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
 from typing import Any
 
-from . import __version__
 from .backup import BackupManager
 from .config import ServerConfig
 from .live_state import LiveStateError, read_live_state
 from .paths import DEPLOYMENT_PATHS, RuntimePaths
 from .release import RuntimeManifest, activate_release
+from .service_lifecycle import ordered_runtime_restart_commands
 
 
 PACKAGE_MANIFEST = "scbl-package.json"
@@ -26,6 +26,7 @@ PACKAGE_TYPES = {"full": "scbl-full", "patch": "scbl-patch"}
 KNOWN_COMPONENTS = frozenset({"server.manager", "server.runtime"})
 FULL_COMPONENTS = KNOWN_COMPONENTS
 MAX_PACKAGE_SIZE = 1536 * 1024 * 1024
+MANAGER_TARGET = Path("/usr/local/lib/scbl/scblctl.pyz")
 
 
 class DeploymentError(RuntimeError):
@@ -155,7 +156,7 @@ class DeploymentManager:
             extracted = self._extract_artifacts(package, root)
             self._preflight_components(package, extracted)
             previous_runtime = current_link.resolve(strict=True) if has_runtime else None
-            manager_target = Path("/usr/local/lib/scbl/scblctl.pyz")
+            manager_target = MANAGER_TARGET
             manager_before = manager_target.read_bytes() if manager_target.is_file() else None
             applied: list[str] = []
             try:
@@ -250,13 +251,8 @@ class DeploymentManager:
             _atomic_write(manager_target, manager_before, 0o755)
         if previous_runtime is not None and previous_runtime.is_dir():
             activate_release(previous_runtime, Path(DEPLOYMENT_PATHS.current))
-            for unit in (
-                "scbl-update.service",
-                "scbl-tunnel.service",
-                "scbl-dedicated.service",
-                "scbl-control-plane.service",
-            ):
-                subprocess.run(("systemctl", "restart", unit), timeout=45, check=False)
+            for command in ordered_runtime_restart_commands():
+                subprocess.run(command, timeout=45, check=False)
         else:
             Path(DEPLOYMENT_PATHS.current).unlink(missing_ok=True)
             for unit in (
@@ -271,7 +267,10 @@ class DeploymentManager:
 
 
 def installed_versions() -> dict[str, str]:
-    result = {"server.manager": __version__}
+    result: dict[str, str] = {}
+    manager_version = _installed_manager_version(MANAGER_TARGET)
+    if manager_version is not None:
+        result["server.manager"] = manager_version
     current = Path(DEPLOYMENT_PATHS.current)
     if current.is_symlink():
         try:
@@ -279,6 +278,27 @@ def installed_versions() -> dict[str, str]:
         except (OSError, ValueError):
             pass
     return result
+
+
+def _installed_manager_version(path: Path) -> str | None:
+    if not path.is_file():
+        return None
+    try:
+        result = subprocess.run(
+            ("python3", str(path), "--version"),
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            timeout=15,
+            check=False,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return None
+    if result.returncode != 0:
+        return None
+    match = re.search(r"(?<!\d)(\d+\.\d+\.\d+)(?!\d)", result.stdout)
+    return match.group(1) if match else None
 
 
 def online_package_url(config: ServerConfig, *, kind: str) -> str:

@@ -12,6 +12,7 @@ from .config import ServerConfig
 from .firewall import ufw_commands
 from .paths import DEPLOYMENT_PATHS
 from .release import RuntimeManifest, activate_release, extract_runtime_archive, stage_release
+from .service_lifecycle import ordered_runtime_restart_commands
 from .services import SERVICES, SystemdManager
 from .system import CommandRunner
 from .templates import (
@@ -231,13 +232,8 @@ class Provisioner:
     def _start_and_verify(self, config: ServerConfig) -> None:
         units = tuple(service.unit for service in SERVICES if service.required)
         self._run_checked(("systemctl", "enable", *units))
-        for unit in (
-            "scbl-update.service",
-            "scbl-tunnel.service",
-            "scbl-dedicated.service",
-            "scbl-control-plane.service",
-        ):
-            self._run_checked(("systemctl", "restart", unit), timeout=45)
+        for command in ordered_runtime_restart_commands():
+            self._run_checked(command, timeout=45)
         failed = []
         for service in SERVICES:
             if not service.required:
@@ -257,9 +253,8 @@ class Provisioner:
                         self.runner.run(("systemctl", "disable", "--now", service.unit), timeout=30)
             else:
                 activate_release(previous, current)
-                for service in SERVICES:
-                    if service.required:
-                        self.runner.run(("systemctl", "restart", service.unit), timeout=45)
+                for command in ordered_runtime_restart_commands():
+                    self.runner.run(command, timeout=45)
         except Exception as exc:
             raise ProvisionError(f"自动回滚失败，需要人工检查：{exc}") from exc
 

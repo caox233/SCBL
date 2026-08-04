@@ -6,9 +6,15 @@ import tempfile
 import unittest
 import zipfile
 from pathlib import Path
+from unittest.mock import Mock, patch
 
 from scblctl.config import ServerConfig
-from scblctl.deployment import DeploymentError, DeploymentManager, online_package_url
+from scblctl.deployment import (
+    DeploymentError,
+    DeploymentManager,
+    _installed_manager_version,
+    online_package_url,
+)
 from scblctl.paths import RuntimePaths
 
 
@@ -71,6 +77,23 @@ class DeploymentTests(unittest.TestCase):
         self.assertTrue(
             online_package_url(config, kind="patch").endswith("/SCBL-Server-Patch.scblpatch")
         )
+
+    def test_installed_manager_version_reads_the_installed_artifact(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            manager = Path(temporary) / "scblctl.pyz"
+            manager.write_bytes(b"placeholder")
+            completed = Mock(returncode=0, stdout="SCBL 2.0.0\n")
+            with patch("scblctl.deployment.subprocess.run", return_value=completed) as run:
+                self.assertEqual("2.0.0", _installed_manager_version(manager))
+            run.assert_called_once_with(
+                ("python3", str(manager), "--version"),
+                capture_output=True,
+                text=True,
+                encoding="utf-8",
+                errors="replace",
+                timeout=15,
+                check=False,
+            )
 
 
 if __name__ == "__main__":

@@ -69,6 +69,7 @@ jobs:
         run: |
           set -euo pipefail
           PYTHONPATH=server/manager python3 -m unittest discover -s server/manager/tests -v
+          python3 server/test_migration_compatibility.py
           bash -n server/bootstrap/install.sh
           bash -n server/packaging/build-runtime.sh
           cargo fmt --all --check

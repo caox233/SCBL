@@ -2,6 +2,8 @@
 
 This release completes the cold-boot reliability pass for the public server.
 
+正式二进制由 GitHub Actions 构建并发布，生产服务器不编译源码。
+
 - Wait up to 45 seconds for a usable public IPv6 address before starting DDNS-Go.
 - Avoid the boot-time race where `network-online.target` is reached before IPv6
   SLAAC or DHCPv6 address assignment finishes.

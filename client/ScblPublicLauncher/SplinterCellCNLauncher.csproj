@@ -23,6 +23,16 @@
     <AssemblyName>SplinterCellCNLauncher.Smoke</AssemblyName>
   </PropertyGroup>
 
+  <!-- Unit tests exercise managed launcher services on the host architecture.
+       Production builds remain the x86 self-contained executable required by the game. -->
+  <PropertyGroup Condition="'$(SCBLTestBuild)' == 'true'">
+    <PlatformTarget>AnyCPU</PlatformTarget>
+    <RuntimeIdentifier></RuntimeIdentifier>
+    <SelfContained>false</SelfContained>
+    <PublishSingleFile>false</PublishSingleFile>
+    <IncludeNativeLibrariesForSelfExtract>false</IncludeNativeLibrariesForSelfExtract>
+  </PropertyGroup>
+
   <ItemGroup>
     <PackageReference Include="Google.Protobuf" Version="3.35.1" />
     <PackageReference Include="Grpc.Net.Client" Version="2.80.0" />

@@ -21,3 +21,15 @@ python3 dist/scblctl.pyz --help
 全新 Linux 主机可运行 `server/bootstrap/install.sh`。安装器只询问公网入口、更新
 通道和是否启用 DDNS；它不读取任何旧版配置。运行时包必须带
 `server-package.json`，清单中的每个文件都在写入 `/opt/scbl/releases` 前校验。
+
+## Windows 构建、Linux 只运行
+
+正式运行时包在 Windows 开发机执行以下命令生成：
+
+```powershell
+powershell -ExecutionPolicy Bypass -File server/packaging/build-runtime.ps1
+```
+
+脚本使用 Windows 内的 WSL2 编译 Linux x86_64 Dedicated Server，并把官方
+EasyTier Linux 二进制、控制平面和更新服务一起封装。Linux 服务端只接收最终
+`SCBL-Server-Runtime-vX.Y.Z-linux-x86_64.tar.gz`，不安装 Cargo/Rust，也不接收源码。

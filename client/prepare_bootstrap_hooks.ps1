@@ -33,7 +33,7 @@ if (!$HasProtocolMarker) {
 $Destination = Join-Path $PublishRoot "tools"
 New-Item -ItemType Directory -Force -Path $Destination | Out-Null
 $TargetDll = Join-Path $Destination "uplay_r1_loader.dll"
-$TargetChecksum = "$TargetDll.sha256"
+$TargetChecksum = Join-Path $Destination "uplay_r1_loader.dll.sha256"
 $TemporaryTarget = "$TargetDll.new"
 $ActualHash = (Get-FileHash -LiteralPath $SourceDll -Algorithm SHA256).Hash.ToLowerInvariant()
 

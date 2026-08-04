@@ -27,4 +27,4 @@
 ## 配套版本
 
 - Linux Server Tool：v2.0.0
-- Hooks / Route Guard / Dedicated Server / shared API：v2.0.0
+- Hooks：v2.0.1；Route Guard / Dedicated Server / shared API：v2.0.0

@@ -4,3 +4,8 @@
 #    "--remap-path-prefix=$(PWD)=/",
 #    "-Clink-arg=/PDBALTPATH:%_PDB%",
 #]
+
+# The MSVC linker otherwise stamps each Hooks DLL with build-specific data.
+# /Brepro keeps separately triggered component and stable builds byte-identical.
+[target.i686-pc-windows-msvc]
+rustflags = ["-Clink-arg=/Brepro"]

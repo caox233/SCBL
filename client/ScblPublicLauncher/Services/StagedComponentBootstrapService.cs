@@ -45,8 +45,8 @@ public static class StagedComponentBootstrapService
         if (state.Components.TryGetValue("updater", out ComponentStateEntry? updater))
         {
             string baseDir = GetBaseDirectory();
-            string payload = Path.Combine(baseDir, UpdaterBootstrapService.PayloadRelativePath.Replace('/', Path.DirectorySeparatorChar));
-            ApplySingleFile("updater", updater, payload);
+            string target = Path.Combine(baseDir, UpdaterBootstrapService.UpdaterRelativePath.Replace('/', Path.DirectorySeparatorChar));
+            ApplySingleFile("updater", updater, target);
         }
 
         if (state.Components.TryGetValue("easytier", out ComponentStateEntry? easytier))

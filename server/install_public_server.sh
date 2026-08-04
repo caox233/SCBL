@@ -2536,11 +2536,12 @@ with zipfile.ZipFile(path) as archive:
         if p.is_absolute() or '..' in p.parts:
             raise SystemExit(f'unsafe client zip path: {item.filename}')
         names.append(str(p).rstrip('/'))
-    required = {'SplinterCellCNLauncher.exe', 'SCBL.Updater.exe'}
-    found = {name.rsplit('/', 1)[-1] for name in names}
-    missing = sorted(required - found)
+    required = {'SplinterCellCNLauncher.exe', 'tools/SCBL.Updater.exe'}
+    missing = sorted(required - set(names))
     if missing:
         raise SystemExit('client package missing: ' + ', '.join(missing))
+    if 'SCBL.Updater.exe' in names:
+        raise SystemExit('client package must keep SCBL.Updater.exe under tools only')
 PYEOF_VALIDATE_CLIENT_ZIP
   then
     rm -rf "$tmpdir"
@@ -2993,11 +2994,12 @@ with zipfile.ZipFile(package) as archive:
         if path.is_absolute() or '..' in path.parts:
             raise SystemExit(f'unsafe client zip path: {item.filename}')
         names.append(str(path).rstrip('/'))
-    found = {name.rsplit('/', 1)[-1] for name in names}
-    required = {'SplinterCellCNLauncher.exe', 'SCBL.Updater.exe'}
-    missing = sorted(required - found)
+    required = {'SplinterCellCNLauncher.exe', 'tools/SCBL.Updater.exe'}
+    missing = sorted(required - set(names))
     if missing:
         raise SystemExit('client package missing: ' + ', '.join(missing))
+    if 'SCBL.Updater.exe' in names:
+        raise SystemExit('client package must keep SCBL.Updater.exe under tools only')
 
 full_dir = updates_root / 'full'
 full_dir.mkdir(parents=True, exist_ok=True)

@@ -5,6 +5,7 @@ program = Path("client/SCBL.Updater/Program.cs").read_text(encoding="utf-8")
 restart = Path("client/SCBL.Updater/RestartCoordinator.cs").read_text(encoding="utf-8")
 local = Path("client/ScblPublicLauncher/Services/LocalClientUpdateService.cs").read_text(encoding="utf-8")
 remote = Path("client/ScblPublicLauncher/Services/RemoteClientUpdateService.cs").read_text(encoding="utf-8")
+app = Path("client/ScblPublicLauncher/App.xaml.cs").read_text(encoding="utf-8")
 
 assert 'x.Equals("--restart-helper", StringComparison.OrdinalIgnoreCase)' in program
 assert "RestartCoordinator.RunHelper(target, restart, waitPidText)" in program
@@ -59,6 +60,8 @@ window = launcher
 driver_bootstrap = Path("client/ScblPublicLauncher/Services/WinDivertBootstrapService.cs").read_text(encoding="utf-8")
 build_script = Path("client/build_all_windows.ps1").read_text(encoding="utf-8")
 package_script = Path("client/create_client_full_package.ps1").read_text(encoding="utf-8")
+package_workflow = Path(".github/workflows/assemble-client-package.yml").read_text(encoding="utf-8")
+server_manager = Path("server/install_public_server.sh").read_text(encoding="utf-8")
 assert "ReleaseWinDivertDriverServices(target)" in program
 assert "FilesAreIdentical(source, destination)" in program
 assert "CopyFileWithRetry(file, dest, relative)" in program
@@ -71,7 +74,22 @@ assert 'await _networkOrchestrator.ShutdownAsync("client update")' in window
 assert "EnsureCurrentDriverAsync" in window
 assert "WinDivert64.payload.sys" in driver_bootstrap
 assert 'Copy-Item -Force $WinDivertSys (Join-Path $Tools "WinDivert64.payload.sys")' in build_script
+assert 'Copy-Item -Force $UpdaterBuild (Join-Path $Tools "SCBL.Updater.exe")' in build_script
+assert 'Copy-Item -Force $UpdaterBuild (Join-Path $Publish "SCBL.Updater.exe")' not in build_script
+assert 'Remove-Item -Force (Join-Path $Publish "SCBL.Updater.exe")' in build_script
 assert "'tools/WinDivert64.sys'" in package_script
 assert "WinDivert64.payload.sys" in package_script
+assert "'SCBL.Updater.exe'" in package_script
+assert "Release ZIP must use the single tools/SCBL.Updater.exe copy." in package_script
+assert "'tools/SCBL.Updater.exe'" in package_script
+assert "component-output/SCBL.Updater.exe" not in package_workflow
+assert "component-output/tools/SCBL.Updater.exe" in package_workflow
+assert "publish-single/SCBL.Updater.exe" not in package_workflow
+assert "publish-single/tools/SCBL.Updater.exe" in package_workflow
+assert server_manager.count("required = {'SplinterCellCNLauncher.exe', 'tools/SCBL.Updater.exe'}") == 2
+assert server_manager.count("client package must keep SCBL.Updater.exe under tools only") == 2
+assert 'Path.GetFileName(file).Equals("SCBL.Updater.exe"' not in program
+assert 'Path.Combine(updatesDirectory, "runner", Guid.NewGuid().ToString("N"))' in local
+assert "ScheduleDeferredRunnerCleanup" in app
 
 print("SCBL client update restart and version-check retry checks passed")

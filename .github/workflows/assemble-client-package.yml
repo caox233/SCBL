@@ -60,8 +60,7 @@ jobs:
         shell: pwsh
         run: |
           New-Item -ItemType Directory -Force component-output/tools | Out-Null
-          Copy-Item client/SCBL.Updater/publish/SCBL.Updater.exe component-output/SCBL.Updater.exe
-          Copy-Item client/SCBL.Updater/publish/SCBL.Updater.exe component-output/tools/SCBL.Updater.payload.exe
+          Copy-Item client/SCBL.Updater/publish/SCBL.Updater.exe component-output/tools/SCBL.Updater.exe
       - uses: actions/upload-artifact@v4
         with:
           name: client-updater-win-x86
@@ -172,8 +171,7 @@ jobs:
         run: |
           $required = @(
             "client/ScblPublicLauncher/publish-single/SplinterCellCNLauncher.exe",
-            "client/ScblPublicLauncher/publish-single/SCBL.Updater.exe",
-            "client/ScblPublicLauncher/publish-single/tools/SCBL.Updater.payload.exe",
+            "client/ScblPublicLauncher/publish-single/tools/SCBL.Updater.exe",
             "client/ScblPublicLauncher/publish-single/tools/scbl-process-router.exe",
             "client/ScblPublicLauncher/publish-single/tools/WinDivert.dll",
             "client/ScblPublicLauncher/publish-single/tools/WinDivert64.payload.sys",

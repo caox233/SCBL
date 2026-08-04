@@ -41,6 +41,8 @@ target\i686-pc-windows-msvc\release\hooks.dll
 
 Hooks 不嵌入 Launcher EXE。正式包在 `tools/uplay_r1_loader.dll` 携带校验后的副本；测试模式还可从 `local-components/hooks/uplay_r1_loader.dll` 动态覆盖，替换 DLL 不需要重编 Launcher。正式 `stable` 通道不会读取本地覆盖目录。启动游戏时，Launcher 会把选定并校验后的 DLL 部署到游戏 `SYSTEM` 根目录。
 
+正式目录只保留 `tools/SCBL.Updater.exe`。Launcher 负责在 Updater 未运行时应用它的组件升级；执行完整更新时，Launcher 会把它复制到 `temp/<computer-name>/updates/runner/` 作为一次性执行器，由执行器更新 Launcher、`tools` Updater 和其他组件。根目录不会生成第二份 Updater，一次性副本会在后续启动时清理。
+
 `build_launcher_smoke.ps1` 生成的 `SplinterCellCNLauncher.Smoke.exe` 只用于无法代点 UAC 的远程界面检查。它不请求管理员权限，因此不能用于驱动、网络、组件部署或游戏测试，也绝不能进入正式包。
 
 ## 自建服务器配置

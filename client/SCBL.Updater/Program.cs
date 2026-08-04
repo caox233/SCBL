@@ -441,12 +441,6 @@ internal static class Program
             string relative = Path.GetRelativePath(source, file);
             if (IsSkippedDirectory(relative))
                 continue;
-            if (Path.GetFileName(file).Equals("SCBL.Updater.exe", StringComparison.OrdinalIgnoreCase))
-            {
-                // The running updater is replaced from tools/SCBL.Updater.payload.exe by
-                // the next launcher process.
-                continue;
-            }
             if (IsUpdateMetadataFile(relative))
                 continue;
 

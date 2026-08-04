@@ -1,6 +1,7 @@
 using System;
 using System.Diagnostics;
 using System.IO;
+using System.Security.Cryptography;
 
 namespace SplinterCellCNLauncher.Services;
 
@@ -18,11 +19,7 @@ public sealed class LocalClientUpdateService
     public void StartUpdater(UpdatePackageInfo package, int launcherPid)
     {
         string baseDir = AppContext.BaseDirectory.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
-        string updater = Path.Combine(baseDir, "SCBL.Updater.exe");
-        if (!File.Exists(updater))
-            updater = Path.Combine(baseDir, "tools", "SCBL.Updater.exe");
-        if (!File.Exists(updater))
-            throw new FileNotFoundException("没有找到客户端更新程序。", updater);
+        string updater = PrepareUpdaterRunner(baseDir, LogService.UpdatesDirectory);
 
         string launcherExe = Path.Combine(baseDir, "SplinterCellCNLauncher.exe");
         if (!File.Exists(launcherExe))
@@ -41,10 +38,20 @@ public sealed class LocalClientUpdateService
     public bool ScheduleLauncherRestartAfterExit(int launcherPid)
     {
         string baseDir = AppContext.BaseDirectory.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
-        string updater = Path.Combine(baseDir, "SCBL.Updater.exe");
         string launcher = Path.Combine(baseDir, "SplinterCellCNLauncher.exe");
-        if (!File.Exists(updater) || !File.Exists(launcher))
+        if (!File.Exists(GetCanonicalUpdaterPath(baseDir)) || !File.Exists(launcher))
             return false;
+
+        string updater;
+        try
+        {
+            updater = PrepareUpdaterRunner(baseDir, LogService.UpdatesDirectory);
+        }
+        catch (Exception ex)
+        {
+            LogService.Error("Unable to prepare restart helper: " + ex.Message);
+            return false;
+        }
 
         var psi = new ProcessStartInfo
         {
@@ -65,6 +72,43 @@ public sealed class LocalClientUpdateService
             return false;
         LogService.Info($"Launcher restart scheduled after settings change: helperPid={helper.Id}, waitPid={launcherPid}");
         return true;
+    }
+
+    internal static string PrepareUpdaterRunner(string baseDir, string updatesDirectory)
+    {
+        string canonical = GetCanonicalUpdaterPath(baseDir);
+        if (!File.Exists(canonical))
+            throw new FileNotFoundException("没有找到客户端更新程序。", canonical);
+
+        string runnerDirectory = Path.Combine(updatesDirectory, "runner", Guid.NewGuid().ToString("N"));
+        string runner = Path.Combine(runnerDirectory, "SCBL.Updater.exe");
+        Directory.CreateDirectory(runnerDirectory);
+        try
+        {
+            File.Copy(canonical, runner, overwrite: false);
+            if (!FilesAreIdentical(canonical, runner))
+                throw new IOException("临时更新程序复制后校验失败。");
+            return runner;
+        }
+        catch
+        {
+            try { Directory.Delete(runnerDirectory, recursive: true); } catch { }
+            throw;
+        }
+    }
+
+    internal static string GetCanonicalUpdaterPath(string baseDir)
+        => Path.Combine(
+            baseDir.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar),
+            UpdaterBootstrapService.UpdaterRelativePath.Replace('/', Path.DirectorySeparatorChar));
+
+    private static bool FilesAreIdentical(string first, string second)
+    {
+        if (new FileInfo(first).Length != new FileInfo(second).Length)
+            return false;
+        using FileStream firstStream = File.OpenRead(first);
+        using FileStream secondStream = File.OpenRead(second);
+        return SHA256.HashData(firstStream).AsSpan().SequenceEqual(SHA256.HashData(secondStream));
     }
 
     private static string Quote(string value) => "\"" + value.Replace("\"", "\\\"") + "\"";

@@ -32,6 +32,8 @@ public sealed class ClientStorageMaintenanceServiceTests : IDisposable
         string oldWork = Write("updates/work/old/item.tmp", "old");
         Stamp(oldWork, now.AddDays(-3));
         Directory.SetLastWriteTimeUtc(Path.GetDirectoryName(oldWork)!, now.AddDays(-3));
+        string staleRunner = Write("updates/runner/finished/SCBL.Updater.exe", "runner");
+        Directory.SetLastWriteTimeUtc(Path.GetDirectoryName(staleRunner)!, now);
 
         var componentDirectories = new List<string>();
         for (int index = 0; index < 4; index++)
@@ -55,6 +57,7 @@ public sealed class ClientStorageMaintenanceServiceTests : IDisposable
         Assert.Equal(10, Directory.GetFiles(Path.Combine(_root, "diagnostics"), "*.zip").Length);
         Assert.Equal(2, Directory.GetFiles(Path.Combine(_root, "updates", "downloads"), "*.zip").Length);
         Assert.False(Directory.Exists(Path.Combine(_root, "updates", "work", "old")));
+        Assert.False(Directory.Exists(Path.GetDirectoryName(staleRunner)));
         Assert.True(Directory.Exists(componentDirectories[0]));
         Assert.False(Directory.Exists(componentDirectories[1]));
         Assert.True(Directory.Exists(componentDirectories[2]));

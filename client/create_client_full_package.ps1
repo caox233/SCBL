@@ -32,18 +32,13 @@ $Required = @(
     (Join-Path $Publish "tools\scbl-process-router.exe"),
     (Join-Path $Publish "tools\WinDivert.dll"),
     (Join-Path $Publish "tools\WinDivert64.payload.sys"),
-    (Join-Path $Publish "SCBL.Updater.exe"),
-    (Join-Path $Publish "tools\SCBL.Updater.payload.exe"),
+    (Join-Path $Publish "tools\SCBL.Updater.exe"),
     $BootstrapHook,
     $BootstrapHookSidecar
 )
 foreach ($File in $Required) {
     if (!(Test-Path -LiteralPath $File)) { throw "Publish output is incomplete. Missing: $File" }
 }
-
-$UpdaterHash = (Get-FileHash (Join-Path $Publish "SCBL.Updater.exe") -Algorithm SHA256).Hash
-$PayloadHash = (Get-FileHash (Join-Path $Publish "tools\SCBL.Updater.payload.exe") -Algorithm SHA256).Hash
-if ($UpdaterHash -ne $PayloadHash) { throw "SCBL.Updater.exe and its payload must be identical." }
 
 $BootstrapExpectedMatch = [regex]::Match((Get-Content -LiteralPath $BootstrapHookSidecar -Raw -Encoding ASCII), '(?i)\b[0-9a-f]{64}\b')
 if (!$BootstrapExpectedMatch.Success) { throw "Bootstrap Hooks checksum sidecar is invalid." }
@@ -61,7 +56,7 @@ Add-Type -AssemblyName System.IO.Compression
 Add-Type -AssemblyName System.IO.Compression.FileSystem
 $Compression = if ($Fast) { [System.IO.Compression.CompressionLevel]::Fastest } else { [System.IO.Compression.CompressionLevel]::Optimal }
 $ExcludedRoots = @('temp', 'logs', 'updates', 'backup')
-$ExcludedFiles = @('launcher_settings.json', 'update_manifest.json', 'client_update_manifest.json', 'client_package_manifest.json', 'tools/WinDivert64.sys')
+$ExcludedFiles = @('SCBL.Updater.exe', 'tools/SCBL.Updater.payload.exe', 'launcher_settings.json', 'update_manifest.json', 'client_update_manifest.json', 'client_package_manifest.json', 'tools/WinDivert64.sys')
 $TrimChars = [char[]]@([System.IO.Path]::DirectorySeparatorChar, [System.IO.Path]::AltDirectorySeparatorChar)
 $PublishPrefix = $Publish.TrimEnd($TrimChars) + [System.IO.Path]::DirectorySeparatorChar
 
@@ -117,12 +112,15 @@ if (!(Test-Path -LiteralPath $Zip) -or (Get-Item -LiteralPath $Zip).Length -le 0
 $VerifyArchive = [System.IO.Compression.ZipFile]::OpenRead($Zip)
 try {
     $Names = @($VerifyArchive.Entries | ForEach-Object { $_.FullName })
+    if ($Names -contains 'SCBL.Updater.exe') { throw "Release ZIP must use the single tools/SCBL.Updater.exe copy." }
+    if ($Names -contains 'tools/SCBL.Updater.payload.exe') { throw "Release ZIP must not contain the legacy Updater payload name." }
     if ($Names -contains 'tools/WinDivert64.sys') { throw "Release ZIP must not contain the lock-prone WinDivert64.sys path." }
     if ($Names | Where-Object { $_ -match '^(temp|logs|updates|backup)/' }) {
         throw "Release ZIP must not contain generated client state directories."
     }
     foreach ($RequiredEntry in @(
         'tools/WinDivert64.payload.sys',
+        'tools/SCBL.Updater.exe',
         'tools/uplay_r1_loader.dll',
         'tools/uplay_r1_loader.dll.sha256',
         'client_package_manifest.json')) {

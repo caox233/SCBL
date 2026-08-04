@@ -32,6 +32,25 @@ public static class ClientStorageMaintenanceService
         }
     }
 
+    public static void ScheduleDeferredRunnerCleanup()
+    {
+        _ = Task.Run(async () =>
+        {
+            await Task.Delay(TimeSpan.FromSeconds(8)).ConfigureAwait(false);
+            try
+            {
+                DeleteOldChildren(
+                    Path.Combine(LogService.UpdatesDirectory, "runner"),
+                    DateTime.UtcNow + TimeSpan.FromMinutes(1),
+                    message => LogService.Info("Storage maintenance: " + message));
+            }
+            catch (Exception ex)
+            {
+                LogService.Warning("Deferred Updater runner cleanup skipped: " + ex.Message);
+            }
+        });
+    }
+
     internal static void Run(string dataRoot, DateTime utcNow, Action<string>? report = null)
     {
         string logs = Path.Combine(dataRoot, "logs", "game");
@@ -43,6 +62,7 @@ public static class ClientStorageMaintenanceService
         DeleteOldChildren(Path.Combine(diagnostics, "work"), utcNow - TimeSpan.FromDays(1), report);
 
         string updates = Path.Combine(dataRoot, "updates");
+        DeleteOldChildren(Path.Combine(updates, "runner"), utcNow + TimeSpan.FromMinutes(1), report);
         DeleteOldChildren(Path.Combine(updates, "work"), utcNow - TimeSpan.FromDays(1), report);
         DeleteOldChildren(Path.Combine(updates, "component-work"), utcNow - TimeSpan.FromDays(1), report);
         DeleteOldFiles(updates, new[] { "*.download", "*.tmp" }, utcNow - TimeSpan.FromDays(1), report);

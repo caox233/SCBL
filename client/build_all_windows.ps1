@@ -80,9 +80,13 @@ function Copy-AvailableOutputs {
 
     $UpdaterBuild = Join-Path $Root "SCBL.Updater\publish\SCBL.Updater.exe"
     if (Test-Path -LiteralPath $UpdaterBuild) {
-        Copy-Item -Force $UpdaterBuild (Join-Path $Publish "SCBL.Updater.exe")
-        Copy-Item -Force $UpdaterBuild (Join-Path $Tools "SCBL.Updater.payload.exe")
+        Copy-Item -Force $UpdaterBuild (Join-Path $Tools "SCBL.Updater.exe")
     }
+
+    # The canonical updater lives in tools. The Launcher runs full updates from
+    # a verified temporary copy, so no permanent root-level duplicate is needed.
+    Remove-Item -Force (Join-Path $Publish "SCBL.Updater.exe") -ErrorAction SilentlyContinue
+    Remove-Item -Force (Join-Path $Tools "SCBL.Updater.payload.exe") -ErrorAction SilentlyContinue
 
     $SettingsExample = Join-Path $Root "launcher_settings.example.json"
     if (Test-Path -LiteralPath $SettingsExample) { Copy-Item -Force $SettingsExample (Join-Path $Publish "launcher_settings.example.json") }
@@ -168,8 +172,7 @@ $Timings["assemble"] = [math]::Round($AssemblyElapsed.TotalSeconds, 1)
 $Required = New-Object System.Collections.Generic.List[string]
 if ($BuildLauncher -or $Package) { $Required.Add((Join-Path $Publish "SplinterCellCNLauncher.exe")) }
 if ($BuildUpdater -or $Package) {
-    $Required.Add((Join-Path $Publish "SCBL.Updater.exe"))
-    $Required.Add((Join-Path $Tools "SCBL.Updater.payload.exe"))
+    $Required.Add((Join-Path $Tools "SCBL.Updater.exe"))
 }
 if ($BuildRouter -or $Package) {
     $Required.Add((Join-Path $Tools "scbl-process-router.exe"))
@@ -182,14 +185,6 @@ if ($PrepareRuntime -or $Package) {
     $Required.Add((Join-Path $Tools "easytier-cli.exe"))
 }
 foreach ($File in $Required) { if (!(Test-Path -LiteralPath $File)) { throw "Missing output: $File" } }
-
-$RootUpdater = Join-Path $Publish "SCBL.Updater.exe"
-$PayloadUpdater = Join-Path $Tools "SCBL.Updater.payload.exe"
-if ((Test-Path -LiteralPath $RootUpdater) -and (Test-Path -LiteralPath $PayloadUpdater)) {
-    if ((Get-FileHash -LiteralPath $RootUpdater -Algorithm SHA256).Hash -ne (Get-FileHash -LiteralPath $PayloadUpdater -Algorithm SHA256).Hash) {
-        throw "Updater payload hash mismatch."
-    }
-}
 
 if ($Package) {
     $BootstrapArgs = @('-PublishRoot', $Publish)

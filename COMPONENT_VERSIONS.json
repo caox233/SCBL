@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
-  "clientVersion": "2.0.0",
-  "serverToolVersion": "2.0.4",
+  "clientVersion": "2.0.1",
+  "serverToolVersion": "2.0.5",
   "routeGuardVersion": "2.0.2",
   "hooksVersion": "2.0.1",
   "easyTierVersion": "2.6.4",
@@ -9,7 +9,7 @@
   "sharedApiVersion": "2.0.0",
   "controlApiVersion": 1,
   "dedicatedServer": {
-    "version": "2.0.4",
+    "version": "2.0.5",
     "repository": "caox233/SCBL",
     "releaseTag": "scbl-public-stable-latest",
     "branch": "main"

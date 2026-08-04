@@ -48,12 +48,22 @@ public sealed class RemoteClientUpdateService
         public bool Succeeded { get; init; }
         public string BaseUrl { get; init; } = "";
         public RemoteUpdateInfo? Update { get; init; }
+        public NetworkBootstrapSettings? NetworkBootstrap { get; init; }
 
         public static RemoteUpdateCheckResult Unavailable(string baseUrl)
             => new() { Succeeded = false, BaseUrl = baseUrl };
 
-        public static RemoteUpdateCheckResult Completed(string baseUrl, RemoteUpdateInfo? update)
-            => new() { Succeeded = true, BaseUrl = baseUrl, Update = update };
+        public static RemoteUpdateCheckResult Completed(
+            string baseUrl,
+            RemoteUpdateInfo? update,
+            NetworkBootstrapSettings networkBootstrap)
+            => new()
+            {
+                Succeeded = true,
+                BaseUrl = baseUrl,
+                Update = update,
+                NetworkBootstrap = networkBootstrap
+            };
     }
 
     private sealed class RemoteManifest
@@ -69,6 +79,17 @@ public sealed class RemoteClientUpdateService
         public string[]? releaseNotes { get; set; }
         public RemoteUpdateAnnouncementDto? updateAnnouncement { get; set; }
         public RemoteUpdateAnnouncementDto? update_announcement { get; set; }
+        public RemoteNetworkBootstrapDto? networkBootstrap { get; set; }
+    }
+
+    private sealed class RemoteNetworkBootstrapDto
+    {
+        public int schemaVersion { get; set; }
+        public string? publicEndpoint { get; set; }
+        public int publicUpdatePort { get; set; }
+        public string? tunnelSecret { get; set; }
+        public string? easyTierNetworkName { get; set; }
+        public int easyTierWssPort { get; set; }
     }
 
     private sealed class RemoteUpdateAnnouncementDto
@@ -129,11 +150,24 @@ public sealed class RemoteClientUpdateService
                 string mode = (manifest?.updateMode ?? manifest?.update_mode ?? "").Trim();
                 string package = NormalizeRelativePath(manifest?.fullPackage ?? manifest?.full_package ?? "");
                 string expected = (manifest?.fullPackageSha256 ?? manifest?.full_package_sha256 ?? "").Trim().ToLowerInvariant();
+                RemoteNetworkBootstrapDto? bootstrapDto = manifest?.networkBootstrap;
+                NetworkBootstrapSettings? networkBootstrap = null;
+                bool bootstrapValid = bootstrapDto != null
+                    && NetworkBootstrapSettings.TryCreate(
+                        bootstrapDto.schemaVersion,
+                        bootstrapDto.publicEndpoint,
+                        bootstrapDto.publicUpdatePort,
+                        bootstrapDto.tunnelSecret,
+                        bootstrapDto.easyTierNetworkName,
+                        bootstrapDto.easyTierWssPort,
+                        out networkBootstrap);
 
                 if (!IsThreePartVersion(targetVersion) ||
                     !mode.Equals("full-package", StringComparison.OrdinalIgnoreCase) ||
                     !IsSafePackagePath(package) ||
-                    !IsSha256(expected))
+                    !IsSha256(expected) ||
+                    !bootstrapValid ||
+                    networkBootstrap == null)
                 {
                     LogService.Error("Client version information is incomplete or invalid.");
                     return RemoteUpdateCheckResult.Unavailable(baseUrl);
@@ -147,14 +181,14 @@ public sealed class RemoteClientUpdateService
 
                 if (!ClientVersionPolicy.IsUpdateRequired(current, targetVersion))
                 {
-                    return RemoteUpdateCheckResult.Completed(baseUrl, null);
+                    return RemoteUpdateCheckResult.Completed(baseUrl, null, networkBootstrap);
                 }
                 if (App.ComponentUpdateChannel == ClientUpdateChannel.Test
                     && ClientVersionPolicy.Compare(current, targetVersion) > 0)
                 {
                     LogService.Warning(
                         $"Newer local test client retained: local={current}, formal={targetVersion}, channel=test");
-                    return RemoteUpdateCheckResult.Completed(baseUrl, null);
+                    return RemoteUpdateCheckResult.Completed(baseUrl, null, networkBootstrap);
                 }
 
                 var announcement = manifest?.updateAnnouncement ?? manifest?.update_announcement;
@@ -175,7 +209,7 @@ public sealed class RemoteClientUpdateService
                     UpdateAnnouncementBodyEn = announcementEnabled ? (announcement?.body_en ?? "").Trim() : ""
                 };
                 LogService.Info($"Client version mismatch: local={current}, required={targetVersion}");
-                return RemoteUpdateCheckResult.Completed(baseUrl, update);
+                return RemoteUpdateCheckResult.Completed(baseUrl, update, networkBootstrap);
             }
             catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
             {

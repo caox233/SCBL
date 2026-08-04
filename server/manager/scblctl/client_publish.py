@@ -142,6 +142,12 @@ class ClientPublisher:
             "fullPackageSha256": package.sha256,
             "releaseNotes": release_notes or [f"SCBL {package.version} 客户端"],
         }
+        try:
+            previous = json.loads(self.manifest_path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            previous = {}
+        if isinstance(previous, dict) and isinstance(previous.get("networkBootstrap"), dict):
+            payload["networkBootstrap"] = previous["networkBootstrap"]
         from .announcements import AnnouncementManager
 
         payload["updateAnnouncement"] = AnnouncementManager(

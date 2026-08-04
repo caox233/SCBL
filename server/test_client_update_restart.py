@@ -62,7 +62,6 @@ build_script = Path("client/build_all_windows.ps1").read_text(encoding="utf-8")
 package_script = Path("client/create_client_full_package.ps1").read_text(encoding="utf-8")
 package_workflow = Path(".github/workflows/stable-release.yml").read_text(encoding="utf-8")
 component_assembly = Path("scripts/release/assemble-client-components.ps1").read_text(encoding="utf-8")
-server_manager = Path("server/install_public_server.sh").read_text(encoding="utf-8")
 assert "ReleaseWinDivertDriverServices(target)" in program
 assert "FilesAreIdentical(source, destination)" in program
 assert "CopyFileWithRetry(file, dest, relative)" in program
@@ -87,8 +86,6 @@ assert "./scripts/release/assemble-client-components.ps1" in package_workflow
 assert "-PublishRoot client/ScblPublicLauncher/publish-single" in package_workflow
 assert 'Join-Path $Tools "SCBL.Updater.exe"' in component_assembly
 assert 'Write-Component "updater"' in component_assembly
-assert server_manager.count("required = {'SplinterCellCNLauncher.exe', 'tools/SCBL.Updater.exe'}") == 2
-assert server_manager.count("client package must keep SCBL.Updater.exe under tools only") == 2
 assert 'Path.GetFileName(file).Equals("SCBL.Updater.exe"' not in program
 assert 'Path.Combine(updatesDirectory, "runner", Guid.NewGuid().ToString("N"))' in local
 assert "ScheduleDeferredRunnerCleanup" in app

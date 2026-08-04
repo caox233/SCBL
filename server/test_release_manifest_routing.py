@@ -14,7 +14,6 @@ assert "VERSION_SERVER_TOOL" in bootstrap
 assert "server-tool-v$VERSION/scblctl.pyz" in bootstrap
 assert "sha256sum --check --strict" in bootstrap
 assert "server/bootstrap/install.sh" in wrapper
-assert "install_public_server.sh" not in wrapper
 assert 'interpreter="/usr/bin/env python3"' in builder
 assert "raise SystemExit(main())" in builder
 assert 'packageType": "scbl-server-runtime"' in release

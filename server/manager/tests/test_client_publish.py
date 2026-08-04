@@ -60,6 +60,19 @@ class ClientPublishTests(unittest.TestCase):
             package = self.make_package(root)
             update_root = root / "updates"
             update_root.mkdir()
+            (update_root / "client_update_manifest.json").write_text(
+                json.dumps(
+                    {
+                        "version": "1.0.0",
+                        "networkBootstrap": {
+                            "schemaVersion": 1,
+                            "publicEndpoint": "sc6.example.com:11010",
+                            "tunnelSecret": "server-network-secret",
+                        },
+                    }
+                ),
+                encoding="utf-8",
+            )
             (update_root / "update_announcement.json").write_text(
                 json.dumps(
                     {
@@ -80,6 +93,10 @@ class ClientPublishTests(unittest.TestCase):
             self.assertEqual("2.0.0", manifest["version"])
             self.assertNotIn("minimumVersion", manifest)
             self.assertTrue(manifest["updateAnnouncement"]["enabled"])
+            self.assertEqual(
+                "server-network-secret",
+                manifest["networkBootstrap"]["tunnelSecret"],
+            )
 
 
 if __name__ == "__main__":

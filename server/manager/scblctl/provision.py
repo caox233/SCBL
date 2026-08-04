@@ -10,6 +10,7 @@ from pathlib import Path
 from . import __version__
 from .config import ServerConfig
 from .firewall import ufw_commands
+from .network_bootstrap import sync_network_bootstrap
 from .paths import DEPLOYMENT_PATHS
 from .release import RuntimeManifest, activate_release, extract_runtime_archive, stage_release
 from .service_lifecycle import restart_runtime_stack
@@ -204,14 +205,9 @@ class Provisioner:
             os.chmod(balancing_target, 0o640)
 
         manifest = Path(DEPLOYMENT_PATHS.data) / "client-updates" / "client_update_manifest.json"
-        if not manifest.exists():
-            _atomic_write_text(
-                manifest,
-                '{\n  "version": "0.0.0",\n  "updateMode": "components",\n  "components": []\n}\n',
-                0o640,
-            )
-            update_user = pwd.getpwnam("scbl-update").pw_uid
-            os.chown(manifest, update_user, group)
+        sync_network_bootstrap(manifest, config)
+        update_user = pwd.getpwnam("scbl-update").pw_uid
+        os.chown(manifest, update_user, group)
 
         wait_script = Path("/usr/local/lib/scbl/wait-scbl0")
         _atomic_write_text(wait_script, WAIT_SCBL0, 0o755)

@@ -33,6 +33,8 @@ public partial class MainWindow
                 return false;
             }
 
+            ApplyNetworkBootstrap(check.NetworkBootstrap);
+
             RemoteClientUpdateService.RemoteUpdateInfo? info = check.Update;
             if (info == null)
             {
@@ -99,6 +101,28 @@ public partial class MainWindow
         }
 
         return false;
+    }
+
+    private void ApplyNetworkBootstrap(NetworkBootstrapSettings? bootstrap)
+    {
+        if (bootstrap == null)
+            return;
+        bool changed = !_settings.PublicEndpoint.Equals(bootstrap.PublicEndpoint, StringComparison.OrdinalIgnoreCase)
+            || _settings.PublicUpdatePort != bootstrap.PublicUpdatePort
+            || !_settings.TunnelSecret.Equals(bootstrap.TunnelSecret, StringComparison.Ordinal)
+            || !_settings.EasyTierNetworkName.Equals(bootstrap.EasyTierNetworkName, StringComparison.Ordinal)
+            || _settings.EasyTierWssPort != bootstrap.EasyTierWssPort;
+        if (!changed)
+            return;
+
+        _settings.PublicEndpoint = bootstrap.PublicEndpoint;
+        _settings.PublicUpdatePort = bootstrap.PublicUpdatePort;
+        _settings.TunnelSecret = bootstrap.TunnelSecret;
+        _settings.EasyTierNetworkName = bootstrap.EasyTierNetworkName;
+        _settings.EasyTierWssPort = bootstrap.EasyTierWssPort;
+        _settingsService.Save(_settings);
+        LogService.Info(
+            $"Server network bootstrap applied: endpoint={bootstrap.PublicEndpoint}, updatePort={bootstrap.PublicUpdatePort}, network={bootstrap.EasyTierNetworkName}, wssPort={bootstrap.EasyTierWssPort}; tunnel credential stored with Windows DPAPI.");
     }
 
     private static string FirstNonEmptyText(params string[] values)

@@ -50,7 +50,7 @@ easytier      EasyTier Windows 运行时组件包
 updater       SCBL.Updater.exe
 ```
 
-Hooks 在游戏启动前部署。Route Guard、EasyTier 和 Updater 先下载到版本化缓存，并在下一次相同更新通道启动、网络和游戏尚未运行时原子应用。切换回 `stable` 时不会使用 `test` 通道缓存。
+完整客户端把经过校验的 Hooks 源副本放在 `tools/uplay_r1_loader.dll`，游戏启动前再部署到游戏 `SYSTEM` 根目录。Route Guard、EasyTier 和 Updater 先下载到版本化缓存，并在下一次相同更新通道启动、网络和游戏尚未运行时原子应用。切换回 `stable` 时不会使用 `test` 通道缓存。
 
 普通启动默认使用正式 `stable` 通道。需要测试确定二进制时，在正式版快捷方式的“目标”末尾增加 `--test`：
 

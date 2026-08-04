@@ -3,7 +3,7 @@
 ## 2.0 本地重构基线
 
 - Windows 客户端升级到 .NET 10，并统一使用 `VERSION_CLIENT` 作为版本来源。
-- Hooks 源码合并到 `client/hooks`，客户端正式包从本仓库源码构建并携带独立 bootstrap DLL。
+- Hooks 源码合并到 `client/hooks`，客户端正式包从本仓库源码构建，并在 `tools/uplay_r1_loader.dll` 携带独立 bootstrap DLL。
 - Route Guard、Updater、EasyTier 与 Launcher 使用统一构建和完整包发布流程。
 - 移除旧网络链、废弃差分更新路径和固定测试 Hooks 哈希；测试通道允许反复替换 Hooks，正式通道继续验证完整性。
 - 将公告、诊断、游戏进程监控和玩家发现从巨型窗口类拆为独立职责文件，不改变现有界面。

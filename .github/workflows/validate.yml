@@ -78,9 +78,9 @@ jobs:
           ! grep -Eq 'uplay_r1_loader\.dll$' "$manifest"
           (cd client/ScblPublicLauncher/EmbeddedFiles && sha256sum -c SCBL_EMBEDDED_SHA256.txt)
           grep -Fq 'Exclude="EmbeddedFiles\uplay_r1_loader.dll"' client/ScblPublicLauncher/SplinterCellCNLauncher.csproj
-          grep -Fq 'bootstrap-components\hooks' client/prepare_bootstrap_hooks.ps1
+          grep -Fq 'Join-Path $PublishRoot "tools"' client/prepare_bootstrap_hooks.ps1
           grep -Fq 'uplay_r1_loader.dll.sha256' client/prepare_bootstrap_hooks.ps1
-          grep -Fq 'bootstrap-components/hooks/uplay_r1_loader.dll' client/create_client_full_package.ps1
+          grep -Fq 'tools/uplay_r1_loader.dll' client/create_client_full_package.ps1
           grep -Fq 'Hooks must not be listed in the embedded resource manifest' client/build_launcher_incremental.ps1
 
       - name: Validate server shell, Python and release routing

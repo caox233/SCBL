@@ -36,7 +36,7 @@ target\i686-pc-windows-msvc\release\hooks.dll
 - `scbl-process-router/`：基于 WinDivert 的严格进程路由。
 - `easytier/`：固定版本的 Windows EasyTier 运行时准备脚本。
 
-Hooks 不嵌入 Launcher EXE。正式包在 `bootstrap-components/hooks/` 携带校验后的副本；测试模式还可从 `local-components/hooks/uplay_r1_loader.dll` 动态覆盖，替换 DLL 不需要重编 Launcher。正式 `stable` 通道不会读取本地覆盖目录。
+Hooks 不嵌入 Launcher EXE。正式包在 `tools/uplay_r1_loader.dll` 携带校验后的副本；测试模式还可从 `local-components/hooks/uplay_r1_loader.dll` 动态覆盖，替换 DLL 不需要重编 Launcher。正式 `stable` 通道不会读取本地覆盖目录。启动游戏时，Launcher 会把选定并校验后的 DLL 部署到游戏 `SYSTEM` 根目录。
 
 `build_launcher_smoke.ps1` 生成的 `SplinterCellCNLauncher.Smoke.exe` 只用于无法代点 UAC 的远程界面检查。它不请求管理员权限，因此不能用于驱动、网络、组件部署或游戏测试，也绝不能进入正式包。
 

@@ -124,7 +124,7 @@ public sealed class HookDllService
     private static BootstrapHook ResolveBootstrapHook()
     {
         string root = AppContext.BaseDirectory.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
-        string directory = Path.Combine(root, "bootstrap-components", "hooks");
+        string directory = Path.Combine(root, "tools");
         string dll = Path.Combine(directory, "uplay_r1_loader.dll");
         string sidecar = dll + ".sha256";
 

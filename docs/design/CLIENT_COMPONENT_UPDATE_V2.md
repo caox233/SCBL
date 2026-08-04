@@ -118,8 +118,8 @@ Hooks is no longer a WPF `EmbeddedResource` and changing Hooks no longer changes
 A complete client package carries a verified offline bootstrap copy at:
 
 ```text
-bootstrap-components/hooks/uplay_r1_loader.dll
-bootstrap-components/hooks/uplay_r1_loader.dll.sha256
+tools/uplay_r1_loader.dll
+tools/uplay_r1_loader.dll.sha256
 ```
 
 Stable currently deploys this package bootstrap copy. Test can replace it with the verified test-channel component for that launch.

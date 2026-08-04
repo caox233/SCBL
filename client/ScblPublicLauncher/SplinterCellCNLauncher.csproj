@@ -46,7 +46,7 @@
   </ItemGroup>
 
   <!-- Save templates remain embedded because they are tiny and versioned with Launcher behavior.
-       Hooks is deliberately excluded: the full package carries it under bootstrap-components/
+       Hooks is deliberately excluded: the full package carries it under tools/
        and runtime updates resolve it through the signed component channel. -->
   <ItemGroup>
     <None Remove="EmbeddedFiles\**\*" />

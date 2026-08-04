@@ -179,7 +179,7 @@ jobs:
             "client/ScblPublicLauncher/publish-single/tools/WinDivert64.payload.sys",
             "client/ScblPublicLauncher/publish-single/tools/easytier-core.exe",
             "client/ScblPublicLauncher/publish-single/tools/easytier-cli.exe",
-            "client/ScblPublicLauncher/publish-single/bootstrap-components/hooks/uplay_r1_loader.dll"
+            "client/ScblPublicLauncher/publish-single/tools/uplay_r1_loader.dll"
           )
           foreach ($file in $required) { if (!(Test-Path $file)) { throw "Missing assembled component: $file" } }
       - name: Create full client ZIP

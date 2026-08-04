@@ -99,7 +99,7 @@ jobs:
           $hash = (Get-FileHash $zip.FullName -Algorithm SHA256).Hash.ToLowerInvariant()
           "$hash  $($zip.Name)" | Set-Content -Encoding ascii "$($zip.FullName).sha256"
 
-          $bootstrap = '.\client\ScblPublicLauncher\publish-single\bootstrap-components\hooks\uplay_r1_loader.dll'
+          $bootstrap = '.\client\ScblPublicLauncher\publish-single\tools\uplay_r1_loader.dll'
           $bootstrapSidecar = "$bootstrap.sha256"
           foreach ($required in @($bootstrap, $bootstrapSidecar)) {
             if (!(Test-Path -LiteralPath $required)) { throw "Bootstrap Hooks asset missing: $required" }

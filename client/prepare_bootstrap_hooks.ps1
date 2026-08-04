@@ -25,7 +25,7 @@ if ($Header.Length -lt 2 -or $Header[0] -ne 0x4D -or $Header[1] -ne 0x5A) {
     throw "Local Hooks output is not a Windows PE file: $SourceDll"
 }
 
-$Destination = Join-Path $PublishRoot "bootstrap-components\hooks"
+$Destination = Join-Path $PublishRoot "tools"
 New-Item -ItemType Directory -Force -Path $Destination | Out-Null
 $TargetDll = Join-Path $Destination "uplay_r1_loader.dll"
 $TargetChecksum = "$TargetDll.sha256"
@@ -42,6 +42,13 @@ try {
 }
 finally {
     Remove-Item -LiteralPath $TemporaryTarget -Force -ErrorAction SilentlyContinue
+}
+
+# Do not let an incremental build retain the pre-2.0 package layout and ship
+# a second Hooks copy. The game-directory deployment target remains unchanged.
+$LegacyBootstrapRoot = Join-Path $PublishRoot "bootstrap-components"
+if (Test-Path -LiteralPath $LegacyBootstrapRoot) {
+    Remove-Item -LiteralPath $LegacyBootstrapRoot -Recurse -Force
 }
 
 Write-Host "Bootstrap Hooks prepared from SCBL client/hooks: $TargetDll"

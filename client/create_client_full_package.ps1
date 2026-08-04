@@ -23,7 +23,7 @@ if ($Version -notmatch '^[0-9]+\.[0-9]+\.[0-9]+$') { throw "Version must use thr
 if ($Version -ne $SourceVersion) { throw "Requested version $Version does not match source version $SourceVersion." }
 
 $Publish = Join-Path $PSScriptRoot "ScblPublicLauncher\publish-single"
-$BootstrapHook = Join-Path $Publish "bootstrap-components\hooks\uplay_r1_loader.dll"
+$BootstrapHook = Join-Path $Publish "tools\uplay_r1_loader.dll"
 $BootstrapHookSidecar = "$BootstrapHook.sha256"
 $Required = @(
     (Join-Path $Publish "SplinterCellCNLauncher.exe"),
@@ -120,8 +120,8 @@ try {
     if ($Names -contains 'tools/WinDivert64.sys') { throw "Release ZIP must not contain the lock-prone WinDivert64.sys path." }
     foreach ($RequiredEntry in @(
         'tools/WinDivert64.payload.sys',
-        'bootstrap-components/hooks/uplay_r1_loader.dll',
-        'bootstrap-components/hooks/uplay_r1_loader.dll.sha256',
+        'tools/uplay_r1_loader.dll',
+        'tools/uplay_r1_loader.dll.sha256',
         'client_package_manifest.json')) {
         if ($Names -notcontains $RequiredEntry) { throw "Release ZIP is missing: $RequiredEntry" }
     }
